@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/superpowers/specs/2026-08-14-deepseek-harness-desktop-design.md
+2026-08-14-deepseek-harness-desktop-design.md: 3848dbd92bf7efea8f8cd00378bb9d94061ea897
+2026-08-14-deepseek-harness-desktop-design.zh.md: ecc25b8595d8a597523df97df87cfe64ac2bec7d
