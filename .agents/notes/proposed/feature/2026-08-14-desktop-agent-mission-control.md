@@ -18,9 +18,11 @@ Each root task owns one integration worktree. Read-only child agents may share i
 
 The desktop shell uses Electron because the shipped Host, PTY stack, plugin runtime, and client build already run on Node and Chromium-compatible Web APIs. Electron Main supervises a Node `utilityProcess` running a desktop profile and a sandboxed Renderer running the existing plugin-composed React client. The preload bridge exposes only validated desktop bootstrap and window operations. The Renderer has no Node integration.
 
-The Harness process listens on a random loopback port and requires a per-launch capability for every HTTP and WebSocket connection in addition to Origin checks. The capability is supplied through the narrow desktop bootstrap API and never enters URLs, logs, settings, or Session events. Electron business behavior remains in Cordis plugins; Main owns only window lifecycle, process supervision, notifications, deep links, and updates.
+The Harness process listens on a random loopback port and requires a per-launch capability for every HTTP and WebSocket connection in addition to Origin checks. An isolated Electron session injects the capability header only for that exact origin, so the value never enters Renderer or Preload APIs, URLs, logs, settings, or Session events. Electron business behavior remains in Cordis plugins; Main owns only window lifecycle, process supervision, notifications, deep links, and updates.
 
 Closing the last window while work is active keeps Main and the Harness process in the system tray or macOS menu bar. Explicit quit reports the active task count and requires the user to keep running, stop and quit, or cancel. After an abnormal exit, recovery reports interrupted, failed, or settled state from recorded facts and does not replay an unconfirmed tool call.
+
+Implementation starts with a secured desktop-foundation vertical slice: a supervised Harness process, launch-scoped loopback authorization, and a sandboxed Renderer over the existing client. The executable sequence lives in the [desktop foundation plan](../../../../docs/superpowers/plans/2026-08-14-desktop-foundation.md); Task projection, worktree ownership, Mission Control UI, review, and distribution remain separate follow-on slices so Electron Main and preload do not acquire product-domain state.
 
 ## Product structure
 

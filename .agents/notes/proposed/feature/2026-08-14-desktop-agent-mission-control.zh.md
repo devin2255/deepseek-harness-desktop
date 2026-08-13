@@ -18,9 +18,11 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 桌面壳使用 Electron，因为已发布的 Host、PTY、插件运行时和客户端构建已经依赖 Node 与兼容 Chromium 的 Web API。Electron Main 监管一个运行 desktop profile 的 Node `utilityProcess`，沙箱 Renderer 运行现有插件组合的 React 客户端。Preload bridge 只暴露经过验证的桌面引导和窗口操作，Renderer 不启用 Node 集成。
 
-Harness 进程监听随机 loopback 端口，并在 Origin 检查之外要求每次 HTTP 和 WebSocket 连接携带本次启动生成的 capability。该 capability 通过狭窄的桌面引导 API 提供，不进入 URL、日志、设置或 Session 事件。Electron 业务行为继续由 Cordis 插件承担；Main 只拥有窗口生命周期、进程监管、通知、深链接和更新。
+Harness 进程监听随机 loopback 端口，并在 Origin 检查之外要求每次 HTTP 和 WebSocket 连接携带本次启动生成的 capability。隔离的 Electron session 只为该准确 origin 注入 capability header，因此该值不进入 Renderer 或 Preload API、URL、日志、设置或 Session 事件。Electron 业务行为继续由 Cordis 插件承担；Main 只拥有窗口生命周期、进程监管、通知、深链接和更新。
 
 存在活动工作时，关闭最后一个窗口会让 Main 与 Harness 进程继续驻留系统托盘或 macOS 菜单栏。显式退出会报告活动任务数量，并要求用户选择继续运行、停止后退出或取消。异常退出后，恢复流程根据已经记录的事实报告 interrupted、failed 或 settled 状态，不重放未经确认的工具调用。
+
+实现从安全的桌面基础垂直切片开始：受监管的 Harness 进程、启动范围的 loopback 授权，以及承载现有客户端的沙箱 Renderer。可执行步骤位于[桌面基础计划](../../../../docs/superpowers/plans/2026-08-14-desktop-foundation.md)；Task 投影、worktree 所有权、Mission Control UI、审查与分发保持为独立的后续切片，避免 Electron Main 和 preload 获得产品领域状态。
 
 ## 产品结构
 

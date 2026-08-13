@@ -161,7 +161,7 @@ flowchart LR
 
 桌面 Renderer 设置 `nodeIntegration: false`、`contextIsolation: true` 和 `sandbox: true`，只加载应用打包内容。Preload 不暴露 `ipcRenderer` 或通用 `send`，只暴露经过参数验证的窗口控制、通知偏好和一次性连接引导。所有 Electron IPC 校验发送方；外部链接只允许通过 Main 打开验证后的 HTTPS URL。
 
-Harness 进程监听随机 loopback 端口，并要求 Main 每次启动生成的高熵 capability。HTTP 使用授权头，WebSocket 使用受支持的子协议携带等价能力；Host 同时校验 Origin。能力不写入日志、URL、设置或 Session 事件。Renderer 崩溃不会终止运行任务；Harness 进程崩溃会被 Main 检测并在 UI 中提供恢复，而不是静默重启并假装任务仍在运行。
+Harness 进程监听随机 loopback 端口，并要求 Main 每次启动生成的高熵 capability。隔离的 Electron session 只为准确的 HTTP 与 WebSocket origin 注入授权头，因此 capability 不会进入 Renderer 或 Preload API；Host 同时校验 Origin。能力不写入日志、URL、设置或 Session 事件。Renderer 崩溃不会终止运行任务；Harness 进程崩溃会被 Main 检测并在 UI 中提供恢复，而不是静默重启并假装任务仍在运行。
 
 窗口关闭与应用退出是两个动作。有运行任务时，关闭最后一个窗口默认保留 Main 与 Harness 进程并进入系统托盘或 macOS 菜单栏；任务完成或需要介入时发送通知。显式退出会说明仍在运行的任务数量，并提供继续后台运行、停止后退出或取消。异常退出后的任务恢复为准确的 interrupted、failed 或 settled 状态，不自动重放未确认的工具调用。
 
