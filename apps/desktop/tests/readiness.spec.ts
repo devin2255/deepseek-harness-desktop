@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { createReadinessParser } from '../src/readiness.ts'
 
@@ -10,6 +11,14 @@ function parserWithResults(): { readonly ready: string[]; readonly parser: Retur
 }
 
 describe('createReadinessParser', () => {
+  it('keeps the package test command on the aggregate desktop unit suite', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      scripts?: { test?: string }
+    }
+
+    expect(manifest.scripts?.test).toBe('vitest run --root ../.. apps/desktop/tests')
+  })
+
   it('recognizes the canonical loopback URL across stdout chunk boundaries', () => {
     const { parser, ready } = parserWithResults()
 

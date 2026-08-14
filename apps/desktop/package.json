@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -b && tsdown",
     "start": "electron .",
-    "test": "vitest run --root ../.. apps/desktop/tests/readiness.spec.ts"
+    "test": "vitest run --root ../.. apps/desktop/tests"
   },
   "license": "MIT",
   "dependencies": {
