@@ -45,6 +45,7 @@
   "devDependencies": {
     "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-app-boot": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

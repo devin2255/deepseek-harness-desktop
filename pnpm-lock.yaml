@@ -1221,6 +1221,9 @@ importers:
 
   packages/bundle/desktop-app:
     devDependencies:
+      '@deepseek-ai/dsh-app-boot':
+        specifier: workspace:^
+        version: link:../../boot/app-boot
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis

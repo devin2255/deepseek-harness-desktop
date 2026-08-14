@@ -37,7 +37,7 @@ function matchesBearer(req: IncomingMessage, capability: Buffer): boolean {
 export function apply(ctx: Context): void {
   const configured = process.env[CAPABILITY_ENV]
   delete process.env.DSH_DESKTOP_CAPABILITY
-  if (configured === undefined || configured.length === 0) {
+  if (configured === undefined || !/^[A-Za-z0-9_-]+$/.test(configured)) {
     throw new Error(`desktop-app: ${CAPABILITY_ENV} must contain a per-launch capability`)
   }
   const capability = Buffer.from(configured, 'utf8')

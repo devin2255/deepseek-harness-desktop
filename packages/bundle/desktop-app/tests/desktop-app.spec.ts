@@ -1,16 +1,17 @@
 /** Per-launch desktop loopback authorization behavior. */
 
 import { once } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
+import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import type { WebRequestGuard, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import HttpServer from '@deepseek-ai/dsh-host-webserver'
 import * as DesktopApp from '../src/index.ts'
@@ -20,6 +21,13 @@ let environmentBeforeTest: string | undefined
 let compositionRoot: string | undefined
 let composition: Context | undefined
 const contexts = new Set<Context>()
+const desktopManifestPath = fileURLToPath(new URL('../package.json', import.meta.url))
+const basePatchPath = fileURLToPath(new URL('../../base/cordis.patch.yml', import.meta.url))
+const webPatchPath = fileURLToPath(new URL('../../web-app/cordis.patch.yml', import.meta.url))
+
+interface DesktopBundleManifest {
+  dsh?: { bundle?: { patch?: unknown } }
+}
 
 beforeEach(() => { environmentBeforeTest = process.env[CAPABILITY_ENV] })
 
@@ -74,6 +82,22 @@ async function mountedDesktopRuntime(): Promise<{ ctx: Context; guard: WebReques
 async function disposeContext(ctx: Context): Promise<void> {
   contexts.delete(ctx)
   await ctx.fiber.dispose()
+}
+
+/** Compose the manifest-declared desktop patch over the shipped base and Web rows. */
+async function readDesktopBundleComposition(): Promise<{ entries: ReturnType<typeof composeEntries>; patch: string }> {
+  const manifest = JSON.parse(await readFile(desktopManifestPath, 'utf8')) as DesktopBundleManifest
+  const patch = manifest.dsh?.bundle?.patch
+  if (typeof patch !== 'string') throw new Error('desktop bundle manifest declares no patch path')
+  const patchPath = fileURLToPath(new URL(patch, pathToFileURL(desktopManifestPath)))
+  return {
+    entries: composeEntries([
+      loadOverlayPatches('desktop-app test', basePatchPath),
+      loadOverlayPatches('desktop-app test', webPatchPath),
+      loadOverlayPatches('desktop-app test', patchPath),
+    ]),
+    patch,
+  }
 }
 
 /** Boot the Web server and the desktop plugin by their bare package names. */
@@ -159,6 +183,28 @@ async function rawUpgrade(port: number, authorization: readonly string[]): Promi
 }
 
 describe('desktop launch capability', () => {
+  it('composes the manifest-declared patch over the actual Web bundle rows', async () => {
+    const { entries, patch } = await readDesktopBundleComposition()
+
+    expect(patch).toBe('./cordis.patch.yml')
+    expect(entries.find(entry => entry.id === 'webserver')).toMatchObject({
+      name: '@deepseek-ai/dsh-host-webserver',
+      config: {
+        host: { __jsExpr: "ctx.webStartup.host ?? '127.0.0.1'" },
+        port: { __jsExpr: 'ctx.webStartup.port ?? 3080' },
+        requiredGuards: ['desktop-capability'],
+      },
+    })
+    expect(entries.find(entry => entry.id === 'web-runtime')?.config).toEqual({
+      printUrl: true,
+      surfaceContext: false,
+      trustedHosts: [],
+    })
+    expect(entries.find(entry => entry.id === 'desktop-app')).toMatchObject({
+      name: '@deepseek-ai/dsh-desktop-app',
+    })
+  })
+
   it('loads the bare desktop plugin and authorizes one exact raw HTTP or upgrade request', async () => {
     process.env[CAPABILITY_ENV] = 'launch-secret'
     const loaded = await bootDesktopComposition()
@@ -185,7 +231,7 @@ describe('desktop launch capability', () => {
     expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(401)
   })
 
-  it.each([undefined, ''])('fails loud and removes an absent or empty launch capability', async (capability) => {
+  it.each([undefined, '', ' ', 'launch+secret', 'launch/secret', 'launch=secret', '秘密'])('fails loud and removes an absent, empty, or non-base64url launch capability', async (capability) => {
     if (capability === undefined) delete process.env.DSH_DESKTOP_CAPABILITY
     else process.env[CAPABILITY_ENV] = capability
 
