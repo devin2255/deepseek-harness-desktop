@@ -3,6 +3,7 @@ import { createReadinessParser } from '../src/readiness.ts'
 
 const MAX_LINE_BYTES = 8 * 1024
 const CANONICAL_LINE = 'dsh web: http://127.0.0.1:4200'
+const encoder = new TextEncoder()
 
 function parserWithResults(): { readonly ready: string[]; readonly parser: ReturnType<typeof createReadinessParser> } {
   const ready: string[] = []
@@ -13,8 +14,12 @@ function parserWithResults(): { readonly ready: string[]; readonly parser: Retur
 }
 
 function lineWithByteLength(bytes: number): string {
-  const suffixBytes = bytes - Buffer.byteLength(CANONICAL_LINE) - 1
+  const suffixBytes = bytes - CANONICAL_LINE.length - 1
   return `${CANONICAL_LINE} ${'x'.repeat(suffixBytes)}`
+}
+
+function byteLength(value: string): number {
+  return encoder.encode(value).byteLength
 }
 
 describe('readiness line byte limit', () => {
@@ -22,7 +27,7 @@ describe('readiness line byte limit', () => {
     const { parser, ready } = parserWithResults()
     const line = lineWithByteLength(MAX_LINE_BYTES)
 
-    expect(Buffer.byteLength(line)).toBe(MAX_LINE_BYTES)
+    expect(byteLength(line)).toBe(MAX_LINE_BYTES)
     parser.write(`${line}\n`)
 
     expect(ready).toEqual(['http://127.0.0.1:4200'])
@@ -32,7 +37,7 @@ describe('readiness line byte limit', () => {
     const { parser, ready } = parserWithResults()
     const oversized = lineWithByteLength(MAX_LINE_BYTES + 1)
 
-    expect(Buffer.byteLength(oversized)).toBe(MAX_LINE_BYTES + 1)
+    expect(byteLength(oversized)).toBe(MAX_LINE_BYTES + 1)
     parser.write(`${oversized}\ndsh web: http://127.0.0.1:4201\n`)
 
     expect(ready).toEqual(['http://127.0.0.1:4201'])
@@ -42,9 +47,9 @@ describe('readiness line byte limit', () => {
     const { parser, ready } = parserWithResults()
     const belowLimit = lineWithByteLength(MAX_LINE_BYTES - 1)
 
-    expect(Buffer.byteLength(belowLimit)).toBe(MAX_LINE_BYTES - 1)
+    expect(byteLength(belowLimit)).toBe(MAX_LINE_BYTES - 1)
     parser.write(belowLimit)
-    parser.write('界\ndsh web: http://127.0.0.1:4201\n')
+    parser.write('\u754c\ndsh web: http://127.0.0.1:4201\n')
 
     expect(ready).toEqual(['http://127.0.0.1:4201'])
   })
