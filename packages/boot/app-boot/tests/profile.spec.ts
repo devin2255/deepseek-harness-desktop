@@ -118,6 +118,12 @@ describe('resolveBundleDir', () => {
 })
 
 describe('loadProfile', () => {
+  it('ships desktop as the exact base, web-app, desktop-app tuple', () => {
+    expect(PROFILE_TEMPLATES.desktop).toEqual([
+      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-desktop-app',
+    ])
+  })
+
   it('resolves each dsh.profile.bundles entry to its patch layer in order, plus the user layer', () => {
     const anchor = stageInstallation({
       'bundle-a': { patch: '- insert:\n    - id: a\n      name: pkg-a\n' },

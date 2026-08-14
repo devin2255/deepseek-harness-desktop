@@ -11,14 +11,21 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
+import { lstatSync, mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { evaluate } from '@deepseek-ai/cordis-plugin-loader'
-import { composeEntries, initProfile, loadProfile, PROFILES_DIR } from '@deepseek-ai/dsh-app-boot'
+import {
+  composeEntries,
+  healProfilesModuleFallback,
+  initProfile,
+  loadProfile,
+  PROFILES_DIR,
+  readProfileManifest,
+} from '@deepseek-ai/dsh-app-boot'
 
 /**
  * The effective disabled state of one row on one platform: a `!!js` expression
@@ -76,6 +83,48 @@ describe('the shipped shell composition (real bundle layers)', () => {
       expect(cliManifest.dependencies?.[name], `cold-start closure must reach ${name}`).toBeDefined()
     }
     expect(warnings).toEqual([])
+  })
+
+  it('initializes, heals, and composes the desktop profile from its declared bundle patch', () => {
+    home = mkdtempSync(join(tmpdir(), 'dsh-desktop-profile-'))
+    healProfilesModuleFallback(anchor, home)
+    const profile = loadProfile('dsh', 'desktop', anchor, home)
+
+    expect(readProfileManifest('dsh', profile.dir).dsh?.profile?.bundles).toEqual([
+      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-desktop-app',
+    ])
+    expect(lstatSync(join(home, PROFILES_DIR, 'node_modules', '@deepseek-ai/dsh-desktop-app')).isSymbolicLink()).toBe(true)
+    expect(profile.layers.map(layer => layer.packageName)).toEqual([
+      '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-desktop-app',
+    ])
+    const desktop = profile.layers.at(-1)
+    const desktopManifest = JSON.parse(readFileSync(join(desktop?.packageDir ?? '', 'package.json'), 'utf8')) as {
+      dsh?: { bundle?: { patch?: string } }
+    }
+    expect(desktopManifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
+    expect(desktop?.patchPath).toBe(join(desktop?.packageDir ?? '', desktopManifest.dsh?.bundle?.patch ?? ''))
+
+    const rows = composeEntries(profile.layers.map(layer => layer.patches))
+    expect(rows.find(row => row.id === 'webserver')).toEqual({
+      id: 'webserver',
+      name: '@deepseek-ai/dsh-host-webserver',
+      inject: ['webStartup'],
+      config: {
+        host: { __jsExpr: "ctx.webStartup.host ?? '127.0.0.1'" },
+        port: { __jsExpr: 'ctx.webStartup.port ?? 3080' },
+        requiredGuards: ['desktop-capability'],
+      },
+    })
+    expect(rows.find(row => row.id === 'web-runtime')).toEqual({
+      id: 'web-runtime',
+      name: '@deepseek-ai/dsh-web-app',
+      inject: ['webStartup'],
+      config: { printUrl: true, surfaceContext: false, trustedHosts: [] },
+    })
+    expect(rows.find(row => row.id === 'desktop-app')).toEqual({
+      id: 'desktop-app',
+      name: '@deepseek-ai/dsh-desktop-app',
+    })
   })
 
   it('base-only profiles carry both stacks with the same platform gating', () => {
