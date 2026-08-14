@@ -45,8 +45,8 @@ export interface DesktopWindow {
   readonly webContents: {
     /** Electron's opaque renderer identity. */
     readonly id: number
-    /** Listen for renderer-initiated top-level navigation. */
-    on(event: 'will-navigate', listener: (details: NavigationDetails) => void): void
+    /** Listen for renderer navigation and server-initiated redirects. */
+    on(event: 'will-navigate' | 'will-redirect', listener: (details: NavigationDetails) => void): void
     /** Deny every renderer request to open a second browser window. */
     setWindowOpenHandler(handler: (details: unknown) => { readonly action: 'deny' }): void
   }
@@ -96,9 +96,11 @@ export function createDesktopWindow(
   })
 
   authorization.bind(desktopWindow.webContents.id)
-  desktopWindow.webContents.on('will-navigate', (details) => {
+  const preventCrossOriginNavigation = (details: NavigationDetails): void => {
     if (!isEndpointNavigation(details.url, endpoint)) details.preventDefault()
-  })
+  }
+  desktopWindow.webContents.on('will-navigate', preventCrossOriginNavigation)
+  desktopWindow.webContents.on('will-redirect', preventCrossOriginNavigation)
   desktopWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   desktopWindow.once('closed', () => {
     authorization.dispose()

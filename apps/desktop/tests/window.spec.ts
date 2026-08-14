@@ -9,6 +9,7 @@ function desktopWindow(): {
   readonly dependencies: DesktopWindowDependencies
   readonly options: () => DesktopWindowOptions
   readonly navigation: () => (details: NavigationDetails) => void
+  readonly redirect: () => (details: NavigationDetails) => void
   readonly open: () => { readonly action: 'deny' }
   readonly close: () => void
   readonly steps: string[]
@@ -16,6 +17,7 @@ function desktopWindow(): {
   const steps: string[] = []
   let windowOptions: DesktopWindowOptions | undefined
   let navigationListener: ((details: NavigationDetails) => void) | undefined
+  let redirectListener: ((details: NavigationDetails) => void) | undefined
   let openHandler: (() => { readonly action: 'deny' }) | undefined
   let closedListener: (() => void) | undefined
   const dependencies: DesktopWindowDependencies = {
@@ -27,6 +29,7 @@ function desktopWindow(): {
           id: 19,
           on(event, listener) {
             if (event === 'will-navigate') navigationListener = listener
+            if (event === 'will-redirect') redirectListener = listener
           },
           setWindowOpenHandler(handler) {
             openHandler = () => handler({})
@@ -63,6 +66,10 @@ function desktopWindow(): {
     navigation() {
       if (navigationListener === undefined) throw new Error('Expected a navigation listener')
       return navigationListener
+    },
+    redirect() {
+      if (redirectListener === undefined) throw new Error('Expected a redirect listener')
+      return redirectListener
     },
     open() {
       if (openHandler === undefined) throw new Error('Expected a window-open handler')
@@ -109,7 +116,7 @@ describe('createDesktopWindow', () => {
     expect(fixture.steps).toEqual(['configure', 'create', 'bind', 'load:http://127.0.0.1:4312/'])
   })
 
-  it('allows only navigation at the exact desktop origin and denies all new windows', () => {
+  it('allows only same-origin navigation and redirects, and denies all new windows', () => {
     const fixture = desktopWindow()
     createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
     const allowed = navigationEvent('http://127.0.0.1:4312/settings')
@@ -119,6 +126,12 @@ describe('createDesktopWindow', () => {
     const denied = navigationEvent('https://example.com/')
     fixture.navigation()(denied)
     expect(denied.prevented).toBe(true)
+    const allowedRedirect = navigationEvent('http://127.0.0.1:4312/sign-in')
+    fixture.redirect()(allowedRedirect)
+    expect(allowedRedirect.prevented).toBe(false)
+    const deniedRedirect = navigationEvent('https://example.com/')
+    fixture.redirect()(deniedRedirect)
+    expect(deniedRedirect.prevented).toBe(true)
     expect(fixture.open()).toEqual({ action: 'deny' })
   })
 

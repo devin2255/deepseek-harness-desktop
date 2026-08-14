@@ -111,6 +111,20 @@ describe('configureAuthorizedSession', () => {
     expect(fixture.filters).toEqual([['http://127.0.0.1:4312/*', 'ws://127.0.0.1:4312/*']])
   })
 
+  it('normalizes the default loopback port while retaining explicit HTTP and WebSocket filters', () => {
+    const fixture = authorizedSession()
+    const authorization = configureAuthorizedSession(new URL('http://127.0.0.1:80'), 'capability', fixture.dependencies)
+    authorization.bind(19)
+    const actual = request({ url: 'ws://127.0.0.1:80/socket' })
+
+    fixture.listener()(actual.details, actual.callback)
+
+    expect(fixture.filters).toEqual([['http://127.0.0.1:80/*', 'ws://127.0.0.1:80/*']])
+    expect(actual.response()).toEqual({
+      requestHeaders: { Accept: '*/*', Existing: 'kept', Authorization: 'Bearer capability' },
+    })
+  })
+
   it('rejects an endpoint that is not precisely a loopback HTTP origin with a valid port', () => {
     const fixture = authorizedSession()
 
@@ -162,12 +176,26 @@ describe('configureAuthorizedSession', () => {
     })
   })
 
-  it('authorizes supported request types only for the bound renderer', () => {
+  it('authorizes every exact-origin resource type only for the bound renderer', () => {
     const fixture = authorizedSession()
     const authorization = configureAuthorizedSession(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
     authorization.bind(19)
 
-    for (const resourceType of ['mainFrame', 'xhr', 'script', 'image', 'webSocket']) {
+    for (const resourceType of [
+      'mainFrame',
+      'subFrame',
+      'stylesheet',
+      'script',
+      'image',
+      'font',
+      'object',
+      'xhr',
+      'ping',
+      'cspReport',
+      'media',
+      'webSocket',
+      'other',
+    ]) {
       const actual = request({ resourceType })
       fixture.listener()(actual.details, actual.callback)
       expect(actual.response()).toEqual({

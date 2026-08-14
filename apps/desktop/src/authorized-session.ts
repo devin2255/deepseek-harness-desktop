@@ -5,11 +5,11 @@ import { session } from 'electron'
 /** The non-persistent Electron partition used only by the desktop application window. */
 export const DESKTOP_SESSION_PARTITION = 'dsh-desktop'
 
-/** HTTP and WebSocket request fields inspected before sending an authorization header. */
+/** HTTP and WebSocket request fields provided before sending an authorization header. */
 export interface BeforeSendHeadersDetails {
   /** Request URL supplied by Electron. */
   readonly url: string
-  /** Renderer resource category supplied by Electron. */
+  /** Renderer resource category supplied by Electron; exact origin and renderer identity control authorization. */
   readonly resourceType: string
   /** Existing request headers retained unless they are a prior authorization value. */
   readonly requestHeaders: Record<string, string | string[]>
@@ -72,8 +72,6 @@ export interface AuthorizedSession {
   dispose(): void
 }
 
-const AUTHORIZED_RESOURCE_TYPES = new Set(['mainFrame', 'xhr', 'script', 'image', 'webSocket'])
-
 /**
  * Configure the desktop's isolated session for one exact loopback origin.
  * Electron permits one `onBeforeSendHeaders` listener per event, so this owner must
@@ -91,7 +89,7 @@ export function configureAuthorizedSession(
   if (!isSettledEndpoint(endpoint)) throw new Error('Desktop endpoint must be a loopback HTTP origin with a valid port')
   const dependencies = resolveDependencies(overrides)
   const isolatedSession = dependencies.fromPartition(DESKTOP_SESSION_PARTITION, { cache: true })
-  const port = endpoint.port
+  const port = effectivePort(endpoint)
   let webContentsId: number | undefined
   let disposed = false
 
@@ -102,10 +100,6 @@ export function configureAuthorizedSession(
     }
     if (webContentsId === undefined || details.webContentsId !== webContentsId) {
       callback({ cancel: true })
-      return
-    }
-    if (!AUTHORIZED_RESOURCE_TYPES.has(details.resourceType)) {
-      callback({ requestHeaders: details.requestHeaders })
       return
     }
     callback({ requestHeaders: injectAuthorization(details.requestHeaders, capability) })
@@ -184,7 +178,7 @@ function isSettledEndpoint(endpoint: URL): boolean {
     && endpoint.pathname === '/'
     && endpoint.search === ''
     && endpoint.hash === ''
-    && isValidPort(endpoint.port)
+    && isValidPort(effectivePort(endpoint))
 }
 
 /** Check that a request remains an HTTP or WebSocket request at the authorized endpoint. */
@@ -193,11 +187,26 @@ function matchesEndpointRequest(value: string, port: string): boolean {
     const request = new URL(value)
     return (request.protocol === 'http:' || request.protocol === 'ws:')
       && request.hostname === '127.0.0.1'
-      && request.port === port
+      && effectivePort(request) === port
       && request.username === ''
       && request.password === ''
   } catch {
     return false
+  }
+}
+
+/** Return the explicit or protocol-default port used for exact origin comparison. */
+function effectivePort(url: URL): string {
+  if (url.port !== '') return url.port
+  switch (url.protocol) {
+    case 'http:':
+    case 'ws:':
+      return '80'
+    case 'https:':
+    case 'wss:':
+      return '443'
+    default:
+      return ''
   }
 }
 
