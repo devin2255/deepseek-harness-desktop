@@ -10,7 +10,7 @@
 
 组合包名称先从 dsh 安装目录解析，再从 profile 目录解析。因此，内置组合包（`@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app`、`@deepseek-ai/dsh-desktop-app`、`@deepseek-ai/dsh-headless`）始终来自当前运行的 `dsh` 所属的安装；树外组合包则来自 profile 中由 pnpm 管理的 `node_modules`。patch 行中的裸插件 `name` 会从 profile 目录开始，按照 Node 的模块解析规则逐级向父目录查找，直至由 dsh 维护的安装后备目录 `$DSH_HOME/profiles/node_modules`。该目录为 dsh 安装中的应用和组合包所依赖的每个包各维护一个符号链接，并在每次启动时修复这些链接。
 
-`web`、`desktop` 和 `headless` profile 首次使用时会从随附模板自动初始化（`web`：base + web-app；`desktop`：base + web-app + desktop-app；`headless`：base + headless）。desktop profile 只能由其受监督的 Electron 启动器启动；启动器会提供每次启动专用的 capability，用户不能直接调用它。其他缺失的 profile 会显式报错，并提示运行 `dsh plugin --profile <name> add <package>`。
+`web`、`desktop` 和 `headless` profile 首次使用时会从随附模板自动初始化（`web`：base + web-app；`desktop`：base + web-app + desktop-app；`headless`：base + headless）。desktop profile 只能由其受监督的 Electron 启动器启动；启动器会提供每次启动专用的能力，用户不能直接调用它。其他缺失的 profile 会显式报错，并提示运行 `dsh plugin --profile <name> add <package>`。
 
 ### 应用参数
 
