@@ -52,6 +52,16 @@ export interface DesktopWindow {
   }
   /** Load the already authorized loopback page. */
   loadURL(url: string): Promise<void>
+  /** Whether Electron has already destroyed this native window. */
+  isDestroyed(): boolean
+  /** Destroy this native window after startup fails. */
+  destroy(): void
+  /** Whether the native window is minimized. */
+  isMinimized(): boolean
+  /** Restore a minimized native window. */
+  restore(): void
+  /** Focus the native window. */
+  focus(): void
   /** Dispose session handlers when Electron closes the window. */
   once(event: 'closed', listener: () => void): void
 }
@@ -71,42 +81,78 @@ export interface DesktopWindowDependencies {
  * @param endpoint - The ready desktop Harness loopback URL.
  * @param capability - The process-private bearer value retained only by the session owner.
  * @param overrides - Production operations replaced by structural fakes in focused tests.
- * @returns The created window after its session has been bound and loading begins.
+ * @returns The created window after its initial page load succeeds.
+ * Rejects after any preload, construction, binding, handler-registration, or load failure.
+ * The original error is preserved unless session disposal or window destruction adds cleanup errors.
  */
-export function createDesktopWindow(
+export async function createDesktopWindow(
   endpoint: URL,
   capability: string,
   overrides: Partial<DesktopWindowDependencies> = {},
-): DesktopWindow {
+): Promise<DesktopWindow> {
   const dependencies = resolveDependencies(overrides)
-  const authorization = dependencies.configureSession(endpoint, capability)
-  const desktopWindow = dependencies.createWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 960,
-    minHeight: 640,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      partition: DESKTOP_SESSION_PARTITION,
-      preload: dependencies.preloadPath(),
-      sandbox: true,
-      webSecurity: true,
-    },
-  })
+  let authorization: AuthorizedSession | undefined
+  let desktopWindow: DesktopWindow | undefined
+  try {
+    const preload = dependencies.preloadPath()
+    authorization = dependencies.configureSession(endpoint, capability)
+    desktopWindow = dependencies.createWindow({
+      width: 1280,
+      height: 800,
+      minWidth: 960,
+      minHeight: 640,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        partition: DESKTOP_SESSION_PARTITION,
+        preload,
+        sandbox: true,
+        webSecurity: true,
+      },
+    })
 
-  authorization.bind(desktopWindow.webContents.id)
-  const preventCrossOriginNavigation = (details: NavigationDetails): void => {
-    if (!isEndpointNavigation(details.url, endpoint)) details.preventDefault()
+    authorization.bind(desktopWindow.webContents.id)
+    const preventCrossOriginNavigation = (details: NavigationDetails): void => {
+      if (!isEndpointNavigation(details.url, endpoint)) details.preventDefault()
+    }
+    desktopWindow.webContents.on('will-navigate', preventCrossOriginNavigation)
+    desktopWindow.webContents.on('will-redirect', preventCrossOriginNavigation)
+    desktopWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    desktopWindow.once('closed', () => {
+      authorization?.dispose()
+    })
+    await desktopWindow.loadURL(endpoint.href)
+    return desktopWindow
+  } catch (error: unknown) {
+    const cleanupErrors = cleanUpStartup(desktopWindow, authorization)
+    throw startupCleanupFailure(error, cleanupErrors)
   }
-  desktopWindow.webContents.on('will-navigate', preventCrossOriginNavigation)
-  desktopWindow.webContents.on('will-redirect', preventCrossOriginNavigation)
-  desktopWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  desktopWindow.once('closed', () => {
-    authorization.dispose()
-  })
-  void desktopWindow.loadURL(endpoint.href)
-  return desktopWindow
+}
+
+/** Dispose session authority and destroy a partially started window without skipping later cleanup. */
+function cleanUpStartup(window: DesktopWindow | undefined, authorization: AuthorizedSession | undefined): unknown[] {
+  const errors: unknown[] = []
+  if (authorization !== undefined) {
+    try {
+      authorization.dispose()
+    } catch (error: unknown) {
+      errors.push(error)
+    }
+  }
+  if (window !== undefined) {
+    try {
+      if (!window.isDestroyed()) window.destroy()
+    } catch (error: unknown) {
+      errors.push(error)
+    }
+  }
+  return errors
+}
+
+/** Preserve a startup error unless cleanup produced additional reportable failures. */
+function startupCleanupFailure(error: unknown, cleanupErrors: unknown[]): unknown {
+  if (cleanupErrors.length === 0) return error
+  return new AggregateError([error, ...cleanupErrors], 'Desktop window startup failed and cleanup also failed', { cause: error })
 }
 
 /** Resolve Electron operations at the explicit desktop-shell dependency boundary. */

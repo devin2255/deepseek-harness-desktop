@@ -209,11 +209,14 @@ describe('configureAuthorizedSession', () => {
     const authorization = configureAuthorizedSession(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
     authorization.bind(19)
 
-    for (const webContentsId of [undefined, 20]) {
-      const actual = request({ webContentsId })
-      fixture.listener()(actual.details, actual.callback)
-      expect(actual.response()).toEqual({ cancel: true })
-    }
+    const missing = request()
+    const { webContentsId: _webContentsId, ...missingWebContents } = missing.details
+    fixture.listener()(missingWebContents, missing.callback)
+    expect(missing.response()).toEqual({ cancel: true })
+
+    const different = request({ webContentsId: 20 })
+    fixture.listener()(different.details, different.callback)
+    expect(different.response()).toEqual({ cancel: true })
   })
 
   it('defensively leaves nonmatching URLs unchanged when Electron invokes the listener outside its filter', () => {
@@ -241,6 +244,103 @@ describe('configureAuthorizedSession', () => {
     authorization.dispose()
     authorization.dispose()
 
-    expect(fixture.removals).toEqual(['headers', 'check', 'request'])
+    expect(fixture.removals).toEqual(['request', 'check', 'headers'])
+  })
+
+  it('rolls back each attempted session handler installation when setup throws', () => {
+    for (const failingInstall of ['headers', 'check', 'request'] as const) {
+      const fixture = failingSession(failingInstall)
+
+      expect(() => configureAuthorizedSession(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies))
+        .toThrow(`install ${failingInstall}`)
+
+      expect(fixture.removals).toEqual(fixture.expectedRemovals)
+    }
+  })
+
+  it('attempts every cleanup once when disposal has failures and leaves no captured authorization authority', () => {
+    const fixture = failingSession(undefined, new Set(['headers', 'check', 'request']))
+    const authorization = configureAuthorizedSession(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
+    authorization.bind(19)
+    const capturedListener = fixture.listener()
+
+    expect(() => {
+      authorization.dispose()
+    }).toThrow(AggregateError)
+    expect(fixture.removals).toEqual(['request', 'check', 'headers'])
+    const requestAfterDispose = request()
+    capturedListener(requestAfterDispose.details, requestAfterDispose.callback)
+    expect(requestAfterDispose.response()).toEqual({ cancel: true })
+
+    expect(() => {
+      authorization.dispose()
+    }).not.toThrow()
+    expect(fixture.removals).toEqual(['request', 'check', 'headers'])
   })
 })
+
+function failingSession(
+  failingInstall: 'headers' | 'check' | 'request' | undefined,
+  failingRemovals: ReadonlySet<'headers' | 'check' | 'request'> = new Set(),
+): {
+  readonly dependencies: AuthorizedSessionDependencies
+  readonly expectedRemovals: string[]
+  readonly removals: string[]
+  readonly listener: () => BeforeSendHeadersListener
+} {
+  const removals: string[] = []
+  let headerListener: BeforeSendHeadersListener | undefined
+  const failInstall = (name: 'headers' | 'check' | 'request'): void => {
+    if (failingInstall === name) throw new Error(`install ${name}`)
+  }
+  const remove = (name: 'headers' | 'check' | 'request'): void => {
+    removals.push(name)
+    if (failingRemovals.has(name)) throw new Error(`remove ${name}`)
+  }
+  const dependencies: AuthorizedSessionDependencies = {
+    fromPartition() {
+      return {
+        request: {
+          onBeforeSendHeaders(filter, listener): void {
+            if (filter === null) remove('headers')
+            else {
+              if (listener !== null && listener !== undefined) headerListener = listener
+              failInstall('headers')
+            }
+          },
+        },
+        setPermissionCheckHandler(handler): void {
+          if (handler === null) remove('check')
+          else {
+            failInstall('check')
+          }
+        },
+        setPermissionRequestHandler(handler): void {
+          if (handler === null) remove('request')
+          else {
+            failInstall('request')
+          }
+        },
+      }
+    },
+  }
+  return {
+    dependencies,
+    expectedRemovals: expectedRollback(failingInstall),
+    removals,
+    listener() {
+      if (headerListener === undefined) throw new Error('Expected an installed header listener')
+      return headerListener
+    },
+  }
+}
+
+/** List every setter that may have partially installed state before the named failure. */
+function expectedRollback(failingInstall: 'headers' | 'check' | 'request' | undefined): string[] {
+  switch (failingInstall) {
+    case 'headers': return ['headers']
+    case 'check': return ['check', 'headers']
+    case 'request': return ['request', 'check', 'headers']
+    default: return []
+  }
+}

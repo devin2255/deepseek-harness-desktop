@@ -66,9 +66,9 @@ export interface AuthorizedSessionDependencies {
 
 /** A configured session whose request authority can be bound to one renderer. */
 export interface AuthorizedSession {
-  /** Bind authorization to one intended Electron webContents before loading the endpoint. */
+  /** Bind authorization to one intended Electron webContents before loading the endpoint; throws after disposal. */
   bind(webContentsId: number): void
-  /** Remove session-wide listeners and permission handlers once the window closes. */
+  /** Remove every installed handler once; throws an AggregateError only after every removal was attempted. */
   dispose(): void
 }
 
@@ -76,7 +76,7 @@ export interface AuthorizedSession {
  * Configure the desktop's isolated session for one exact loopback origin.
  * Electron permits one `onBeforeSendHeaders` listener per event, so this owner must
  * be disposed before a replacement window configures the same isolated session.
- * @param endpoint - The settled Harness endpoint, restricted to a bare loopback HTTP origin.
+ * @param endpoint - The settled bare loopback HTTP origin with a valid effective port; URL default HTTP port is 80.
  * @param capability - The process-private bearer value injected only into matching requests.
  * @param overrides - Electron session access replaced by structural fakes in focused tests.
  * @returns A renderer-bound authorization owner that never exposes the capability.
@@ -92,8 +92,13 @@ export function configureAuthorizedSession(
   const port = effectivePort(endpoint)
   let webContentsId: number | undefined
   let disposed = false
+  const cleanupActions: (() => void)[] = []
 
   const onBeforeSendHeaders: BeforeSendHeadersListener = (details, callback) => {
+    if (disposed) {
+      callback({ cancel: true })
+      return
+    }
     if (!matchesEndpointRequest(details.url, port)) {
       callback({ requestHeaders: details.requestHeaders })
       return
@@ -105,14 +110,59 @@ export function configureAuthorizedSession(
     callback({ requestHeaders: injectAuthorization(details.requestHeaders, capability) })
   }
 
-  isolatedSession.request.onBeforeSendHeaders(
-    { urls: [`http://127.0.0.1:${port}/*`, `ws://127.0.0.1:${port}/*`] },
-    onBeforeSendHeaders,
-  )
-  isolatedSession.setPermissionCheckHandler(() => false)
-  isolatedSession.setPermissionRequestHandler((_webContents, _permission, callback, _details) => {
-    callback(false)
-  })
+  const cleanUp = (): unknown[] => {
+    const errors: unknown[] = []
+    while (cleanupActions.length > 0) {
+      const action = cleanupActions.pop()
+      if (action === undefined) continue
+      try {
+        action()
+      } catch (error: unknown) {
+        errors.push(error)
+      }
+    }
+    return errors
+  }
+
+  try {
+    install(
+      cleanupActions,
+      () => {
+        isolatedSession.request.onBeforeSendHeaders(
+          { urls: [`http://127.0.0.1:${port}/*`, `ws://127.0.0.1:${port}/*`] },
+          onBeforeSendHeaders,
+        )
+      },
+      () => {
+        isolatedSession.request.onBeforeSendHeaders(null)
+      },
+    )
+    install(
+      cleanupActions,
+      () => {
+        isolatedSession.setPermissionCheckHandler(() => false)
+      },
+      () => {
+        isolatedSession.setPermissionCheckHandler(null)
+      },
+    )
+    install(
+      cleanupActions,
+      () => {
+        isolatedSession.setPermissionRequestHandler((_webContents, _permission, callback, _details) => {
+          callback(false)
+        })
+      },
+      () => {
+        isolatedSession.setPermissionRequestHandler(null)
+      },
+    )
+  } catch (error: unknown) {
+    const cleanupErrors = cleanUp()
+    disposed = true
+    webContentsId = undefined
+    throw cleanupFailure(error, cleanupErrors, 'Desktop session setup failed and cleanup also failed')
+  }
 
   return {
     bind(id) {
@@ -121,13 +171,24 @@ export function configureAuthorizedSession(
     },
     dispose() {
       if (disposed) return
+      const cleanupErrors = cleanUp()
       disposed = true
       webContentsId = undefined
-      isolatedSession.request.onBeforeSendHeaders(null)
-      isolatedSession.setPermissionCheckHandler(null)
-      isolatedSession.setPermissionRequestHandler(null)
+      if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'Desktop session cleanup failed')
     },
   }
+}
+
+/** Register cleanup before an Electron setter so a setter that partially succeeds is rolled back too. */
+function install(cleanupActions: (() => void)[], installAction: () => void, cleanupAction: () => void): void {
+  cleanupActions.push(cleanupAction)
+  installAction()
+}
+
+/** Preserve the setup error unless cleanup produced additional reportable failures. */
+function cleanupFailure(error: unknown, cleanupErrors: unknown[], message: string): unknown {
+  if (cleanupErrors.length === 0) return error
+  return new AggregateError([error, ...cleanupErrors], message, { cause: error })
 }
 
 /** Resolve Electron's session manager at the explicit dependency boundary. */
@@ -169,7 +230,7 @@ function resolveDependencies(overrides: Partial<AuthorizedSessionDependencies>):
   }
 }
 
-/** Check that a readiness endpoint is a bare HTTP loopback URL with an explicit valid port. */
+/** Check that a readiness endpoint is a bare HTTP loopback URL with a valid effective port. */
 function isSettledEndpoint(endpoint: URL): boolean {
   return endpoint.protocol === 'http:'
     && endpoint.hostname === '127.0.0.1'
@@ -195,7 +256,7 @@ function matchesEndpointRequest(value: string, port: string): boolean {
   }
 }
 
-/** Return the explicit or protocol-default port used for exact origin comparison. */
+/** Return the explicit or protocol-default port used for exact origin comparison; only HTTP remains a valid endpoint. */
 function effectivePort(url: URL): string {
   if (url.port !== '') return url.port
   switch (url.protocol) {

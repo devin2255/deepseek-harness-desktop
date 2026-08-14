@@ -35,10 +35,10 @@ class FakeUtilityProcess extends EventEmitter {
 function harness(overrides: Partial<HarnessSupervisorDependencies> = {}): {
   readonly child: FakeUtilityProcess
   readonly dependencies: HarnessSupervisorDependencies
-  readonly fork: ReturnType<typeof vi.fn>
+  readonly fork: HarnessSupervisorDependencies['fork']
 } {
   const child = new FakeUtilityProcess()
-  const fork = vi.fn(() => child)
+  const fork = vi.fn<HarnessSupervisorDependencies['fork']>(() => child)
   const dependencies: HarnessSupervisorDependencies = {
     fork,
     resolveCli: () => '/fixture/dsh/lib/bin.js',

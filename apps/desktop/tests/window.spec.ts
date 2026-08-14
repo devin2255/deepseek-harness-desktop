@@ -12,6 +12,7 @@ function desktopWindow(): {
   readonly redirect: () => (details: NavigationDetails) => void
   readonly open: () => { readonly action: 'deny' }
   readonly close: () => void
+  readonly destroyed: () => boolean
   readonly steps: string[]
 } {
   const steps: string[] = []
@@ -20,6 +21,7 @@ function desktopWindow(): {
   let redirectListener: ((details: NavigationDetails) => void) | undefined
   let openHandler: (() => { readonly action: 'deny' }) | undefined
   let closedListener: (() => void) | undefined
+  let wasDestroyed = false
   const dependencies: DesktopWindowDependencies = {
     createWindow(options) {
       steps.push('create')
@@ -38,6 +40,17 @@ function desktopWindow(): {
         loadURL(url) {
           steps.push(`load:${url}`)
           return Promise.resolve()
+        },
+        destroy() {
+          wasDestroyed = true
+        },
+        focus() {
+          steps.push('focus')
+        },
+        isDestroyed: () => wasDestroyed,
+        isMinimized: () => false,
+        restore() {
+          steps.push('restore')
         },
         once(event, listener) {
           if (event === 'closed') closedListener = listener
@@ -79,6 +92,7 @@ function desktopWindow(): {
       if (closedListener === undefined) throw new Error('Expected a close listener')
       closedListener()
     },
+    destroyed: () => wasDestroyed,
     steps,
   }
 }
@@ -94,10 +108,10 @@ function navigationEvent(url: string): FakeEvent {
 }
 
 describe('createDesktopWindow', () => {
-  it('creates a sandboxed window in the isolated partition and binds authorization before loading', () => {
+  it('creates a sandboxed window in the isolated partition and binds authorization before loading', async () => {
     const fixture = desktopWindow()
 
-    createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
+    const actual = await createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
 
     expect(fixture.options()).toEqual({
       width: 1280,
@@ -114,11 +128,16 @@ describe('createDesktopWindow', () => {
       },
     })
     expect(fixture.steps).toEqual(['configure', 'create', 'bind', 'load:http://127.0.0.1:4312/'])
+    expect(actual.isMinimized()).toBe(false)
+    actual.restore()
+    actual.focus()
+    expect(fixture.steps).toContain('restore')
+    expect(fixture.steps).toContain('focus')
   })
 
-  it('allows only same-origin navigation and redirects, and denies all new windows', () => {
+  it('allows only same-origin navigation and redirects, and denies all new windows', async () => {
     const fixture = desktopWindow()
-    createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
+    await createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
     const allowed = navigationEvent('http://127.0.0.1:4312/settings')
     fixture.navigation()(allowed)
 
@@ -135,12 +154,172 @@ describe('createDesktopWindow', () => {
     expect(fixture.open()).toEqual({ action: 'deny' })
   })
 
-  it('disposes session handlers after the BrowserWindow closes', () => {
+  it('disposes session handlers after the BrowserWindow closes', async () => {
     const fixture = desktopWindow()
-    createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
+    await createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
 
     fixture.close()
 
     expect(fixture.steps).toContain('dispose')
   })
+
+  it('awaits a failed initial load, removes authorization, and destroys the window', async () => {
+    const loadFailure = new Error('load failed')
+    const fixture = desktopWindowWithLoadFailure(loadFailure)
+
+    await expect(createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)).rejects.toBe(loadFailure)
+
+    expect(fixture.steps).toEqual(['configure', 'bind', 'load', 'dispose', 'destroy'])
+    expect(fixture.destroyed()).toBe(true)
+  })
+
+  it('rolls back authorization and the window after every setup failure point', async () => {
+    for (const stage of ['preload', 'constructor', 'bind', 'navigate', 'redirect', 'open', 'closed', 'load'] as const) {
+      const fixture = desktopWindowWithSetupFailure(stage)
+
+      await expect(createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies))
+        .rejects.toBe(fixture.failure)
+
+      if (stage === 'preload') expect(fixture.steps).toEqual(['preload'])
+      else expect(fixture.steps).toContain('dispose')
+      expect(fixture.destroyed()).toBe(stage !== 'preload' && stage !== 'constructor')
+    }
+  })
+
+  it('reports both cleanup failures after an initial load failure', async () => {
+    const fixture = desktopWindowWithSetupFailure('load', new Set(['dispose', 'destroy']))
+
+    await expect(createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies))
+      .rejects.toBeInstanceOf(AggregateError)
+
+    expect(fixture.steps).toContain('dispose')
+    expect(fixture.steps).toContain('destroy')
+  })
 })
+
+function desktopWindowWithLoadFailure(loadFailure: Error): {
+  readonly dependencies: DesktopWindowDependencies
+  readonly destroyed: () => boolean
+  readonly steps: string[]
+} {
+  const steps: string[] = []
+  let wasDestroyed = false
+  return {
+    dependencies: {
+      createWindow() {
+        return {
+          webContents: {
+            id: 19,
+            on() {},
+            setWindowOpenHandler() {},
+          },
+          loadURL() {
+            steps.push('load')
+            return Promise.reject(loadFailure)
+          },
+          once() {},
+          destroy() {
+            steps.push('destroy')
+            wasDestroyed = true
+          },
+          focus() {},
+          isDestroyed: () => wasDestroyed,
+          isMinimized: () => false,
+          restore() {},
+        }
+      },
+      configureSession() {
+        steps.push('configure')
+        return {
+          bind() {
+            steps.push('bind')
+          },
+          dispose() {
+            steps.push('dispose')
+          },
+        }
+      },
+      preloadPath: () => 'C:\\bundle\\preload.cjs',
+    },
+    destroyed: () => wasDestroyed,
+    steps,
+  }
+}
+
+function desktopWindowWithSetupFailure(
+  stage: 'preload' | 'constructor' | 'bind' | 'navigate' | 'redirect' | 'open' | 'closed' | 'load',
+  failingCleanup: ReadonlySet<'dispose' | 'destroy'> = new Set(),
+): {
+  readonly dependencies: DesktopWindowDependencies
+  readonly destroyed: () => boolean
+  readonly failure: Error
+  readonly steps: string[]
+} {
+  const failure = new Error(`startup ${stage} failed`)
+  const steps: string[] = []
+  let wasDestroyed = false
+  const fail = (target: typeof stage): void => {
+    if (stage === target) throw failure
+  }
+  return {
+    dependencies: {
+      preloadPath() {
+        steps.push('preload')
+        fail('preload')
+        return 'C:\\bundle\\preload.cjs'
+      },
+      configureSession() {
+        steps.push('configure')
+        return {
+          bind() {
+            steps.push('bind')
+            fail('bind')
+          },
+          dispose() {
+            steps.push('dispose')
+            if (failingCleanup.has('dispose')) throw new Error('dispose failed')
+          },
+        }
+      },
+      createWindow() {
+        steps.push('create')
+        fail('constructor')
+        return {
+          webContents: {
+            id: 19,
+            on(event) {
+              steps.push(event)
+              if (event === 'will-navigate') fail('navigate')
+              if (event === 'will-redirect') fail('redirect')
+            },
+            setWindowOpenHandler() {
+              steps.push('open')
+              fail('open')
+            },
+          },
+          loadURL() {
+            steps.push('load')
+            if (stage === 'load') return Promise.reject(failure)
+            return Promise.resolve()
+          },
+          once() {
+            steps.push('closed')
+            fail('closed')
+          },
+          destroy() {
+            steps.push('destroy')
+            wasDestroyed = true
+            if (failingCleanup.has('destroy')) throw new Error('destroy failed')
+          },
+          focus() {},
+          isDestroyed: () => wasDestroyed,
+          isMinimized: () => false,
+          restore() {},
+        }
+      },
+    },
+    destroyed: () => wasDestroyed,
+    failure,
+    steps,
+  }
+}
