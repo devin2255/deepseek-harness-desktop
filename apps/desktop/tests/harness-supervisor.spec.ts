@@ -11,6 +11,7 @@ vi.mock('electron', () => ({
 
 import {
   HarnessShutdownTimeoutError,
+  HarnessStartupTimeoutError,
   startHarness,
   type HarnessSupervisorDependencies,
 } from '../src/harness-supervisor.ts'
@@ -321,6 +322,29 @@ describe('startHarness', () => {
     }
   })
 
+  it('cleans timers and listeners when a startup-timeout kill synchronously emits exit', async () => {
+    vi.useFakeTimers()
+    try {
+      const { child, dependencies } = harness()
+      child.kill.mockImplementationOnce(() => {
+        child.exit()
+        return true
+      })
+      const error = rejectedError(startHarness(dependencies))
+
+      await vi.advanceTimersByTimeAsync(10)
+
+      await expect(error).resolves.toBeInstanceOf(HarnessStartupTimeoutError)
+      expect(child.kill).toHaveBeenCalledTimes(1)
+      expect(child.listenerCount('exit')).toBe(0)
+      expect(child.stdout.listenerCount('data')).toBe(0)
+      expect(child.stderr.listenerCount('data')).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('aborts startup, kills once, and wins races with late readiness and exit', async () => {
     const controller = new AbortController()
     const { child, dependencies } = harness()
@@ -337,6 +361,95 @@ describe('startHarness', () => {
     expect(child.listenerCount('exit')).toBe(0)
     expect(child.stdout.listenerCount('data')).toBe(0)
     expect(child.stderr.listenerCount('data')).toBe(0)
+  })
+
+  it('rejects an already-aborted startup before resolving dependencies or generating a capability', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fork = vi.fn()
+    const randomBytes = vi.fn(() => Buffer.alloc(32))
+
+    const error = await rejectedError(startHarness({ fork, randomBytes }, { signal: controller.signal }))
+
+    expect(error.name).toBe('AbortError')
+    expect(fork).not.toHaveBeenCalled()
+    expect(randomBytes).not.toHaveBeenCalled()
+  })
+
+  it('cleans timers and listeners when kill synchronously emits exit during stop', async () => {
+    vi.useFakeTimers()
+    try {
+      const { child, dependencies } = harness()
+      const start = startHarness(dependencies)
+      child.stdout.write('dsh web: http://127.0.0.1:4311\n')
+      const handle = await start
+      child.kill.mockImplementationOnce(() => {
+        child.exit()
+        return true
+      })
+
+      await expect(handle.stop()).resolves.toBeUndefined()
+
+      expect(child.kill).toHaveBeenCalledTimes(1)
+      expect(child.listenerCount('exit')).toBe(0)
+      expect(child.stdout.listenerCount('data')).toBe(0)
+      expect(child.stderr.listenerCount('data')).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('redacts many common-prefix inherited secrets from a large stderr chunk within a bounded diagnostic tail', async () => {
+    const secrets = Object.fromEntries(
+      Array.from({ length: 24 }, (_, index) => [`COMMON_PREFIX_${index}_SECRET`, `shared-prefix-${index.toString().padStart(2, '0')}-sensitive-value`]),
+    )
+    const target = secrets.COMMON_PREFIX_23_SECRET
+    const { child, dependencies } = harness({ environment: secrets })
+    const start = startHarness(dependencies)
+    const error = rejectedError(start)
+    const beganAt = performance.now()
+
+    child.stderr.write(`${'x'.repeat(64 * 1024)}\ncontext ${target}\nfinal diagnostic`)
+    child.exit(25)
+
+    const actual = await error
+    expect(performance.now() - beganAt).toBeLessThan(1_000)
+    expect(actual.message).toContain('final diagnostic')
+    expect(actual.message).toContain('[redacted]')
+    expect(actual.message).not.toContain(target)
+    expect(Buffer.byteLength(actual.message)).toBeLessThanOrEqual(8 * 1024 + 100)
+  })
+
+  it('redacts shared-prefix Unicode inherited secrets without changing unrelated diagnostics', async () => {
+    const shortSecret = '秘密共享'
+    const longSecret = '秘密共享更长'
+    const { child, dependencies } = harness({
+      environment: { SHORT_SECRET: shortSecret, LONG_TOKEN: longSecret },
+    })
+    const error = rejectedError(startHarness(dependencies))
+
+    child.stderr.write(`before ${longSecret} after`)
+    child.exit(26)
+
+    const actual = await error
+    expect(actual.message).toContain('before [redacted] after')
+    expect(actual.message).not.toContain(shortSecret)
+    expect(actual.message).not.toContain(longSecret)
+  })
+
+  it('suppresses raw stderr when inherited sensitive literals exceed the diagnostic compilation bound', async () => {
+    const hugeSecret = 'z'.repeat(8 * 1024 + 1)
+    const { child, dependencies } = harness({ environment: { HUGE_SECRET: hugeSecret } })
+    const error = rejectedError(startHarness(dependencies))
+
+    child.stderr.write('diagnostic that cannot be safely scanned')
+    child.exit(27)
+
+    const actual = await error
+    expect(actual.message).toContain('[stderr suppressed]')
+    expect(actual.message).not.toContain('diagnostic that cannot be safely scanned')
+    expect(actual.message).not.toContain(hugeSecret)
   })
 
   it('redacts inherited key and token values across stderr chunks', async () => {

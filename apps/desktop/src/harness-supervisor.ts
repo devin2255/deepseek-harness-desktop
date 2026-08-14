@@ -4,13 +4,11 @@ import { randomBytes as nodeRandomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { utilityProcess, type ForkOptions } from 'electron'
 import { createReadinessParser } from './readiness.ts'
+import { RedactedStderrTail } from './sensitive-text-redactor.ts'
 
 const CAPABILITY_BYTES = 32
-/** Maximum retained stderr diagnostic suffix; decoded invalid UTF-8 uses deterministic replacement characters. */
-const STDERR_TAIL_BYTES = 8 * 1024
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000
-const REDACTION = '[redacted]'
 const SENSITIVE_ENVIRONMENT_KEY = /KEY|SECRET|TOKEN|PASSWORD/iu
 const dshRequire = createRequire(import.meta.url)
 
@@ -113,6 +111,7 @@ export function startHarness(
   overrides: Partial<HarnessSupervisorDependencies> = {},
   options: HarnessStartOptions = {},
 ): Promise<HarnessHandle> {
+  if (isSignalAborted(options.signal)) return Promise.reject(new HarnessStartupAbortedError())
   const dependencies = resolveDependencies(overrides)
   const capability = dependencies.randomBytes(CAPABILITY_BYTES).toString('base64url')
   const child = dependencies.fork(dependencies.resolveCli(), ['--profile', 'desktop', '--port', '0'], {
@@ -182,12 +181,12 @@ export function startHarness(
     clearTimeout(startupTimer)
     options.signal?.removeEventListener('abort', onAbort)
     removeOutputListeners()
-    requestKill()
     startupShutdownTimer = setTimeout(() => {
       child.off('exit', onStartupExit)
       failStartup(new HarnessShutdownTimeoutError(dependencies.shutdownTimeoutMs))
     }, dependencies.shutdownTimeoutMs)
     startupShutdownTimer.unref()
+    requestKill()
   }
 
   const onStartupExit = (code: number): void => {
@@ -243,7 +242,7 @@ export function startHarness(
   }, dependencies.startupTimeoutMs)
   startupTimer.unref()
   options.signal?.addEventListener('abort', onAbort, { once: true })
-  if (options.signal?.aborted === true) onAbort()
+  if (isSignalAborted(options.signal)) onAbort()
 
   return startupPromise
 }
@@ -262,6 +261,11 @@ function resolveDependencies(overrides: Partial<HarnessSupervisorDependencies>):
   }
 }
 
+/** Read cancellation state through a call so the abort event race remains observable after startup setup. */
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true
+}
+
 /** Decode a stdout chunk without corrupting UTF-8 text split across byte chunks. */
 function decodeOutput(decoder: TextDecoder, chunk: unknown): string {
   return decoder.decode(outputBytes(chunk), { stream: true })
@@ -274,92 +278,13 @@ function outputBytes(chunk: unknown): Buffer {
   return Buffer.from(String(chunk))
 }
 
-/** Retains a redacted, UTF-8-safe stderr tail without preserving capability fragments. */
-class RedactedStderrTail {
-  readonly #decoder = new TextDecoder()
-  #pending = ''
-  #tail: Buffer = Buffer.alloc(0)
-
-  /**
-   * @param patterns - Non-empty sensitive values removed before data enters the retained tail.
-   */
-  constructor(private readonly patterns: readonly string[]) {}
-
-  /** Consume one stderr chunk, keeping a bounded suffix that cannot contain the capability. */
-  write(chunk: unknown): void {
-    this.#writeText(this.#decoder.decode(outputBytes(chunk), { stream: true }))
-  }
-
-  /** Flush the decoder and return the diagnostic after scanning the final bounded remainder. */
-  finish(): string {
-    this.#writeText(this.#decoder.decode())
-    const candidateLength = trailingSensitivePrefixLength(this.#pending, this.patterns)
-    this.#tail = appendUtf8Tail(this.#tail, this.#pending.slice(0, this.#pending.length - candidateLength))
-    if (candidateLength > 0) this.#tail = appendUtf8Tail(this.#tail, REDACTION)
-    this.#pending = ''
-    return new TextDecoder().decode(this.#tail)
-  }
-
-  /** Scan exact matches while retaining only a proper sensitive-value prefix between chunks. */
-  #writeText(text: string): void {
-    const combined = `${this.#pending}${text}`
-    let index = 0
-    let emitted = ''
-    while (index < combined.length) {
-      const remainder = combined.slice(index)
-      if (this.patterns.some(pattern => pattern.length > remainder.length && pattern.startsWith(remainder))) break
-      const matched = this.patterns.find(pattern => combined.startsWith(pattern, index))
-      if (matched !== undefined) {
-        emitted += REDACTION
-        index += matched.length
-      } else {
-        const codePoint = combined.codePointAt(index)
-        const width = codePoint === undefined || codePoint <= 0xffff ? 1 : 2
-        emitted += combined.slice(index, index + width)
-        index += width
-      }
-    }
-    this.#pending = combined.slice(index)
-    this.#tail = appendUtf8Tail(this.#tail, emitted)
-  }
-}
-
-/** Return the longest non-empty suffix that is a prefix of any sensitive value at stderr EOF. */
-function trailingSensitivePrefixLength(value: string, patterns: readonly string[]): number {
-  let longest = 0
-  for (const pattern of patterns) {
-    const maximum = Math.min(pattern.length - 1, value.length)
-    for (let length = maximum; length > longest; length -= 1) {
-      if (value.endsWith(pattern.slice(0, length))) {
-        longest = length
-        break
-      }
-    }
-  }
-  return longest
-}
-
-/** Return the capability and inherited sensitive environment values, sorted for longest-match scanning. */
+/** Return the capability and inherited sensitive environment values for diagnostic redaction. */
 function redactionPatterns(capability: string, environment: NodeJS.ProcessEnv): string[] {
   const patterns = [capability]
   for (const [key, value] of Object.entries(environment)) {
     if (value !== undefined && value.length > 0 && SENSITIVE_ENVIRONMENT_KEY.test(key)) patterns.push(value)
   }
-  return [...new Set(patterns)].sort((left, right) => right.length - left.length)
-}
-
-/** Append valid UTF-8 text and trim its leading bytes only at a Unicode code-point boundary. */
-function appendUtf8Tail(current: Buffer, text: string): Buffer {
-  const combined = Buffer.concat([current, Buffer.from(text)])
-  if (combined.byteLength <= STDERR_TAIL_BYTES) return combined
-  let start = combined.byteLength - STDERR_TAIL_BYTES
-  while (start < combined.byteLength && isUtf8ContinuationByte(combined[start])) start += 1
-  return combined.subarray(start)
-}
-
-/** Identify a byte that continues the preceding UTF-8 code point. */
-function isUtf8ContinuationByte(byte: number | undefined): boolean {
-  return byte !== undefined && (byte & 0b1100_0000) === 0b1000_0000
+  return [...new Set(patterns)]
 }
 
 /** Request process termination once and reject if its exit event does not arrive on time. */
@@ -373,7 +298,6 @@ function stopChild(
 ): Promise<void> {
   removeOutputListeners()
   if (hasExited()) return Promise.resolve()
-  requestKill()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       clearTimeout(timer)
@@ -385,5 +309,6 @@ function stopChild(
       clearTimeout(timer)
       resolve()
     })
+    requestKill()
   })
 }
