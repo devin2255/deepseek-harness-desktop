@@ -211,30 +211,33 @@ class RedactedStderrTail {
     this.#writeText(text)
   }
 
-  /** Flush the decoder and return the diagnostic, discarding a trailing candidate capability prefix. */
+  /** Flush the decoder and return the diagnostic after scanning the final bounded remainder. */
   finish(): string {
     this.#writeText(this.#decoder.decode())
+    this.#tail = appendUtf8Tail(this.#tail, this.#pending)
     this.#pending = ''
     return new TextDecoder().decode(this.#tail)
   }
 
-  /** Emit text that cannot be extended into a capability by a later chunk. */
+  /** Scan exact matches while retaining fewer characters than a complete capability between chunks. */
   #writeText(text: string): void {
     const combined = `${this.#pending}${text}`
-    const pendingLength = trailingCapabilityPrefixLength(combined, this.capability)
-    const emitted = combined.slice(0, combined.length - pendingLength).replaceAll(this.capability, REDACTION)
-    this.#pending = combined.slice(combined.length - pendingLength)
+    let index = 0
+    let emitted = ''
+    while (combined.length - index >= this.capability.length) {
+      if (combined.startsWith(this.capability, index)) {
+        emitted += REDACTION
+        index += this.capability.length
+      } else {
+        const codePoint = combined.codePointAt(index)
+        const width = codePoint === undefined || codePoint <= 0xffff ? 1 : 2
+        emitted += combined.slice(index, index + width)
+        index += width
+      }
+    }
+    this.#pending = combined.slice(index)
     this.#tail = appendUtf8Tail(this.#tail, emitted)
   }
-}
-
-/** Return the longest incomplete suffix that could become the capability in a later stderr chunk. */
-function trailingCapabilityPrefixLength(value: string, capability: string): number {
-  const maximum = Math.min(capability.length - 1, value.length)
-  for (let length = maximum; length > 0; length -= 1) {
-    if (value.endsWith(capability.slice(0, length))) return length
-  }
-  return 0
 }
 
 /** Append valid UTF-8 text and trim its leading bytes only at a Unicode code-point boundary. */

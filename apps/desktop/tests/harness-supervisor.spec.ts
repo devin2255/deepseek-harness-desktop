@@ -130,6 +130,28 @@ describe('startHarness', () => {
     expect(actual.message).not.toContain(secret)
   })
 
+  it('redacts an overlapping all-A capability whether stderr delivers it whole or split', async () => {
+    const secret = 'A'.repeat(43)
+    const variants = [
+      [secret, '!'],
+      [secret.slice(0, 21), secret.slice(21), '!'],
+    ]
+
+    for (const chunks of variants) {
+      const { child, dependencies } = harness({ randomBytes: size => Buffer.alloc(size) })
+      const start = startHarness(dependencies)
+      const error = rejectedError(start)
+
+      for (const chunk of chunks) child.stderr.write(chunk)
+      child.exit(20)
+
+      const actual = await error
+      expect(actual.message).toContain('[redacted]!')
+      expect(actual.message).not.toContain(secret)
+      expect(actual.message).not.toMatch(/A{8}/u)
+    }
+  })
+
   it('keeps an invalid UTF-8 and multibyte stderr diagnostic byte-bounded', async () => {
     const { child, dependencies } = harness()
     const start = startHarness(dependencies)
