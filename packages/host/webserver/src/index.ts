@@ -24,6 +24,9 @@ declare module '@deepseek-ai/cordis' {
 /** Route match kind: 'exact' matches the pathname verbatim; 'prefix' p matches p and p/<anything>. */
 export type WebRouteKind = 'exact' | 'prefix'
 
+/** One pre-dispatch authorization decision shared by HTTP and upgrade requests. */
+export type WebRequestGuard = (req: IncomingMessage) => boolean
+
 /** One named route registration. */
 export interface WebRoute {
   kind: WebRouteKind
@@ -47,6 +50,8 @@ export interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Guard registrations required before this server authorizes any request. */
+  requiredGuards: string[]
 }
 
 /**
@@ -60,11 +65,13 @@ export class WebServer extends Service {
   static Config: z<Config> = z.object({
     host: z.union([z.const('127.0.0.1'), z.const('0.0.0.0')]).required(),
     port: z.natural().max(65535).required(),
+    requiredGuards: z.array(z.string()).default([]),
   })
 
   private readonly exact = new Map<string, WebRoute>()
   private readonly prefixes = new Map<string, WebRoute>()
   private readonly upgrades = new Map<string, WebUpgradeRoute>()
+  private readonly guards = new Map<string, WebRequestGuard>()
   private readonly upgradedSockets = new Set<Duplex>()
   private readonly indexTaps: ((html: string) => string)[] = []
   private fallback: WebRoute['handler'] | undefined
@@ -73,6 +80,10 @@ export class WebServer extends Service {
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'webServer')
+    const duplicateGuard = config.requiredGuards.find((name, index) => config.requiredGuards.indexOf(name) !== index)
+    if (duplicateGuard !== undefined) {
+      throw new Error(`webserver: duplicate required request guard "${duplicateGuard}"`)
+    }
   }
 
   /** The listening port (the OS-assigned value when config.port is 0). */
@@ -115,6 +126,22 @@ export class WebServer extends Service {
   }
 
   /**
+   * Register one named request guard. Every registered guard must authorize a
+   * request before HTTP or upgrade dispatch continues; a duplicate name is a
+   * composition error.
+   * @param name - unique guard registration name.
+   * @param guard - synchronous authorization decision for each request.
+   * @returns the disposer removing the guard.
+   */
+  registerGuard(name: string, guard: WebRequestGuard): () => void {
+    if (this.guards.has(name)) {
+      throw new Error(`webserver: duplicate request guard "${name}"`)
+    }
+    this.guards.set(name, guard)
+    return () => { this.guards.delete(name) }
+  }
+
+  /**
    * Claim the fallback seat: the handler answering every request no named
    * route matches (the SPA dist server in the shipped Web composition). One
    * owner only — a second registration throws, because two fallbacks cannot
@@ -147,9 +174,15 @@ export class WebServer extends Service {
   /** Listen; resolves once the socket is bound (rejection = FAILED fiber). */
   async [Service.init](): Promise<void> {
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      const url = req.url
+      if (!this.authorized(req)) {
+        res.writeHead(401, { connection: 'close' })
+        res.end('unauthorized')
+        return
+      }
       /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server
       requests; the field is only optional on the client-side IncomingMessage type */
-      const rawPath = new URL(req.url ?? '/', 'http://x').pathname
+      const rawPath = new URL(url ?? '/', 'http://x').pathname
       const route = this.match(rawPath)
       if (route !== undefined) {
         await route.handler(req, res)
@@ -179,6 +212,7 @@ export class WebServer extends Service {
       })
     })
     this.server.on('upgrade', (req, socket, head) => {
+      const url = req.url
       const onError = (error: Error): void => {
         this.ctx.logger.warn(error)
         socket.destroy()
@@ -190,8 +224,12 @@ export class WebServer extends Service {
       })
       let route: WebUpgradeRoute | undefined
       try {
+        if (!this.authorized(req)) {
+          socket.destroy()
+          return
+        }
         /* v8 ignore next -- node:http always sets url on server requests. */
-        route = this.upgrades.get(new URL(req.url ?? '/', 'http://x').pathname)
+        route = this.upgrades.get(new URL(url ?? '/', 'http://x').pathname)
       } catch (error) {
         this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
         socket.destroy()
@@ -248,6 +286,15 @@ export class WebServer extends Service {
       if (best === undefined || prefix.length > best.path.length) best = route
     }
     return best
+  }
+
+  /** Require every configured and registered guard to authorize a request. */
+  private authorized(req: IncomingMessage): boolean {
+    if (this.config.requiredGuards.some(name => !this.guards.has(name))) return false
+    for (const guard of this.guards.values()) {
+      if (!guard(req)) return false
+    }
+    return true
   }
 
   /**

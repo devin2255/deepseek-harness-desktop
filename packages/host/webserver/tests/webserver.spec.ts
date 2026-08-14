@@ -28,7 +28,7 @@ afterEach(async () => {
 })
 
 /** Write a cordis.yml with one webserver row, then boot it through the real Loader. */
-async function loadComposition(port = 0): Promise<Context> {
+async function loadComposition(port = 0, requiredGuards?: string[]): Promise<Context> {
   root = await mkdtemp(join(tmpdir(), 'dsh-webserver-loader-'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
@@ -36,6 +36,7 @@ async function loadComposition(port = 0): Promise<Context> {
     '  config:',
     "    host: '127.0.0.1'",
     `    port: ${String(port)}`,
+    ...(requiredGuards === undefined ? [] : [`    requiredGuards: ${JSON.stringify(requiredGuards)}`]),
     '',
   ].join('\n'))
 
@@ -68,7 +69,7 @@ async function request(port: number, path: string, init?: RequestInit): Promise<
 }
 
 /** Open one raw upgrade request and return after the handler writes its response. */
-async function upgrade(port: number, path: string): Promise<ReturnType<typeof connect>> {
+async function upgrade(port: number, path: string, authorization?: string): Promise<ReturnType<typeof connect>> {
   const socket = connect(port, '127.0.0.1')
   await once(socket, 'connect')
   const response = once(socket, 'data')
@@ -77,6 +78,7 @@ async function upgrade(port: number, path: string): Promise<ReturnType<typeof co
     `Host: 127.0.0.1:${String(port)}`,
     'Connection: Upgrade',
     'Upgrade: dsh-test',
+    ...(authorization === undefined ? [] : [`Authorization: ${authorization}`]),
     '',
     '',
   ].join('\r\n'))
@@ -85,7 +87,77 @@ async function upgrade(port: number, path: string): Promise<ReturnType<typeof co
   return socket
 }
 
+/** Open one raw upgrade request and wait for the server to close it. */
+async function rejectedUpgrade(port: number, path: string, authorization?: string): Promise<void> {
+  const socket = connect(port, '127.0.0.1')
+  socket.on('error', () => { /* A server-side reset is the rejected-upgrade outcome. */ })
+  await once(socket, 'connect')
+  const closed = once(socket, 'close')
+  socket.write([
+    `GET ${path} HTTP/1.1`,
+    `Host: 127.0.0.1:${String(port)}`,
+    'Connection: Upgrade',
+    'Upgrade: dsh-test',
+    ...(authorization === undefined ? [] : [`Authorization: ${authorization}`]),
+    '',
+    '',
+  ].join('\r\n'))
+  await closed
+}
+
 describe('real Loader composition', () => {
+  it('runs request guards before routes, fallback, and upgrade owners', { timeout: 60_000 }, async () => {
+    const loaded = await loadComposition(0, ['desktop-capability'])
+    const server = loaded.webServer
+    const port = server.port
+    let upgradeOwnerRuns = 0
+
+    expect(server.registerGuard).toBeTypeOf('function')
+
+    server.register({ kind: 'exact', path: '/ready', handler: (_req, res) => { res.end('ready') } })
+    server.registerFallback((_req, res) => { res.end('fallback') })
+    server.registerUpgrade({
+      path: '/events',
+      handler: (_req, socket) => {
+        upgradeOwnerRuns++
+        socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: dsh-test\r\n\r\n')
+      },
+    })
+
+    expect(await request(port, '/ready')).toMatchObject({ status: 401, body: 'unauthorized' })
+    await rejectedUpgrade(port, '/events')
+    expect(upgradeOwnerRuns).toBe(0)
+
+    const seen: string[] = []
+    const removeGuard = server.registerGuard('desktop-capability', (req) => {
+      seen.push(req.url ?? '')
+      const accepted = req.headers.authorization === 'Bearer accepted'
+      if (accepted) req.url = '/fallback'
+      return accepted
+    })
+    expect(() => server.registerGuard('desktop-capability', () => true))
+      .toThrow('webserver: duplicate request guard "desktop-capability"')
+
+    expect(await request(port, '/ready')).toMatchObject({ status: 401, body: 'unauthorized' })
+    expect(await request(port, '/ready', { headers: { authorization: 'Bearer accepted' } }))
+      .toMatchObject({ status: 200, body: 'ready' })
+    expect(await request(port, '/fallback', { headers: { authorization: 'Bearer accepted' } }))
+      .toMatchObject({ status: 200, body: 'fallback' })
+    expect(seen).toEqual(['/ready', '/ready', '/fallback'])
+
+    await rejectedUpgrade(port, '/events')
+    expect(upgradeOwnerRuns).toBe(0)
+    const accepted = await upgrade(port, '/events', 'Bearer accepted')
+    expect(upgradeOwnerRuns).toBe(1)
+    accepted.destroy()
+    removeGuard()
+  })
+
+  it('rejects duplicate required request guard names', async () => {
+    await expect(loadComposition(0, ['desktop-capability', 'desktop-capability']))
+      .rejects.toThrow('webserver: duplicate required request guard "desktop-capability"')
+  })
+
   // Real-Loader composition resolves workspace packages through tsx at test
   // time; first resolution after the host/client program split is slow enough
   // to trip the default 5s budget on cold caches.
