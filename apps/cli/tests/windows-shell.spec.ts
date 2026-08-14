@@ -3,7 +3,7 @@
  * platform on its own rows (`disabled: !!js process.platform`), so exactly
  * one shell stack mounts per host and no separate platform layer exists —
  * the launcher applies nothing beyond the bundle layers. The spec composes
- * the REAL shipped bundle layers (dsh-base + dsh-web-app resolved from the
+ * the REAL shipped bundle layers (dsh-base + dsh-web-app + dsh-desktop-app resolved from the
  * app installation anchor) through the boot's patch algorithm and pins the
  * effective per-platform roster, the preset-level gates that keep tool-bash
  * out of win32 sessions and tool-pwsh out of POSIX sessions, and the
