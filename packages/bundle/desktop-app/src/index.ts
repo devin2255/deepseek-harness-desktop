@@ -19,6 +19,7 @@ export const CAPABILITY_ENV = 'DSH_DESKTOP_CAPABILITY'
 
 /** Match one exact Base64url bearer capability without exposing it. */
 function matchesBearer(req: IncomingMessage, capability: Buffer): boolean {
+  if (req.headersDistinct.authorization?.length !== 1) return false
   const authorization = req.headers.authorization
   if (typeof authorization !== 'string') return false
   const match = /^Bearer ([A-Za-z0-9_-]+)$/.exec(authorization)

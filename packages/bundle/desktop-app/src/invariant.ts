@@ -15,8 +15,8 @@ export const inject = ['invariants']
 
 /**
  * No runtime invariant: WebServer fails closed while a required guard is
- * missing or rejects, and real request tests cover the desktop guard's
- * registration and disposal relation.
+ * missing or rejects, and Loader-composed raw HTTP and upgrade tests cover
+ * the desktop guard's registration and disposal relation.
  */
 const install: InvariantInstaller = () => {}
 
