@@ -214,7 +214,9 @@ class RedactedStderrTail {
   /** Flush the decoder and return the diagnostic after scanning the final bounded remainder. */
   finish(): string {
     this.#writeText(this.#decoder.decode())
-    this.#tail = appendUtf8Tail(this.#tail, this.#pending)
+    const candidateLength = trailingCapabilityPrefixLength(this.#pending, this.capability)
+    this.#tail = appendUtf8Tail(this.#tail, this.#pending.slice(0, this.#pending.length - candidateLength))
+    if (candidateLength > 0) this.#tail = appendUtf8Tail(this.#tail, REDACTION)
     this.#pending = ''
     return new TextDecoder().decode(this.#tail)
   }
@@ -238,6 +240,15 @@ class RedactedStderrTail {
     this.#pending = combined.slice(index)
     this.#tail = appendUtf8Tail(this.#tail, emitted)
   }
+}
+
+/** Return the longest non-empty suffix that is a prefix of the capability at stderr EOF. */
+function trailingCapabilityPrefixLength(value: string, capability: string): number {
+  const maximum = Math.min(capability.length - 1, value.length)
+  for (let length = maximum; length > 0; length -= 1) {
+    if (value.endsWith(capability.slice(0, length))) return length
+  }
+  return 0
 }
 
 /** Append valid UTF-8 text and trim its leading bytes only at a Unicode code-point boundary. */

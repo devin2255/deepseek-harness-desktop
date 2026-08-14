@@ -152,6 +152,38 @@ describe('startHarness', () => {
     }
   })
 
+  it('redacts all-A capability prefixes that end at stderr EOF', async () => {
+    const secret = 'A'.repeat(43)
+
+    for (const length of [42, 43]) {
+      const { child, dependencies } = harness({ randomBytes: size => Buffer.alloc(size) })
+      const start = startHarness(dependencies)
+      const error = rejectedError(start)
+
+      child.stderr.write(secret.slice(0, length))
+      child.exit(21)
+
+      const actual = await error
+      expect(actual.message).toContain('[redacted]')
+      expect(actual.message).not.toMatch(/A{8}/u)
+    }
+  })
+
+  it('preserves unrelated diagnostics while redacting a non-repetitive capability prefix at stderr EOF', async () => {
+    const { child, dependencies } = harness()
+    const start = startHarness(dependencies)
+    const error = rejectedError(start)
+    const secret = Buffer.alloc(32, 0xab).toString('base64url')
+
+    child.stderr.write(`unrelated diagnostic\n${secret.slice(0, 31)}`)
+    child.exit(22)
+
+    const actual = await error
+    expect(actual.message).toContain('unrelated diagnostic')
+    expect(actual.message).toContain('[redacted]')
+    expect(actual.message).not.toContain(secret.slice(0, 8))
+  })
+
   it('keeps an invalid UTF-8 and multibyte stderr diagnostic byte-bounded', async () => {
     const { child, dependencies } = harness()
     const start = startHarness(dependencies)
