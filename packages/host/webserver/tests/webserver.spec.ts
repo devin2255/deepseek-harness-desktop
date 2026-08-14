@@ -11,7 +11,7 @@ import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -63,9 +63,17 @@ async function loadComposition(port = 0, requiredGuards?: string[]): Promise<Con
 }
 
 /** GET (by default) one path against the running server; returns status plus a body prefix. */
-async function request(port: number, path: string, init?: RequestInit): Promise<{ status: number; body: string }> {
+async function request(
+  port: number,
+  path: string,
+  init?: RequestInit,
+): Promise<{ status: number; body: string; connection: string | null }> {
   const response = await fetch(`http://127.0.0.1:${String(port)}${path}`, init)
-  return { status: response.status, body: (await response.text()).slice(0, 80) }
+  return {
+    status: response.status,
+    body: (await response.text()).slice(0, 80),
+    connection: response.headers.get('connection'),
+  }
 }
 
 /** Open one raw upgrade request and return after the handler writes its response. */
@@ -156,6 +164,98 @@ describe('real Loader composition', () => {
   it('rejects duplicate required request guard names', async () => {
     await expect(loadComposition(0, ['desktop-capability', 'desktop-capability']))
       .rejects.toThrow('webserver: duplicate required request guard "desktop-capability"')
+  })
+
+  it('short-circuits guards, contains guard errors, and restores fail-closed disposal', { timeout: 60_000 }, async () => {
+    const loaded = await loadComposition(0, ['primary'])
+    const server = loaded.webServer
+    const port = server.port
+    const warn = vi.spyOn(loaded.logger, 'warn').mockImplementation(() => undefined)
+    let exactRuns = 0
+    let fallbackRuns = 0
+    let upgradeOwnerRuns = 0
+    let primaryCalls = 0
+    let secondaryCalls = 0
+    let throwingCalls = 0
+
+    server.register({
+      kind: 'exact',
+      path: '/exact',
+      handler: (_req, res) => {
+        exactRuns++
+        res.end('exact')
+      },
+    })
+    server.registerFallback((_req, res) => {
+      fallbackRuns++
+      res.end('fallback')
+    })
+    server.registerUpgrade({
+      path: '/events',
+      handler: (_req, socket) => {
+        upgradeOwnerRuns++
+        socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: dsh-test\r\n\r\n')
+      },
+    })
+    const removePrimary = server.registerGuard('primary', (req) => {
+      primaryCalls++
+      return req.headers.authorization?.startsWith('Bearer ') ?? false
+    })
+    server.registerGuard('secondary', (req) => {
+      secondaryCalls++
+      return req.headers.authorization === 'Bearer accepted'
+    })
+    server.registerGuard('throwing', (req) => {
+      throwingCalls++
+      if (req.url?.includes('throw=true')) throw new Error('test guard failure')
+      return true
+    })
+
+    expect(await request(port, '/exact')).toMatchObject({ status: 401, body: 'unauthorized', connection: 'close' })
+    expect({ primaryCalls, secondaryCalls, throwingCalls, exactRuns }).toEqual({
+      primaryCalls: 1,
+      secondaryCalls: 0,
+      throwingCalls: 0,
+      exactRuns: 0,
+    })
+
+    expect(await request(port, '/exact', { headers: { authorization: 'Bearer rejected' } }))
+      .toMatchObject({ status: 401, body: 'unauthorized' })
+    expect({ primaryCalls, secondaryCalls, throwingCalls, exactRuns }).toEqual({
+      primaryCalls: 2,
+      secondaryCalls: 1,
+      throwingCalls: 0,
+      exactRuns: 0,
+    })
+
+    expect(await request(port, '/exact', { headers: { authorization: 'Bearer accepted' } }))
+      .toMatchObject({ status: 200, body: 'exact' })
+    expect({ primaryCalls, secondaryCalls, throwingCalls, exactRuns }).toEqual({
+      primaryCalls: 3,
+      secondaryCalls: 2,
+      throwingCalls: 1,
+      exactRuns: 1,
+    })
+
+    expect(await request(port, '/fallback', { headers: { authorization: 'Bearer rejected' } }))
+      .toMatchObject({ status: 401, body: 'unauthorized' })
+    expect(fallbackRuns).toBe(0)
+
+    expect(await request(port, '/exact?throw=true', { headers: { authorization: 'Bearer accepted' } }))
+      .toMatchObject({ status: 400, body: '' })
+    expect(exactRuns).toBe(1)
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ message: 'test guard failure' }))
+    await rejectedUpgrade(port, '/events?throw=true', 'Bearer accepted')
+    expect(upgradeOwnerRuns).toBe(0)
+    expect(warn).toHaveBeenCalledTimes(2)
+
+    removePrimary()
+    expect(await request(port, '/exact', { headers: { authorization: 'Bearer accepted' } }))
+      .toMatchObject({ status: 401, body: 'unauthorized' })
+    expect(() => server.registerGuard('primary', () => true)).not.toThrow()
+    expect(await request(port, '/exact', { headers: { authorization: 'Bearer accepted' } }))
+      .toMatchObject({ status: 200, body: 'exact' })
+    warn.mockRestore()
   })
 
   // Real-Loader composition resolves workspace packages through tsx at test
