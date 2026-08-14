@@ -117,6 +117,8 @@ export function startHarness(
   const child = dependencies.fork(dependencies.resolveCli(), ['--profile', 'desktop', '--port', '0'], {
     cwd: dependencies.cwd(),
     env: { ...dependencies.environment, DSH_DESKTOP_CAPABILITY: capability },
+    // Electron's Node ABI cannot load the host-Node addon that otherwise exposes this loader API.
+    execArgv: ['--expose-internals'],
     serviceName: 'DeepSeek Harness Runtime',
     stdio: 'pipe',
   })

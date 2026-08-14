@@ -20,6 +20,7 @@
     "build": "tsc -b && tsdown",
     "start": "electron .",
     "test": "vitest run --root ../.. apps/desktop/tests",
+    "test:e2e": "vitest run --root ../.. --config vitest.desktop-e2e.config.ts",
     "typecheck": "tsc -p tsconfig.test.json --noEmit"
   },
   "license": "MIT",

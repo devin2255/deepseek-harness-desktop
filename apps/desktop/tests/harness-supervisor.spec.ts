@@ -73,6 +73,7 @@ describe('startHarness', () => {
         FROM_PARENT: 'kept',
         DSH_DESKTOP_CAPABILITY: 'q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s',
       },
+      execArgv: ['--expose-internals'],
       serviceName: 'DeepSeek Harness Runtime',
       stdio: 'pipe',
     })
