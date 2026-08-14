@@ -39,8 +39,18 @@ export interface NavigationDetails {
   preventDefault(): void
 }
 
-/** The BrowserWindow subset required by the desktop shell. */
+/** Native-window lifecycle controls returned after desktop startup succeeds. */
 export interface DesktopWindow {
+  /** Whether the native window is minimized. */
+  isMinimized(): boolean
+  /** Restore a minimized native window. */
+  restore(): void
+  /** Focus the native window. */
+  focus(): void
+}
+
+/** BrowserWindow operations used only while starting and cleaning up the desktop window. */
+interface DesktopWindowStartupHandle extends DesktopWindow {
   /** Renderer controls associated with this browser window. */
   readonly webContents: {
     /** Electron's opaque renderer identity. */
@@ -56,12 +66,6 @@ export interface DesktopWindow {
   isDestroyed(): boolean
   /** Destroy this native window after startup fails. */
   destroy(): void
-  /** Whether the native window is minimized. */
-  isMinimized(): boolean
-  /** Restore a minimized native window. */
-  restore(): void
-  /** Focus the native window. */
-  focus(): void
   /** Dispose session handlers when Electron closes the window. */
   once(event: 'closed', listener: () => void): void
 }
@@ -69,7 +73,7 @@ export interface DesktopWindow {
 /** Production inputs that can be structurally replaced without launching Electron. */
 export interface DesktopWindowDependencies {
   /** Create a BrowserWindow with the desktop containment settings. */
-  createWindow(options: DesktopWindowOptions): DesktopWindow
+  createWindow(options: DesktopWindowOptions): DesktopWindowStartupHandle
   /** Install the isolated session authorization before creating the renderer. */
   configureSession(endpoint: URL, capability: string): AuthorizedSession
   /** Return the absolute packaged preload path. */
@@ -92,7 +96,7 @@ export async function createDesktopWindow(
 ): Promise<DesktopWindow> {
   const dependencies = resolveDependencies(overrides)
   let authorization: AuthorizedSession | undefined
-  let desktopWindow: DesktopWindow | undefined
+  let desktopWindow: DesktopWindowStartupHandle | undefined
   try {
     const preload = dependencies.preloadPath()
     authorization = dependencies.configureSession(endpoint, capability)
@@ -130,7 +134,10 @@ export async function createDesktopWindow(
 }
 
 /** Dispose session authority and destroy a partially started window without skipping later cleanup. */
-function cleanUpStartup(window: DesktopWindow | undefined, authorization: AuthorizedSession | undefined): unknown[] {
+function cleanUpStartup(
+  window: DesktopWindowStartupHandle | undefined,
+  authorization: AuthorizedSession | undefined,
+): unknown[] {
   const errors: unknown[] = []
   if (authorization !== undefined) {
     try {

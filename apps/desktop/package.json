@@ -19,7 +19,8 @@
   "scripts": {
     "build": "tsc -b && tsdown",
     "start": "electron .",
-    "test": "vitest run --root ../.. apps/desktop/tests && tsc -p tsconfig.test.json --noEmit"
+    "test": "vitest run --root ../.. apps/desktop/tests",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit"
   },
   "license": "MIT",
   "dependencies": {

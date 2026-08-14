@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { createDesktopWindow, type DesktopWindowDependencies, type DesktopWindowOptions, type NavigationDetails } from '../src/window.ts'
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import {
+  createDesktopWindow,
+  type DesktopWindow,
+  type DesktopWindowDependencies,
+  type DesktopWindowOptions,
+  type NavigationDetails,
+} from '../src/window.ts'
 
 interface FakeEvent extends NavigationDetails {
   prevented: boolean
@@ -108,6 +114,10 @@ function navigationEvent(url: string): FakeEvent {
 }
 
 describe('createDesktopWindow', () => {
+  it('returns only the native-window lifecycle controls', () => {
+    expectTypeOf<keyof DesktopWindow>().toEqualTypeOf<'focus' | 'isMinimized' | 'restore'>()
+  })
+
   it('creates a sandboxed window in the isolated partition and binds authorization before loading', async () => {
     const fixture = desktopWindow()
 
