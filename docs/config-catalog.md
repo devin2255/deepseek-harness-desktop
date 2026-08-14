@@ -796,10 +796,12 @@ export interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Guard registrations required before this server authorizes any request. */
+  requiredGuards: string[]
 }
 ```
 
-Source: [`packages/host/webserver/src/index.ts:45`](../packages/host/webserver/src/index.ts)
+Source: [`packages/host/webserver/src/index.ts:48`](../packages/host/webserver/src/index.ts)
 
 <a id="deepseek-aidsh-invariants"></a>
 

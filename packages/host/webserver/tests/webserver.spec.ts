@@ -119,15 +119,29 @@ describe('real Loader composition', () => {
     const server = loaded.webServer
     const port = server.port
     let upgradeOwnerRuns = 0
+    let exactUrl: string | undefined
+    let fallbackUrl: string | undefined
+    let upgradeUrl: string | undefined
 
     expect(server.registerGuard).toBeTypeOf('function')
 
-    server.register({ kind: 'exact', path: '/ready', handler: (_req, res) => { res.end('ready') } })
-    server.registerFallback((_req, res) => { res.end('fallback') })
+    server.register({
+      kind: 'exact',
+      path: '/ready',
+      handler: (req, res) => {
+        exactUrl = req.url
+        res.end('ready')
+      },
+    })
+    server.registerFallback((req, res) => {
+      fallbackUrl = req.url
+      res.end('fallback')
+    })
     server.registerUpgrade({
       path: '/events',
-      handler: (_req, socket) => {
+      handler: (req, socket) => {
         upgradeOwnerRuns++
+        upgradeUrl = req.url
         socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: dsh-test\r\n\r\n')
       },
     })
@@ -149,14 +163,17 @@ describe('real Loader composition', () => {
     expect(await request(port, '/ready')).toMatchObject({ status: 401, body: 'unauthorized' })
     expect(await request(port, '/ready', { headers: { authorization: 'Bearer accepted' } }))
       .toMatchObject({ status: 200, body: 'ready' })
-    expect(await request(port, '/fallback', { headers: { authorization: 'Bearer accepted' } }))
+    expect(exactUrl).toBe('/ready')
+    expect(await request(port, '/fallback?request=original', { headers: { authorization: 'Bearer accepted' } }))
       .toMatchObject({ status: 200, body: 'fallback' })
-    expect(seen).toEqual(['/ready', '/ready', '/fallback'])
+    expect(fallbackUrl).toBe('/fallback?request=original')
+    expect(seen).toEqual(['/ready', '/ready', '/fallback?request=original'])
 
     await rejectedUpgrade(port, '/events')
     expect(upgradeOwnerRuns).toBe(0)
-    const accepted = await upgrade(port, '/events', 'Bearer accepted')
+    const accepted = await upgrade(port, '/events?stream=original', 'Bearer accepted')
     expect(upgradeOwnerRuns).toBe(1)
+    expect(upgradeUrl).toBe('/events?stream=original')
     accepted.destroy()
     removeGuard()
   })

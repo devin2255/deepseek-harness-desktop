@@ -57,9 +57,10 @@ export interface Config {
 /**
  * The browser HTTP carrier service. Activation listens immediately. Route
  * registration order does not affect requests because configured named routes
- * must be distinct, and the fallback handler answers anything not yet claimed
- * during startup with 404 until its owner registers. A listen failure rejects
- * initialization, and the boot process reports the failed fiber.
+ * must be distinct, and after guard admission the fallback handler answers
+ * anything not yet claimed during startup with 404 until its owner registers.
+ * A missing or rejecting guard answers 401 before routing. A listen failure
+ * rejects initialization, and the boot process reports the failed fiber.
  */
 export class WebServer extends Service {
   static Config: z<Config> = z.object({
@@ -290,11 +291,16 @@ export class WebServer extends Service {
 
   /** Require every configured and registered guard to authorize a request. */
   private authorized(req: IncomingMessage): boolean {
-    if (this.config.requiredGuards.some(name => !this.guards.has(name))) return false
-    for (const guard of this.guards.values()) {
-      if (!guard(req)) return false
+    const url = req.url
+    try {
+      if (this.config.requiredGuards.some(name => !this.guards.has(name))) return false
+      for (const guard of this.guards.values()) {
+        if (!guard(req)) return false
+      }
+      return true
+    } finally {
+      req.url = url
     }
-    return true
   }
 
   /**
