@@ -80,6 +80,7 @@ export interface AuthorizedSession {
  * @param capability - The process-private bearer value injected only into matching requests.
  * @param overrides - Electron session access replaced by structural fakes in focused tests.
  * @returns A renderer-bound authorization owner that never exposes the capability.
+ * @throws The setup error after every attempted rollback, or an AggregateError containing it and every rollback failure.
  */
 export function configureAuthorizedSession(
   endpoint: URL,
@@ -271,7 +272,7 @@ function effectivePort(url: URL): string {
   }
 }
 
-/** Check an explicit decimal TCP port without accepting URL defaults or partial numbers. */
+/** Check a normalized effective decimal TCP port, including a protocol default. */
 function isValidPort(port: string): boolean {
   return /^[1-9][0-9]{0,4}$/u.test(port) && Number(port) <= 65_535
 }

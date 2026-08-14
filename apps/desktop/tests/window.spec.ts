@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
+import { configureAuthorizedSession } from '../src/authorized-session.ts'
 import {
   createDesktopWindow,
   type DesktopWindow,
@@ -12,6 +13,7 @@ interface FakeEvent extends NavigationDetails {
 }
 
 function desktopWindow(): {
+  readonly addCloseListener: (listener: () => void) => void
   readonly dependencies: DesktopWindowDependencies
   readonly options: () => DesktopWindowOptions
   readonly navigation: () => (details: NavigationDetails) => void
@@ -26,7 +28,7 @@ function desktopWindow(): {
   let navigationListener: ((details: NavigationDetails) => void) | undefined
   let redirectListener: ((details: NavigationDetails) => void) | undefined
   let openHandler: (() => { readonly action: 'deny' }) | undefined
-  let closedListener: (() => void) | undefined
+  const closedListeners: (() => void)[] = []
   let wasDestroyed = false
   const dependencies: DesktopWindowDependencies = {
     createWindow(options) {
@@ -59,7 +61,7 @@ function desktopWindow(): {
           steps.push('restore')
         },
         once(event, listener) {
-          if (event === 'closed') closedListener = listener
+          if (event === 'closed') closedListeners.push(listener)
         },
       }
     },
@@ -75,8 +77,12 @@ function desktopWindow(): {
       }
     },
     preloadPath: () => 'C:\\bundle\\preload.cjs',
+    reportCleanupError() {},
   }
   return {
+    addCloseListener(listener) {
+      closedListeners.push(listener)
+    },
     dependencies,
     options() {
       if (windowOptions === undefined) throw new Error('Expected BrowserWindow options')
@@ -95,8 +101,8 @@ function desktopWindow(): {
       return openHandler()
     },
     close() {
-      if (closedListener === undefined) throw new Error('Expected a close listener')
-      closedListener()
+      if (closedListeners.length === 0) throw new Error('Expected a close listener')
+      for (const listener of closedListeners) listener()
     },
     destroyed: () => wasDestroyed,
     steps,
@@ -171,6 +177,31 @@ describe('createDesktopWindow', () => {
     fixture.close()
 
     expect(fixture.steps).toContain('dispose')
+  })
+
+  it('contains close cleanup and reporter failures so later close listeners run', async () => {
+    const fixture = desktopWindow()
+    const removals: string[] = []
+    const reported: unknown[] = []
+    await createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', {
+      ...fixture.dependencies,
+      configureSession: failingCleanupSession(removals),
+      reportCleanupError(error: unknown) {
+        reported.push(error)
+        throw new Error('report failed')
+      },
+    })
+    fixture.addCloseListener(() => {
+      fixture.steps.push('later listener')
+    })
+
+    expect(() => {
+      fixture.close()
+    }).not.toThrow()
+    expect(removals).toEqual(['request', 'check', 'headers'])
+    expect(reported).toHaveLength(1)
+    expect(reported[0]).toBeInstanceOf(AggregateError)
+    expect(fixture.steps).toContain('later listener')
   })
 
   it('awaits a failed initial load, removes authorization, and destroys the window', async () => {
@@ -250,6 +281,7 @@ function desktopWindowWithLoadFailure(loadFailure: Error): {
         }
       },
       preloadPath: () => 'C:\\bundle\\preload.cjs',
+      reportCleanupError() {},
     },
     destroyed: () => wasDestroyed,
     steps,
@@ -327,9 +359,34 @@ function desktopWindowWithSetupFailure(
           restore() {},
         }
       },
+      reportCleanupError() {},
     },
     destroyed: () => wasDestroyed,
     failure,
     steps,
   }
+}
+
+function failingCleanupSession(removals: string[]): DesktopWindowDependencies['configureSession'] {
+  return (endpoint, capability) => configureAuthorizedSession(endpoint, capability, {
+    fromPartition() {
+      const failRemoval = (name: string): never => {
+        removals.push(name)
+        throw new Error(`remove ${name}`)
+      }
+      return {
+        request: {
+          onBeforeSendHeaders(filter) {
+            if (filter === null) failRemoval('headers')
+          },
+        },
+        setPermissionCheckHandler(handler) {
+          if (handler === null) failRemoval('check')
+        },
+        setPermissionRequestHandler(handler) {
+          if (handler === null) failRemoval('request')
+        },
+      }
+    },
+  })
 }

@@ -78,6 +78,8 @@ export interface DesktopWindowDependencies {
   configureSession(endpoint: URL, capability: string): AuthorizedSession
   /** Return the absolute packaged preload path. */
   preloadPath(): string
+  /** Report a failure raised while removing session handlers after the native window closes. */
+  reportCleanupError(error: unknown): void
 }
 
 /**
@@ -122,14 +124,30 @@ export async function createDesktopWindow(
     desktopWindow.webContents.on('will-navigate', preventCrossOriginNavigation)
     desktopWindow.webContents.on('will-redirect', preventCrossOriginNavigation)
     desktopWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    const activeAuthorization = authorization
     desktopWindow.once('closed', () => {
-      authorization?.dispose()
+      disposeAfterClose(activeAuthorization, (error) => {
+        dependencies.reportCleanupError(error)
+      })
     })
     await desktopWindow.loadURL(endpoint.href)
     return desktopWindow
   } catch (error: unknown) {
     const cleanupErrors = cleanUpStartup(desktopWindow, authorization)
     throw startupCleanupFailure(error, cleanupErrors)
+  }
+}
+
+/** Contain session disposal and diagnostic-sink failures so Electron can notify later close listeners. */
+function disposeAfterClose(authorization: AuthorizedSession, reportCleanupError: (error: unknown) => void): void {
+  try {
+    authorization.dispose()
+  } catch (error: unknown) {
+    try {
+      reportCleanupError(error)
+    } catch {
+      // Cleanup reporting is best-effort; its failure must not escape Electron's close listener.
+    }
   }
 }
 
@@ -168,6 +186,9 @@ function resolveDependencies(overrides: Partial<DesktopWindowDependencies>): Des
     createWindow: options => new BrowserWindow(options),
     configureSession: configureAuthorizedSession,
     preloadPath: () => fileURLToPath(new URL('./preload.cjs', import.meta.url)),
+    reportCleanupError: (error) => {
+      console.error('Desktop session cleanup failed after window closed:', error)
+    },
     ...overrides,
   }
 }
