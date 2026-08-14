@@ -9,7 +9,9 @@ const CAPABILITY_BYTES = 32
 /** Maximum retained stderr diagnostic suffix; decoded invalid UTF-8 uses deterministic replacement characters. */
 const STDERR_TAIL_BYTES = 8 * 1024
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
+const DEFAULT_STARTUP_TIMEOUT_MS = 30_000
 const REDACTION = '[redacted]'
+const SENSITIVE_ENVIRONMENT_KEY = /KEY|SECRET|TOKEN|PASSWORD/iu
 const dshRequire = createRequire(import.meta.url)
 
 /** A process output stream used for the readiness signal and diagnostics. */
@@ -48,6 +50,14 @@ export interface HarnessSupervisorDependencies {
   environment: NodeJS.ProcessEnv
   /** Maximum time to wait for an exit event after requesting termination. */
   shutdownTimeoutMs: number
+  /** Maximum time to wait for the canonical readiness line. */
+  startupTimeoutMs: number
+}
+
+/** Optional caller-owned startup cancellation. */
+export interface HarnessStartOptions {
+  /** Cancels startup before the Harness announces readiness. */
+  readonly signal?: AbortSignal
 }
 
 /** A ready desktop Harness endpoint and its private capability. */
@@ -56,7 +66,7 @@ export interface HarnessHandle {
   readonly endpoint: URL
   /** Per-process bearer capability; callers must not log or serialize it. */
   readonly capability: string
-  /** Request shutdown and wait for the utility process to exit. */
+  /** Request shutdown and wait for exit; rejects on timeout while the process may remain alive. */
   stop(): Promise<void>
 }
 
@@ -71,14 +81,38 @@ export class HarnessShutdownTimeoutError extends Error {
   }
 }
 
+/** Reports that the child did not announce readiness before the startup deadline. */
+export class HarnessStartupTimeoutError extends Error {
+  /**
+   * @param timeoutMs - The elapsed readiness deadline.
+   */
+  constructor(timeoutMs: number) {
+    super(`Harness utility process did not announce readiness within ${timeoutMs}ms`)
+    this.name = 'HarnessStartupTimeoutError'
+  }
+}
+
+/** Reports caller cancellation before the child announced readiness. */
+export class HarnessStartupAbortedError extends Error {
+  constructor() {
+    super('Harness startup was aborted')
+    this.name = 'AbortError'
+  }
+}
+
 /**
  * Fork the desktop profile and wait for its canonical loopback readiness line.
  * The caller must invoke this only after Electron's `app.whenReady()` resolves,
  * because Electron permits `utilityProcess.fork()` only after app readiness.
- * @param overrides - Optional production dependencies replaced by focused tests.
+ * Rejects for an early child exit, startup timeout, caller abort, or shutdown timeout.
+ * @param overrides - Optional production dependencies replaced by focused tests. Fork errors propagate to the caller.
+ * @param options - Caller cancellation accepted until readiness; timeout and cancellation kill the child and wait for exit.
  * @returns The ready loopback endpoint and an idempotent asynchronous shutdown handle.
  */
-export function startHarness(overrides: Partial<HarnessSupervisorDependencies> = {}): Promise<HarnessHandle> {
+export function startHarness(
+  overrides: Partial<HarnessSupervisorDependencies> = {},
+  options: HarnessStartOptions = {},
+): Promise<HarnessHandle> {
   const dependencies = resolveDependencies(overrides)
   const capability = dependencies.randomBytes(CAPABILITY_BYTES).toString('base64url')
   const child = dependencies.fork(dependencies.resolveCli(), ['--profile', 'desktop', '--port', '0'], {
@@ -97,7 +131,10 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
   let completeStartup: ((handle: HarnessHandle) => void) | undefined
   let rejectStartup: ((reason: Error) => void) | undefined
   let startupSettled = false
-  const stderrTail = new RedactedStderrTail(capability)
+  let startupFailure: Error | undefined
+  let startupShutdownTimer: ReturnType<typeof setTimeout> | undefined
+  let killRequested = false
+  const stderrTail = new RedactedStderrTail(redactionPatterns(capability, dependencies.environment))
   const startupPromise = new Promise((resolve: (handle: HarnessHandle) => void, reject: (reason: Error) => void) => {
     completeStartup = resolve
     rejectStartup = reject
@@ -108,9 +145,22 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
     if (child.stderr !== null) child.stderr.off('data', onStderr)
   }
 
+  const clearStartupControls = (): void => {
+    clearTimeout(startupTimer)
+    if (startupShutdownTimer !== undefined) clearTimeout(startupShutdownTimer)
+    options.signal?.removeEventListener('abort', onAbort)
+  }
+
+  const requestKill = (): void => {
+    if (killRequested) return
+    killRequested = true
+    child.kill()
+  }
+
   const finishStartup = (handle: HarnessHandle): void => {
-    if (startupSettled) return
+    if (startupSettled || startupFailure !== undefined) return
     startupSettled = true
+    clearStartupControls()
     removeOutputListeners()
     child.off('exit', onStartupExit)
     child.on('exit', onRuntimeExit)
@@ -120,14 +170,34 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
   const failStartup = (error: Error): void => {
     if (startupSettled) return
     startupSettled = true
+    clearStartupControls()
     removeOutputListeners()
+    child.off('exit', onStartupExit)
     rejectStartup?.(error)
+  }
+
+  const beginStartupFailure = (error: Error): void => {
+    if (startupSettled || startupFailure !== undefined) return
+    startupFailure = error
+    clearTimeout(startupTimer)
+    options.signal?.removeEventListener('abort', onAbort)
+    removeOutputListeners()
+    requestKill()
+    startupShutdownTimer = setTimeout(() => {
+      child.off('exit', onStartupExit)
+      failStartup(new HarnessShutdownTimeoutError(dependencies.shutdownTimeoutMs))
+    }, dependencies.shutdownTimeoutMs)
+    startupShutdownTimer.unref()
   }
 
   const onStartupExit = (code: number): void => {
     exited = true
     child.off('exit', onStartupExit)
     resolveExit?.()
+    if (startupFailure !== undefined) {
+      failStartup(startupFailure)
+      return
+    }
     const diagnostic = stderrTail.finish()
     const tail = diagnostic.length === 0 ? '' : `\nstderr tail:\n${diagnostic}`
     failStartup(new Error(`Harness exited before readiness (exit code ${code})${tail}`))
@@ -141,11 +211,11 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
 
   const stop = (): Promise<void> => {
     stopPromise ??= stopChild(
-      child,
       exitedPromise,
       () => exited,
       removeOutputListeners,
       () => child.off('exit', onRuntimeExit),
+      requestKill,
       dependencies.shutdownTimeoutMs,
     )
     return stopPromise
@@ -161,10 +231,19 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
   const onStderr = (chunk: unknown): void => {
     stderrTail.write(chunk)
   }
+  const onAbort = (): void => {
+    beginStartupFailure(new HarnessStartupAbortedError())
+  }
 
   child.on('exit', onStartupExit)
   if (child.stdout !== null) child.stdout.on('data', onStdout)
   if (child.stderr !== null) child.stderr.on('data', onStderr)
+  const startupTimer = setTimeout(() => {
+    beginStartupFailure(new HarnessStartupTimeoutError(dependencies.startupTimeoutMs))
+  }, dependencies.startupTimeoutMs)
+  startupTimer.unref()
+  options.signal?.addEventListener('abort', onAbort, { once: true })
+  if (options.signal?.aborted === true) onAbort()
 
   return startupPromise
 }
@@ -178,13 +257,14 @@ function resolveDependencies(overrides: Partial<HarnessSupervisorDependencies>):
     cwd: () => process.cwd(),
     environment: process.env,
     shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
+    startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
     ...overrides,
   }
 }
 
 /** Decode a stdout chunk without corrupting UTF-8 text split across byte chunks. */
 function decodeOutput(decoder: TextDecoder, chunk: unknown): string {
-  return typeof chunk === 'string' ? chunk : decoder.decode(outputBytes(chunk), { stream: true })
+  return decoder.decode(outputBytes(chunk), { stream: true })
 }
 
 /** Convert an output chunk to bytes without inspecting or logging its contents. */
@@ -201,35 +281,37 @@ class RedactedStderrTail {
   #tail: Buffer = Buffer.alloc(0)
 
   /**
-   * @param capability - The exact capability removed before data enters the retained tail.
+   * @param patterns - Non-empty sensitive values removed before data enters the retained tail.
    */
-  constructor(private readonly capability: string) {}
+  constructor(private readonly patterns: readonly string[]) {}
 
   /** Consume one stderr chunk, keeping a bounded suffix that cannot contain the capability. */
   write(chunk: unknown): void {
-    const text = typeof chunk === 'string' ? chunk : this.#decoder.decode(outputBytes(chunk), { stream: true })
-    this.#writeText(text)
+    this.#writeText(this.#decoder.decode(outputBytes(chunk), { stream: true }))
   }
 
   /** Flush the decoder and return the diagnostic after scanning the final bounded remainder. */
   finish(): string {
     this.#writeText(this.#decoder.decode())
-    const candidateLength = trailingCapabilityPrefixLength(this.#pending, this.capability)
+    const candidateLength = trailingSensitivePrefixLength(this.#pending, this.patterns)
     this.#tail = appendUtf8Tail(this.#tail, this.#pending.slice(0, this.#pending.length - candidateLength))
     if (candidateLength > 0) this.#tail = appendUtf8Tail(this.#tail, REDACTION)
     this.#pending = ''
     return new TextDecoder().decode(this.#tail)
   }
 
-  /** Scan exact matches while retaining fewer characters than a complete capability between chunks. */
+  /** Scan exact matches while retaining only a proper sensitive-value prefix between chunks. */
   #writeText(text: string): void {
     const combined = `${this.#pending}${text}`
     let index = 0
     let emitted = ''
-    while (combined.length - index >= this.capability.length) {
-      if (combined.startsWith(this.capability, index)) {
+    while (index < combined.length) {
+      const remainder = combined.slice(index)
+      if (this.patterns.some(pattern => pattern.length > remainder.length && pattern.startsWith(remainder))) break
+      const matched = this.patterns.find(pattern => combined.startsWith(pattern, index))
+      if (matched !== undefined) {
         emitted += REDACTION
-        index += this.capability.length
+        index += matched.length
       } else {
         const codePoint = combined.codePointAt(index)
         const width = codePoint === undefined || codePoint <= 0xffff ? 1 : 2
@@ -242,13 +324,28 @@ class RedactedStderrTail {
   }
 }
 
-/** Return the longest non-empty suffix that is a prefix of the capability at stderr EOF. */
-function trailingCapabilityPrefixLength(value: string, capability: string): number {
-  const maximum = Math.min(capability.length - 1, value.length)
-  for (let length = maximum; length > 0; length -= 1) {
-    if (value.endsWith(capability.slice(0, length))) return length
+/** Return the longest non-empty suffix that is a prefix of any sensitive value at stderr EOF. */
+function trailingSensitivePrefixLength(value: string, patterns: readonly string[]): number {
+  let longest = 0
+  for (const pattern of patterns) {
+    const maximum = Math.min(pattern.length - 1, value.length)
+    for (let length = maximum; length > longest; length -= 1) {
+      if (value.endsWith(pattern.slice(0, length))) {
+        longest = length
+        break
+      }
+    }
   }
-  return 0
+  return longest
+}
+
+/** Return the capability and inherited sensitive environment values, sorted for longest-match scanning. */
+function redactionPatterns(capability: string, environment: NodeJS.ProcessEnv): string[] {
+  const patterns = [capability]
+  for (const [key, value] of Object.entries(environment)) {
+    if (value !== undefined && value.length > 0 && SENSITIVE_ENVIRONMENT_KEY.test(key)) patterns.push(value)
+  }
+  return [...new Set(patterns)].sort((left, right) => right.length - left.length)
 }
 
 /** Append valid UTF-8 text and trim its leading bytes only at a Unicode code-point boundary. */
@@ -267,16 +364,16 @@ function isUtf8ContinuationByte(byte: number | undefined): boolean {
 
 /** Request process termination once and reject if its exit event does not arrive on time. */
 function stopChild(
-  child: HarnessUtilityProcess,
   exitedPromise: Promise<void>,
   hasExited: () => boolean,
   removeOutputListeners: () => void,
   detachExitListener: () => void,
+  requestKill: () => void,
   timeoutMs: number,
 ): Promise<void> {
   removeOutputListeners()
   if (hasExited()) return Promise.resolve()
-  child.kill()
+  requestKill()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       clearTimeout(timer)

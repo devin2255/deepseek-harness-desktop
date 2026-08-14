@@ -44,6 +44,8 @@ function harness(overrides: Partial<HarnessSupervisorDependencies> = {}): {
     randomBytes: size => Buffer.alloc(size, 0xab),
     cwd: () => '/fixture/cwd',
     environment: { FROM_PARENT: 'kept' },
+    shutdownTimeoutMs: 10,
+    startupTimeoutMs: 10,
     ...overrides,
   }
   return { child, dependencies, fork }
@@ -80,6 +82,22 @@ describe('startHarness', () => {
     const handle = await start
     expect(handle.endpoint).toEqual(new URL('http://127.0.0.1:4312'))
     expect(handle.capability).toHaveLength(43)
+  })
+
+  it('resolves the installed Harness CLI when tests inject only the fork boundary', async () => {
+    const { child, fork } = harness()
+    const start = startHarness({
+      fork,
+      randomBytes: size => Buffer.alloc(size, 0xab),
+      cwd: () => '/fixture/cwd',
+      environment: { FROM_PARENT: 'kept' },
+      shutdownTimeoutMs: 10,
+      startupTimeoutMs: 10,
+    })
+
+    expect(fork).toHaveBeenCalledWith(expect.stringMatching(/apps[\\/]cli[\\/]lib[\\/]bin\.js$/u), expect.any(Array), expect.any(Object))
+    child.stdout.write('dsh web: http://127.0.0.1:4313\n')
+    await expect(start).resolves.toMatchObject({ endpoint: new URL('http://127.0.0.1:4313') })
   })
 
   it('waits for a readiness line split across stdout chunks and ignores other output', async () => {
@@ -258,5 +276,104 @@ describe('startHarness', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('times out an alive child before readiness only after it exits', async () => {
+    vi.useFakeTimers()
+    try {
+      const { child, dependencies } = harness()
+      const start = startHarness(dependencies)
+      const error = rejectedError(start)
+
+      await vi.advanceTimersByTimeAsync(10)
+      expect(child.kill).toHaveBeenCalledTimes(1)
+      expect(child.listenerCount('exit')).toBe(1)
+
+      child.exit()
+      const actual = await error
+      expect(actual.name).toBe('HarnessStartupTimeoutError')
+      expect(child.listenerCount('exit')).toBe(0)
+      expect(child.stdout.listenerCount('data')).toBe(0)
+      expect(child.stderr.listenerCount('data')).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cleans startup listeners when a timed-out child does not exit after kill', async () => {
+    vi.useFakeTimers()
+    try {
+      const { child, dependencies } = harness()
+      const error = rejectedError(startHarness(dependencies))
+
+      await vi.advanceTimersByTimeAsync(20)
+
+      const actual = await error
+      expect(actual).toBeInstanceOf(HarnessShutdownTimeoutError)
+      expect(child.kill).toHaveBeenCalledTimes(1)
+      expect(child.listenerCount('exit')).toBe(0)
+      expect(child.stdout.listenerCount('data')).toBe(0)
+      expect(child.stderr.listenerCount('data')).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('aborts startup, kills once, and wins races with late readiness and exit', async () => {
+    const controller = new AbortController()
+    const { child, dependencies } = harness()
+    const start = startHarness(dependencies, { signal: controller.signal })
+    const error = rejectedError(start)
+
+    controller.abort()
+    child.stdout.write('dsh web: http://127.0.0.1:4310\n')
+    child.exit()
+
+    const actual = await error
+    expect(actual.name).toBe('AbortError')
+    expect(child.kill).toHaveBeenCalledTimes(1)
+    expect(child.listenerCount('exit')).toBe(0)
+    expect(child.stdout.listenerCount('data')).toBe(0)
+    expect(child.stderr.listenerCount('data')).toBe(0)
+  })
+
+  it('redacts inherited key and token values across stderr chunks', async () => {
+    const apiKey = 'key-value-123'
+    const token = 'token-value-456'
+    const { child, dependencies } = harness({
+      environment: { DEEPSEEK_API_KEY: apiKey, OTHER_TOKEN: token, FROM_PARENT: 'kept' },
+    })
+    const start = startHarness(dependencies)
+    const error = rejectedError(start)
+
+    child.stderr.write(`context ${apiKey.slice(0, 7)}`)
+    child.stderr.write(`${apiKey.slice(7)} and ${token.slice(0, 6)}`)
+    child.stderr.write(`${token.slice(6)} final diagnostic`)
+    child.exit(23)
+
+    const actual = await error
+    expect(actual.message).toContain('context')
+    expect(actual.message).toContain('final diagnostic')
+    expect(actual.message).not.toContain(apiKey)
+    expect(actual.message).not.toContain(apiKey.slice(0, 8))
+    expect(actual.message).not.toContain(token)
+    expect(actual.message).not.toContain(token.slice(0, 8))
+  })
+
+  it('keeps valid multibyte stderr text intact when chunks alternate between bytes and strings', async () => {
+    const { child, dependencies } = harness()
+    const start = startHarness(dependencies)
+    const error = rejectedError(start)
+
+    child.stderr.write(Buffer.from('界'))
+    child.stderr.write('界'.repeat(3_000))
+    child.stderr.write('final diagnostic')
+    child.exit(24)
+
+    const actual = await error
+    expect(actual.message).toContain('final diagnostic')
+    expect(actual.message).not.toContain('�')
   })
 })
