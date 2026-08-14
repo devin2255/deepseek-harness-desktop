@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { configureAuthorizedSession } from '../src/authorized-session.ts'
 import {
   createDesktopWindow,
@@ -63,6 +63,11 @@ function desktopWindow(): {
         once(event, listener) {
           if (event === 'closed') closedListeners.push(listener)
         },
+        off(event, listener) {
+          if (event !== 'closed') return
+          const index = closedListeners.indexOf(listener)
+          if (index !== -1) closedListeners.splice(index, 1)
+        },
       }
     },
     configureSession() {
@@ -102,7 +107,7 @@ function desktopWindow(): {
     },
     close() {
       if (closedListeners.length === 0) throw new Error('Expected a close listener')
-      for (const listener of closedListeners) listener()
+      for (const listener of [...closedListeners]) listener()
     },
     destroyed: () => wasDestroyed,
     steps,
@@ -121,7 +126,7 @@ function navigationEvent(url: string): FakeEvent {
 
 describe('createDesktopWindow', () => {
   it('returns only the native-window lifecycle controls', () => {
-    expectTypeOf<keyof DesktopWindow>().toEqualTypeOf<'focus' | 'isMinimized' | 'restore'>()
+    expectTypeOf<keyof DesktopWindow>().toEqualTypeOf<'focus' | 'isMinimized' | 'onClosed' | 'restore'>()
   })
 
   it('creates a sandboxed window in the isolated partition and binds authorization before loading', async () => {
@@ -177,6 +182,31 @@ describe('createDesktopWindow', () => {
     fixture.close()
 
     expect(fixture.steps).toContain('dispose')
+  })
+
+  it('contains close-subscriber failures and allows disposing a subscription', async () => {
+    const fixture = desktopWindow()
+    const reported: unknown[] = []
+    const actual = await createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', {
+      ...fixture.dependencies,
+      reportCleanupError(error) {
+        reported.push(error)
+      },
+    })
+    const disposed = vi.fn()
+    const later = vi.fn()
+    const failure = new Error('close subscriber failed')
+    const dispose = actual.onClosed(disposed)
+    actual.onClosed(() => { throw failure })
+    actual.onClosed(later)
+    dispose()
+
+    expect(() => {
+      fixture.close()
+    }).not.toThrow()
+    expect(disposed).not.toHaveBeenCalled()
+    expect(later).toHaveBeenCalledTimes(1)
+    expect(reported).toEqual([failure])
   })
 
   it('contains close cleanup and reporter failures so later close listeners run', async () => {
@@ -259,6 +289,7 @@ function desktopWindowWithLoadFailure(loadFailure: Error): {
             return Promise.reject(loadFailure)
           },
           once() {},
+          off() {},
           destroy() {
             steps.push('destroy')
             wasDestroyed = true
@@ -348,6 +379,7 @@ function desktopWindowWithSetupFailure(
             steps.push('closed')
             fail('closed')
           },
+          off() {},
           destroy() {
             steps.push('destroy')
             wasDestroyed = true

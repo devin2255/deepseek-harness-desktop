@@ -6,7 +6,7 @@ import {
   type DesktopMainDependencies,
   type DesktopQuitEvent,
 } from '../src/main-lifecycle.ts'
-import type { HarnessHandle } from '../src/harness-supervisor.ts'
+import { HarnessShutdownTimeoutError, type HarnessHandle } from '../src/harness-supervisor.ts'
 import type { DesktopWindow } from '../src/window.ts'
 
 function deferred<T>(): {
@@ -53,6 +53,8 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly focus: Mock<DesktopWindow['focus']>
   readonly isMinimized: Mock<DesktopWindow['isMinimized']>
   readonly restore: Mock<DesktopWindow['restore']>
+  readonly closeWindow: () => void
+  readonly disposeClosed: Mock<() => void>
   readonly window: DesktopWindow
   readonly createWindow: DesktopMainDependencies['createWindow']
   readonly reportFailure: DesktopMainDependencies['reportFailure']
@@ -69,7 +71,19 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const isMinimized = vi.fn(() => false)
   const restore = vi.fn()
   const focus = vi.fn()
-  const window: DesktopWindow = { focus, isMinimized, restore }
+  let closedListener: (() => void) | undefined
+  const disposeClosed = vi.fn(() => {
+    closedListener = undefined
+  })
+  const window: DesktopWindow = {
+    focus,
+    isMinimized,
+    onClosed(listener) {
+      closedListener = listener
+      return disposeClosed
+    },
+    restore,
+  }
   const startHarness = vi.fn(async () => harness)
   const createWindow = vi.fn(async () => window)
   const reportFailure = vi.fn()
@@ -78,7 +92,6 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     platform: 'win32',
     startHarness,
     createWindow,
-    windowCount: () => 1,
     reportFailure,
     ...overrides,
   }
@@ -86,6 +99,12 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     app,
     dependencies,
     harness,
+    closeWindow() {
+      const listener = closedListener
+      closedListener = undefined
+      listener?.()
+    },
+    disposeClosed,
     focus,
     isMinimized,
     restore,
@@ -188,6 +207,26 @@ describe('startDesktopMain', () => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
+  it('reports a child-that-never-exits abort rejection once and still latches quit', async () => {
+    const failure = new HarnessShutdownTimeoutError(10)
+    const { app, dependencies, reportFailure } = fixture({
+      startHarness: vi.fn<DesktopMainDependencies['startHarness']>(({ signal }) => new Promise<HarnessHandle>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => { reject(failure) }, { once: true })
+      })),
+    })
+    const desktop = startDesktopMain(dependencies)
+    await flushLifecycle()
+
+    app.emitBeforeQuit()
+    await Promise.all([desktop.startup, desktop.shutdown])
+
+    expect(reportFailure).toHaveBeenCalledTimes(1)
+    expect(reportFailure).toHaveBeenCalledWith('shutdown', failure)
+    expect(reportFailure).not.toHaveBeenCalledWith('startup', failure)
+    expect(app.quit).toHaveBeenCalledTimes(1)
+    expect(app.emitBeforeQuit().preventDefault).not.toHaveBeenCalled()
+  })
+
   it('reports a stop failure and still reaches the latched quit without rejecting', async () => {
     const failure = new Error('bounded stop failure')
     const { app, dependencies, reportFailure, stop } = fixture()
@@ -253,15 +292,29 @@ describe('startDesktopMain', () => {
     }
   })
 
-  it('recreates one macOS window on activation with the existing Harness authority', async () => {
-    let windowCount = 1
-    const { app, dependencies, harness, createWindow, startHarness } = fixture({
-      platform: 'darwin',
-      windowCount: () => windowCount,
-    })
+  it('clears a natively closed window before handling a second instance', async () => {
+    const { app, closeWindow, dependencies, createWindow, focus, restore } = fixture()
     const desktop = startDesktopMain(dependencies)
     await desktop.startup
-    windowCount = 0
+
+    closeWindow()
+    app.emit('second-instance')
+
+    expect(focus).not.toHaveBeenCalled()
+    expect(restore).not.toHaveBeenCalled()
+    expect(createWindow).toHaveBeenCalledTimes(1)
+  })
+
+  it('recreates and focuses one macOS window after native close and activation', async () => {
+    const first = fixture()
+    const second = fixture()
+    const createWindow = vi.fn()
+      .mockResolvedValueOnce(first.window)
+      .mockResolvedValueOnce(second.window)
+    const { app, dependencies, harness, startHarness } = fixture({ platform: 'darwin', createWindow })
+    const desktop = startDesktopMain(dependencies)
+    await desktop.startup
+    first.closeWindow()
 
     app.emit('activate')
     app.emit('activate')
@@ -270,6 +323,56 @@ describe('startDesktopMain', () => {
     expect(startHarness).toHaveBeenCalledTimes(1)
     expect(createWindow).toHaveBeenCalledTimes(2)
     expect(createWindow).toHaveBeenLastCalledWith(harness.endpoint, harness.capability)
+    expect(second.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('recreates a macOS window for a second instance without calling the stale handle', async () => {
+    const first = fixture()
+    const second = fixture()
+    const createWindow = vi.fn()
+      .mockResolvedValueOnce(first.window)
+      .mockResolvedValueOnce(second.window)
+    const { app, dependencies } = fixture({ platform: 'darwin', createWindow })
+    const desktop = startDesktopMain(dependencies)
+    await desktop.startup
+    first.closeWindow()
+
+    app.emit('second-instance')
+    await flushLifecycle()
+
+    expect(first.focus).not.toHaveBeenCalled()
+    expect(first.restore).not.toHaveBeenCalled()
+    expect(second.focus).toHaveBeenCalledTimes(1)
+    expect(createWindow).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not recreate a closed macOS window while Harness stop is pending', async () => {
+    const stopping = deferred<undefined>()
+    const { app, closeWindow, createWindow, dependencies, stop } = fixture({ platform: 'darwin' })
+    vi.mocked(stop).mockReturnValue(stopping.promise)
+    const desktop = startDesktopMain(dependencies)
+    await desktop.startup
+    closeWindow()
+
+    app.emitBeforeQuit()
+    app.emit('activate')
+    app.emit('second-instance')
+    await flushLifecycle()
+
+    expect(createWindow).toHaveBeenCalledTimes(1)
+    stopping.resolve(undefined)
+    await desktop.shutdown
+  })
+
+  it('disposes the active window-close subscription during shutdown', async () => {
+    const { app, dependencies, disposeClosed } = fixture()
+    const desktop = startDesktopMain(dependencies)
+    await desktop.startup
+
+    app.emitBeforeQuit()
+    await desktop.shutdown
+
+    expect(disposeClosed).toHaveBeenCalledTimes(1)
   })
 
   it('contains event callback and reporting exceptions', async () => {

@@ -19,7 +19,7 @@ pnpm --filter @deepseek-ai/dsh-desktop start
 
 ## 运行时生命周期
 
-Main 在应用就绪前启用 Chromium 沙箱并获取 Electron 单实例锁。持有锁的实例等待 `app.whenReady()`，使用 `desktop` profile 在随机 loopback 端口启动且仅启动一个 Harness，等待其规范就绪行，然后创建一个已授权窗口。第二次启动只会恢复并聚焦该窗口，不会再启动 Harness。
+Main 在应用就绪前启用 Chromium 沙箱并获取 Electron 单实例锁。持有锁的实例等待 `app.whenReady()`，使用 `desktop` profile 在随机 loopback 端口启动且仅启动一个 Harness，等待其规范就绪行，然后创建一个已授权窗口。原生窗口关闭后，Main 会清除窗口所有权，后续事件不会调用失效句柄。第二次启动会恢复并聚焦仍然存在的窗口，不会再启动 Harness；在 macOS 上，它会使用现有 Harness 授权重新创建并聚焦已关闭的窗口。
 
 第一次显式退出会中止尚未完成的 Harness 启动，等待启动资源归属完成结算，停止一次已就绪的 Harness，然后在退出锁存状态下再次调用 `app.quit()`。即使关闭失败被报告，应用仍会最终退出。在 Windows 和 Linux 上关闭最后一个窗口会退出；在 macOS 上激活应用会使用现有 Harness 授权重新创建缺失的窗口。
 
@@ -32,7 +32,7 @@ Main 在应用就绪前启用 Chromium 沙箱并获取 Electron 单实例锁。�
 
 ## 失败
 
-Harness 启动错误、就绪超时或初始窗口故障会被报告；应用会清理已拥有的 Harness 或部分窗口状态，然后退出。启动取消和 Harness 关闭都有有界的进程等待。窗口关闭后的 session handler 清理故障会被报告，但不会逃逸 Electron 回调；诊断报告自身的故障也会被隔离。
+Harness 启动错误、就绪超时或初始窗口故障会被报告；应用会清理已拥有的 Harness 或部分窗口状态，然后退出。启动取消和 Harness 关闭都有有界的进程等待。请求取消启动所产生的 `AbortError` 不会被报告；取消后发现的子进程退出超时或其他故障会作为关闭故障报告一次。session handler 清理和窗口关闭订阅方的故障会被报告，但不会逃逸 Electron 回调；诊断报告自身的故障也会被隔离。
 
 ## 模型体验
 

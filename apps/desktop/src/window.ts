@@ -47,10 +47,18 @@ export interface DesktopWindow {
   restore(): void
   /** Focus the native window. */
   focus(): void
+  /** Subscribe to native close and return an idempotent disposer for this subscription. */
+  onClosed(listener: () => void): () => void
 }
 
 /** BrowserWindow operations used only while starting and cleaning up the desktop window. */
-interface DesktopWindowStartupHandle extends DesktopWindow {
+interface DesktopWindowStartupHandle {
+  /** Whether the native window is minimized. */
+  isMinimized(): boolean
+  /** Restore a minimized native window. */
+  restore(): void
+  /** Focus the native window. */
+  focus(): void
   /** Renderer controls associated with this browser window. */
   readonly webContents: {
     /** Electron's opaque renderer identity. */
@@ -68,6 +76,8 @@ interface DesktopWindowStartupHandle extends DesktopWindow {
   destroy(): void
   /** Dispose session handlers when Electron closes the window. */
   once(event: 'closed', listener: () => void): void
+  /** Remove a previously registered close listener. */
+  off(event: 'closed', listener: () => void): void
 }
 
 /** Production inputs that can be structurally replaced without launching Electron. */
@@ -78,7 +88,7 @@ export interface DesktopWindowDependencies {
   configureSession(endpoint: URL, capability: string): AuthorizedSession
   /** Return the absolute packaged preload path. */
   preloadPath(): string
-  /** Report a failure raised while removing session handlers after the native window closes. */
+  /** Report a contained close-subscriber or session-cleanup failure. */
   reportCleanupError(error: unknown): void
 }
 
@@ -131,7 +141,36 @@ export async function createDesktopWindow(
       })
     })
     await desktopWindow.loadURL(endpoint.href)
-    return desktopWindow
+    const loadedWindow = desktopWindow
+    return {
+      focus: () => {
+        loadedWindow.focus()
+      },
+      isMinimized: () => loadedWindow.isMinimized(),
+      onClosed(listener) {
+        let listening = true
+        const notifyClosed = (): void => {
+          if (!listening) return
+          listening = false
+          try {
+            listener()
+          } catch (error: unknown) {
+            reportContainedCloseFailure(error, (failure) => {
+              dependencies.reportCleanupError(failure)
+            })
+          }
+        }
+        loadedWindow.once('closed', notifyClosed)
+        return () => {
+          if (!listening) return
+          listening = false
+          loadedWindow.off('closed', notifyClosed)
+        }
+      },
+      restore: () => {
+        loadedWindow.restore()
+      },
+    }
   } catch (error: unknown) {
     const cleanupErrors = cleanUpStartup(desktopWindow, authorization)
     throw startupCleanupFailure(error, cleanupErrors)
@@ -143,11 +182,16 @@ function disposeAfterClose(authorization: AuthorizedSession, reportCleanupError:
   try {
     authorization.dispose()
   } catch (error: unknown) {
-    try {
-      reportCleanupError(error)
-    } catch {
-      // Cleanup reporting is best-effort; its failure must not escape Electron's close listener.
-    }
+    reportContainedCloseFailure(error, reportCleanupError)
+  }
+}
+
+/** Report a close failure without allowing either the failure or diagnostic sink to escape Electron dispatch. */
+function reportContainedCloseFailure(error: unknown, reportCleanupError: (error: unknown) => void): void {
+  try {
+    reportCleanupError(error)
+  } catch {
+    // Close reporting is best-effort; its failure must not escape Electron's close listener.
   }
 }
 

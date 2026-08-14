@@ -35,8 +35,6 @@ export interface DesktopMainDependencies {
   readonly startHarness: (options: HarnessStartOptions) => Promise<HarnessHandle>
   /** Create the authorized desktop window for a ready Harness. */
   readonly createWindow: (endpoint: URL, capability: string) => Promise<DesktopWindow>
-  /** Count live native windows without retaining BrowserWindow authority here. */
-  readonly windowCount: () => number
   /** Report contained startup, shutdown, and event-callback failures. */
   readonly reportFailure: (phase: 'startup' | 'shutdown' | 'callback', error: unknown) => void
 }
@@ -59,7 +57,9 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   const startupController = new AbortController()
   let harness: HarnessHandle | undefined
   let activeWindow: DesktopWindow | undefined
+  let disposeActiveWindowClosed: (() => void) | undefined
   let windowCreation: Promise<DesktopWindow> | undefined
+  let windowFocusRequest: Promise<void> | undefined
   let shutdownTask: Promise<void> | undefined
   let resolveShutdown!: () => void
   const shutdown = new Promise<void>((resolve) => {
@@ -67,6 +67,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   })
   let quitLatched = false
   const startupWasAborted = (): boolean => startupController.signal.aborted
+  const windowInteractionAllowed = (): boolean => !startupWasAborted() && shutdownTask === undefined && !quitLatched
 
   const report = (phase: 'startup' | 'shutdown' | 'callback', error: unknown): void => {
     try {
@@ -79,6 +80,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   const quitAfterCleanup = (waitForStartup = true): Promise<void> => {
     shutdownTask ??= (async () => {
       startupController.abort()
+      releaseActiveWindowClosed()
       try {
         if (waitForStartup) await startup
         if (harness !== undefined) await harness.stop()
@@ -99,10 +101,38 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
 
   const createHarnessWindow = (): Promise<DesktopWindow> => {
     if (harness === undefined) return Promise.reject(new Error('Desktop Harness is not ready'))
-    windowCreation ??= dependencies.createWindow(harness.endpoint, harness.capability).finally(() => {
-      windowCreation = undefined
-    })
+    windowCreation ??= dependencies.createWindow(harness.endpoint, harness.capability)
+      .then((window) => {
+        if (windowInteractionAllowed()) trackActiveWindow(window)
+        return window
+      })
+      .finally(() => {
+        windowCreation = undefined
+      })
     return windowCreation
+  }
+
+  const focusWindow = (window: DesktopWindow): void => {
+    if (window.isMinimized()) window.restore()
+    window.focus()
+  }
+
+  const focusOrRecreateMacWindow = (): void => {
+    if (!windowInteractionAllowed()) return
+    if (activeWindow !== undefined) {
+      focusWindow(activeWindow)
+      return
+    }
+    if (dependencies.platform !== 'darwin' || harness === undefined) return
+    windowFocusRequest ??= createHarnessWindow()
+      .then((window) => {
+        if (windowInteractionAllowed() && activeWindow === window) focusWindow(window)
+      }, (error: unknown) => {
+        report('callback', error)
+      })
+      .finally(() => {
+        windowFocusRequest = undefined
+      })
   }
 
   app.enableSandbox()
@@ -121,9 +151,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
 
   app.on('second-instance', () => {
     try {
-      if (activeWindow === undefined) return
-      if (activeWindow.isMinimized()) activeWindow.restore()
-      activeWindow.focus()
+      focusOrRecreateMacWindow()
     } catch (error: unknown) {
       report('callback', error)
     }
@@ -139,12 +167,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
 
   app.on('activate', () => {
     try {
-      if (dependencies.platform !== 'darwin' || harness === undefined || dependencies.windowCount() !== 0) return
-      void createHarnessWindow().then((window) => {
-        activeWindow = window
-      }, (error: unknown) => {
-        report('callback', error)
-      })
+      if (dependencies.platform === 'darwin') focusOrRecreateMacWindow()
     } catch (error: unknown) {
       report('callback', error)
     }
@@ -162,9 +185,12 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       if (startupWasAborted()) return
       harness = await dependencies.startHarness({ signal: startupController.signal })
       if (startupWasAborted()) return
-      activeWindow = await createHarnessWindow()
+      await createHarnessWindow()
     } catch (error: unknown) {
-      if (startupWasAborted()) return
+      if (startupWasAborted()) {
+        if (!isAbortError(error)) report('shutdown', error)
+        return
+      }
       report('startup', error)
       await quitAfterCleanup(false)
     }
@@ -181,4 +207,34 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     }
     return Promise.resolve()
   }
+
+  function trackActiveWindow(window: DesktopWindow): void {
+    releaseActiveWindowClosed()
+    activeWindow = window
+    disposeActiveWindowClosed = window.onClosed(() => {
+      if (activeWindow !== window) return
+      activeWindow = undefined
+      disposeActiveWindowClosed = undefined
+    })
+  }
+
+  function releaseActiveWindowClosed(): void {
+    const dispose = disposeActiveWindowClosed
+    activeWindow = undefined
+    disposeActiveWindowClosed = undefined
+    if (dispose !== undefined) containWindowCloseDisposal(dispose)
+  }
+
+  function containWindowCloseDisposal(dispose: () => void): void {
+    try {
+      dispose()
+    } catch (error: unknown) {
+      report('callback', error)
+    }
+  }
+}
+
+/** Identify the cancellation form emitted by the supervised Harness startup path. */
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }

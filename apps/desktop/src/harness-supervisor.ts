@@ -102,6 +102,8 @@ export class HarnessStartupAbortedError extends Error {
  * Fork the desktop profile and wait for its canonical loopback readiness line.
  * The caller must invoke this only after Electron's `app.whenReady()` resolves,
  * because Electron permits `utilityProcess.fork()` only after app readiness.
+ * The entry must be the trusted packaged Harness CLI: its utility child alone receives
+ * the Node-internals flag required by the Loader fallback and must not run untrusted code.
  * Rejects for an early child exit, startup timeout, caller abort, or shutdown timeout.
  * @param overrides - Optional production dependencies replaced by focused tests. Fork errors propagate to the caller.
  * @param options - Caller cancellation accepted until readiness; timeout and cancellation kill the child and wait for exit.
@@ -117,7 +119,9 @@ export function startHarness(
   const child = dependencies.fork(dependencies.resolveCli(), ['--profile', 'desktop', '--port', '0'], {
     cwd: dependencies.cwd(),
     env: { ...dependencies.environment, DSH_DESKTOP_CAPABILITY: capability },
-    // Electron's Node ABI cannot load the host-Node addon that otherwise exposes this loader API.
+    // Electron's ABI cannot load the host-Node `node-addon-require-builtin` binary used by
+    // `@deepseek-ai/loader` for `ModuleLoader.fromInternal()`. Scope the pure Node-internals
+    // fallback to this trusted Harness utility child instead of exposing it to other children.
     execArgv: ['--expose-internals'],
     serviceName: 'DeepSeek Harness Runtime',
     stdio: 'pipe',
