@@ -70,7 +70,7 @@ describe('startHarness', () => {
         FROM_PARENT: 'kept',
         DSH_DESKTOP_CAPABILITY: 'q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s',
       },
-      serviceName: 'DeepSeek Harness',
+      serviceName: 'DeepSeek Harness Runtime',
       stdio: 'pipe',
     })
     expect(fork).toHaveBeenCalledTimes(1)
@@ -110,6 +110,39 @@ describe('startHarness', () => {
     expect(Buffer.byteLength(actual.message)).toBeLessThanOrEqual(8 * 1024 + 100)
     expect(child.stdout.listenerCount('data')).toBe(0)
     expect(child.stderr.listenerCount('data')).toBe(0)
+  })
+
+  it('does not emit a capability suffix when tail retention cuts through a capability split across stderr chunks', async () => {
+    const { child, dependencies } = harness()
+    const start = startHarness(dependencies)
+    const error = rejectedError(start)
+    const secret = Buffer.alloc(32, 0xab).toString('base64url')
+
+    child.stderr.write(secret.slice(0, 21))
+    child.stderr.write(secret.slice(21))
+    child.stderr.write('x'.repeat(8 * 1024 - 10))
+    child.exit(18)
+
+    const actual = await error
+    expect(actual.message).not.toContain(secret.slice(10))
+    expect(actual.message).not.toContain(secret.slice(21))
+    expect(actual.message).not.toContain(secret.slice(33))
+    expect(actual.message).not.toContain(secret)
+  })
+
+  it('keeps an invalid UTF-8 and multibyte stderr diagnostic byte-bounded', async () => {
+    const { child, dependencies } = harness()
+    const start = startHarness(dependencies)
+    const error = rejectedError(start)
+
+    child.stderr.write(Uint8Array.from([0xff, 0xe7, 0x95]))
+    child.stderr.write('界'.repeat(3_000))
+    child.stderr.write('final diagnostic')
+    child.exit(19)
+
+    const actual = await error
+    expect(actual.message).toContain('final diagnostic')
+    expect(Buffer.byteLength(actual.message)).toBeLessThanOrEqual(8 * 1024 + 100)
   })
 
   it('removes stdout and stderr listeners after readiness', async () => {
@@ -164,6 +197,10 @@ describe('startHarness', () => {
 
       await rejection
       expect(child.kill).toHaveBeenCalledTimes(1)
+      expect(child.listenerCount('exit')).toBe(0)
+      expect(child.stdout.listenerCount('data')).toBe(0)
+      expect(child.stderr.listenerCount('data')).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
     } finally {
       vi.useRealTimers()
     }

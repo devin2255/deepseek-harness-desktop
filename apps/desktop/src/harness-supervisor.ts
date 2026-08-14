@@ -9,6 +9,7 @@ const CAPABILITY_BYTES = 32
 /** Maximum retained stderr diagnostic suffix; decoded invalid UTF-8 uses deterministic replacement characters. */
 const STDERR_TAIL_BYTES = 8 * 1024
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
+const REDACTION = '[redacted]'
 const dshRequire = createRequire(import.meta.url)
 
 /** A process output stream used for the readiness signal and diagnostics. */
@@ -83,7 +84,7 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
   const child = dependencies.fork(dependencies.resolveCli(), ['--profile', 'desktop', '--port', '0'], {
     cwd: dependencies.cwd(),
     env: { ...dependencies.environment, DSH_DESKTOP_CAPABILITY: capability },
-    serviceName: 'DeepSeek Harness',
+    serviceName: 'DeepSeek Harness Runtime',
     stdio: 'pipe',
   })
 
@@ -96,7 +97,7 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
   let completeStartup: ((handle: HarnessHandle) => void) | undefined
   let rejectStartup: ((reason: Error) => void) | undefined
   let startupSettled = false
-  let stderrTail: Buffer = Buffer.alloc(0)
+  const stderrTail = new RedactedStderrTail(capability)
   const startupPromise = new Promise((resolve: (handle: HarnessHandle) => void, reject: (reason: Error) => void) => {
     completeStartup = resolve
     rejectStartup = reject
@@ -111,6 +112,8 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
     if (startupSettled) return
     startupSettled = true
     removeOutputListeners()
+    child.off('exit', onStartupExit)
+    child.on('exit', onRuntimeExit)
     completeStartup?.(handle)
   }
 
@@ -121,17 +124,30 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
     rejectStartup?.(error)
   }
 
-  const onExit = (code: number): void => {
+  const onStartupExit = (code: number): void => {
     exited = true
-    child.off('exit', onExit)
+    child.off('exit', onStartupExit)
     resolveExit?.()
-    const diagnostic = redactCapability(new TextDecoder().decode(stderrTail), capability)
+    const diagnostic = stderrTail.finish()
     const tail = diagnostic.length === 0 ? '' : `\nstderr tail:\n${diagnostic}`
     failStartup(new Error(`Harness exited before readiness (exit code ${code})${tail}`))
   }
 
+  const onRuntimeExit = (): void => {
+    exited = true
+    child.off('exit', onRuntimeExit)
+    resolveExit?.()
+  }
+
   const stop = (): Promise<void> => {
-    stopPromise ??= stopChild(child, exitedPromise, () => exited, removeOutputListeners, dependencies.shutdownTimeoutMs)
+    stopPromise ??= stopChild(
+      child,
+      exitedPromise,
+      () => exited,
+      removeOutputListeners,
+      () => child.off('exit', onRuntimeExit),
+      dependencies.shutdownTimeoutMs,
+    )
     return stopPromise
   }
 
@@ -143,10 +159,10 @@ export function startHarness(overrides: Partial<HarnessSupervisorDependencies> =
     parser.write(decodeOutput(stdoutDecoder, chunk))
   }
   const onStderr = (chunk: unknown): void => {
-    stderrTail = appendTail(stderrTail, outputBytes(chunk))
+    stderrTail.write(chunk)
   }
 
-  child.on('exit', onExit)
+  child.on('exit', onStartupExit)
   if (child.stdout !== null) child.stdout.on('data', onStdout)
   if (child.stderr !== null) child.stderr.on('data', onStderr)
 
@@ -178,16 +194,61 @@ function outputBytes(chunk: unknown): Buffer {
   return Buffer.from(String(chunk))
 }
 
-/** Keep only the newest fixed-size stderr byte suffix for an early-exit diagnostic. */
-function appendTail(current: Buffer, next: Buffer): Buffer {
-  if (next.byteLength >= STDERR_TAIL_BYTES) return next.subarray(next.byteLength - STDERR_TAIL_BYTES)
-  const combined = Buffer.concat([current, next])
-  return combined.byteLength <= STDERR_TAIL_BYTES ? combined : combined.subarray(combined.byteLength - STDERR_TAIL_BYTES)
+/** Retains a redacted, UTF-8-safe stderr tail without preserving capability fragments. */
+class RedactedStderrTail {
+  readonly #decoder = new TextDecoder()
+  #pending = ''
+  #tail: Buffer = Buffer.alloc(0)
+
+  /**
+   * @param capability - The exact capability removed before data enters the retained tail.
+   */
+  constructor(private readonly capability: string) {}
+
+  /** Consume one stderr chunk, keeping a bounded suffix that cannot contain the capability. */
+  write(chunk: unknown): void {
+    const text = typeof chunk === 'string' ? chunk : this.#decoder.decode(outputBytes(chunk), { stream: true })
+    this.#writeText(text)
+  }
+
+  /** Flush the decoder and return the diagnostic, discarding a trailing candidate capability prefix. */
+  finish(): string {
+    this.#writeText(this.#decoder.decode())
+    this.#pending = ''
+    return new TextDecoder().decode(this.#tail)
+  }
+
+  /** Emit text that cannot be extended into a capability by a later chunk. */
+  #writeText(text: string): void {
+    const combined = `${this.#pending}${text}`
+    const pendingLength = trailingCapabilityPrefixLength(combined, this.capability)
+    const emitted = combined.slice(0, combined.length - pendingLength).replaceAll(this.capability, REDACTION)
+    this.#pending = combined.slice(combined.length - pendingLength)
+    this.#tail = appendUtf8Tail(this.#tail, emitted)
+  }
 }
 
-/** Replace an accidentally echoed per-process capability before an error leaves this module. */
-function redactCapability(value: string, capability: string): string {
-  return value.replaceAll(capability, '[redacted]')
+/** Return the longest incomplete suffix that could become the capability in a later stderr chunk. */
+function trailingCapabilityPrefixLength(value: string, capability: string): number {
+  const maximum = Math.min(capability.length - 1, value.length)
+  for (let length = maximum; length > 0; length -= 1) {
+    if (value.endsWith(capability.slice(0, length))) return length
+  }
+  return 0
+}
+
+/** Append valid UTF-8 text and trim its leading bytes only at a Unicode code-point boundary. */
+function appendUtf8Tail(current: Buffer, text: string): Buffer {
+  const combined = Buffer.concat([current, Buffer.from(text)])
+  if (combined.byteLength <= STDERR_TAIL_BYTES) return combined
+  let start = combined.byteLength - STDERR_TAIL_BYTES
+  while (start < combined.byteLength && isUtf8ContinuationByte(combined[start])) start += 1
+  return combined.subarray(start)
+}
+
+/** Identify a byte that continues the preceding UTF-8 code point. */
+function isUtf8ContinuationByte(byte: number | undefined): boolean {
+  return byte !== undefined && (byte & 0b1100_0000) === 0b1000_0000
 }
 
 /** Request process termination once and reject if its exit event does not arrive on time. */
@@ -196,6 +257,7 @@ function stopChild(
   exitedPromise: Promise<void>,
   hasExited: () => boolean,
   removeOutputListeners: () => void,
+  detachExitListener: () => void,
   timeoutMs: number,
 ): Promise<void> {
   removeOutputListeners()
@@ -204,6 +266,7 @@ function stopChild(
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       clearTimeout(timer)
+      detachExitListener()
       reject(new HarnessShutdownTimeoutError(timeoutMs))
     }, timeoutMs)
     timer.unref()
