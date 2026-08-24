@@ -1,7 +1,7 @@
 /** Assemble and validate a relocatable production deployment for the desktop app. */
 
 import { spawnSync } from 'node:child_process'
-import { cp, lstat, mkdir, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -97,6 +97,17 @@ export function assertRelocatableLink(linkPath: string, target: string): void {
   }
 }
 
+/**
+ * Resolve a bundle manifest beside the real pnpm installation of dsh.
+ * @param packageName - Bundle package name.
+ * @param dshManifestPath - Logical or real path to the staged dsh manifest.
+ * @returns Absolute path to the resolved bundle manifest.
+ */
+export async function resolveBundleManifest(packageName: string, dshManifestPath: string): Promise<string> {
+  const realDshManifest = await realpath(dshManifestPath)
+  return createRequire(realDshManifest).resolve(`${packageName}/package.json`)
+}
+
 function assertExactStage(path: string): void {
   assertOwnedOutput(path)
   if (resolve(path) !== resolve(DESKTOP_STAGE)) {
@@ -178,11 +189,11 @@ async function verifyRuntime(): Promise<void> {
     '@deepseek-ai/dsh-desktop-app',
   ]
   for (const path of requiredFiles) await assertOrdinaryFile(path)
-  const requireFromDsh = createRequire(join(DESKTOP_STAGE, 'node_modules/@deepseek-ai/dsh/package.json'))
+  const dshManifestPath = join(DESKTOP_STAGE, 'node_modules/@deepseek-ai/dsh/package.json')
   for (const packageName of bundlePackages) {
     let manifestPath: string
     try {
-      manifestPath = requireFromDsh.resolve(`${packageName}/package.json`)
+      manifestPath = await resolveBundleManifest(packageName, dshManifestPath)
     } catch (error) {
       throw new Error(`desktop staging: cannot resolve ${packageName}/package.json from staged @deepseek-ai/dsh`, { cause: error })
     }

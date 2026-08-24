@@ -1,7 +1,10 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+/** Desktop production staging behavior and path-safety tests. */
+
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   assertOwnedOutput,
@@ -10,13 +13,18 @@ import {
   DESKTOP_STAGE,
   REPOSITORY_ROOT,
 } from './packaging-layout.ts'
-import { assertRelocatableLink, deploymentManifest, pnpmInvocation } from './stage.ts'
+import { assertRelocatableLink, deploymentManifest, pnpmInvocation, resolveBundleManifest } from './stage.ts'
 
 const repositoryRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const sourceManifest = JSON.parse(readFileSync(join(repositoryRoot, 'apps/desktop/package.json'), 'utf8')) as Record<string, unknown>
 const rootManifest = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')) as {
   readonly scripts?: Record<string, string>
 }
+const temporaryDirectories: string[] = []
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true })
+})
 
 describe('desktop packaging layout', () => {
   it('derives every output beneath the repository-owned desktop artifact directory', () => {
@@ -83,5 +91,27 @@ describe('desktop production staging', () => {
     expect(() => {
       assertRelocatableLink(link, resolve(REPOSITORY_ROOT, 'apps/cli'))
     }).toThrow(link)
+  })
+
+  it('resolves bundle manifests from the real pnpm package installation', async () => {
+    const stage = mkdtempSync(join(tmpdir(), 'dsh-desktop-stage-'))
+    temporaryDirectories.push(stage)
+    const installation = join(stage, 'node_modules/.pnpm/dsh/node_modules/@deepseek-ai')
+    const realDsh = join(installation, 'dsh')
+    const bundle = join(installation, 'dsh-base')
+    const logicalDsh = join(stage, 'node_modules/@deepseek-ai/dsh')
+    mkdirSync(realDsh, { recursive: true })
+    mkdirSync(bundle, { recursive: true })
+    mkdirSync(dirname(logicalDsh), { recursive: true })
+    writeFileSync(join(realDsh, 'package.json'), '{"name":"@deepseek-ai/dsh"}\n')
+    writeFileSync(join(bundle, 'package.json'), '{"name":"@deepseek-ai/dsh-base"}\n')
+    symlinkSync(
+      process.platform === 'win32' ? realDsh : relative(dirname(logicalDsh), realDsh),
+      logicalDsh,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+
+    await expect(resolveBundleManifest('@deepseek-ai/dsh-base', join(logicalDsh, 'package.json')))
+      .resolves.toBe(join(bundle, 'package.json'))
   })
 })
