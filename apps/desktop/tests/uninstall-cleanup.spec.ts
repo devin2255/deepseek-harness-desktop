@@ -1,7 +1,7 @@
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { lstat, open, rmdir, unlink, utimes, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, parse } from 'node:path'
+import { dirname, join, parse, sep } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   isUninstallCleanupInvocation,
@@ -331,6 +331,51 @@ describe('runUninstallCleanup', () => {
     })).rejects.toThrow(/fatal.*recovery/iu)
     expect(transactionArtifacts(appData).filter(name => name.includes('uninstall-restore'))).toHaveLength(1)
 
+    await expect(invoke(appData)).resolves.toBe(true)
+    expect(transactionArtifacts(appData)).toEqual([])
+    expect(readFileSync(external, 'utf8')).toBe('keep')
+  })
+
+  it('reuses one restore workspace across repeated interrupted recovery attempts', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-repeated-recovery-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const external = join(appData, 'external.txt')
+    const transactionId = '0123456789abcdef0123456789abcdef'
+    const restore = join(appData, `.DeepSeek Harness.uninstall-restore-${transactionId}-0000000000000000`)
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(external, 'keep')
+    await stageArchive(appData)
+    renameSync(product, restore)
+
+    const interruptRecovery = async (): Promise<void> => {
+      let fixedWorkspaceUnlinks = 0
+      await expect(runUninstallCleanup({
+        argv: [`--uninstall-delete-user-data=${TOKEN}`],
+        environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+        maxSnapshotEntries: 100,
+      }, {
+        unlink: async (path) => {
+          const candidate = String(path)
+          if (candidate.startsWith(`${restore}${sep}`)) {
+            fixedWorkspaceUnlinks += 1
+            if (fixedWorkspaceUnlinks > 1) throw new Error('injected fixed restore cleanup failure')
+          } else if (candidate.includes('uninstall-restore')) {
+            throw new Error('injected second restore workspace cleanup failure')
+          }
+          await unlink(path)
+        },
+        utimes: async (path, atime, mtime) => {
+          if (String(path).includes('uninstall-restore')) throw new Error('injected interrupted restore metadata failure')
+          await utimes(path, atime, mtime)
+        },
+      })).rejects.toThrow(/recovery|restore/iu)
+      expect(transactionArtifacts(appData).filter(name => name.includes('uninstall-restore'))).toHaveLength(1)
+      expect(readFileSync(external, 'utf8')).toBe('keep')
+    }
+
+    await interruptRecovery()
+    await interruptRecovery()
     await expect(invoke(appData)).resolves.toBe(true)
     expect(transactionArtifacts(appData)).toEqual([])
     expect(readFileSync(external, 'utf8')).toBe('keep')

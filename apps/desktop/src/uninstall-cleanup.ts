@@ -445,7 +445,7 @@ async function appendFile(
 
 async function restoreArchive(
   archivePath: string,
-  destination: string,
+  destination: string | undefined,
   transactionId: string,
   maxEntries: number,
   dependencies: UninstallCleanupDependencies,
@@ -475,9 +475,13 @@ async function restoreArchive(
       }
       const rootMetadata = decodeMetadata(header, 44)
       consumeEntry(state, maxEntries)
-      await mkdir(destination)
-      destinationState.created = true
-      const directories: ArchivedDirectoryMetadata[] = [{ path: destination, ...rootMetadata }]
+      if (destination !== undefined) {
+        await mkdir(destination)
+        destinationState.created = true
+      }
+      const directories: ArchivedDirectoryMetadata[] = destination === undefined
+        ? []
+        : [{ path: destination, ...rootMetadata }]
       while (true) {
         const type = (await readExact(archive, 1, state)).readUInt8(0)
         if (type === ARCHIVE_END) break
@@ -497,10 +501,12 @@ async function restoreArchive(
         }
         assertArchivePath(relativePath, state.paths)
         const metadata = decodeMetadata(await readExact(archive, ARCHIVE_METADATA_BYTES, state), 0)
-        const target = archiveTarget(destination, relativePath)
+        const target = destination === undefined ? undefined : archiveTarget(destination, relativePath)
         if (type === ARCHIVE_DIRECTORY) {
-          await mkdir(target)
-          directories.push({ path: target, ...metadata })
+          if (target !== undefined) {
+            await mkdir(target)
+            directories.push({ path: target, ...metadata })
+          }
         } else {
           await restoreFile(archive, target, metadata, state, dependencies)
         }
@@ -515,7 +521,7 @@ async function restoreArchive(
       }
     })
   } catch (error: unknown) {
-    if (destinationState.created) {
+    if (destinationState.created && destination !== undefined) {
       try {
         await removeOwnedTree(destination, dependencies)
       } catch (cleanupError: unknown) {
@@ -595,7 +601,7 @@ function archiveTarget(root: string, path: string): string {
 
 async function restoreFile(
   archive: FileHandle,
-  target: string,
+  target: string | undefined,
   metadata: ArchivedMetadata,
   state: ArchiveReadState,
   dependencies: UninstallCleanupDependencies,
@@ -607,7 +613,7 @@ async function restoreFile(
     throw new Error('Uninstall cleanup archive file content is truncated or too large')
   }
   const size = Number(encodedSize)
-  const output = await open(target, 'wx', 0o600)
+  const output = target === undefined ? undefined : await open(target, 'wx', 0o600)
   const hash = createHash('sha256')
   try {
     let remaining = size
@@ -615,17 +621,17 @@ async function restoreFile(
     while (remaining > 0) {
       const bytes = await readExact(archive, Math.min(IO_CHUNK_BYTES, remaining), state)
       hash.update(bytes)
-      await writeBuffer(output, bytes, outputPosition)
+      if (output !== undefined) await writeBuffer(output, bytes, outputPosition)
       outputPosition += bytes.length
       remaining -= bytes.length
     }
-    await output.sync()
+    if (output !== undefined) await output.sync()
   } finally {
-    await output.close()
+    if (output !== undefined) await output.close()
   }
   const expectedDigest = await readExact(archive, ARCHIVE_CHECKSUM_BYTES, state)
   if (!timingSafeEqual(hash.digest(), expectedDigest)) throw new Error('Uninstall cleanup archive file checksum failed')
-  await applyMetadata(target, metadata, dependencies)
+  if (target !== undefined) await applyMetadata(target, metadata, dependencies)
 }
 
 async function applyMetadata(
@@ -684,7 +690,7 @@ async function restoreCanonicalOrThrow(
   dependencies: UninstallCleanupDependencies,
 ): Promise<void> {
   let lastError: unknown = originalError
-  const restorePath = join(dirname(productRoot), `${RESTORE_PREFIX}${transactionId}-0000000000000000`)
+  const restorePath = restoreWorkspacePath(dirname(productRoot), transactionId)
   for (let attempt = 1; attempt <= RESTORE_ATTEMPTS; attempt += 1) {
     try {
       await restoreArchive(archivePath, restorePath, transactionId, maxEntries, dependencies)
@@ -725,15 +731,27 @@ async function recoverInterruptedTransactions(
   if (transaction.archive === undefined) {
     throw new Error('Uninstall cleanup refuses an orphan transaction artifact')
   }
-  const verificationPath = join(appData, `${RESTORE_PREFIX}${transaction.id}-${randomBytes(8).toString('hex')}`)
-  await restoreArchive(transaction.archive.path, verificationPath, transaction.id, maxEntries, dependencies)
-  if (await lstatIfExists(productRoot) === undefined) await rename(verificationPath, productRoot)
-  else await removeOwnedTree(verificationPath, productionDependencies())
+  await restoreArchive(transaction.archive.path, undefined, transaction.id, maxEntries, dependencies)
+  const restorePath = restoreWorkspacePath(appData, transaction.id)
+  if (transaction.restore !== undefined) {
+    if (transaction.restore.path !== restorePath) {
+      throw new Error('Uninstall cleanup refuses a non-canonical restore workspace')
+    }
+    await removeOwnedTree(restorePath, dependencies)
+  }
+  if (await lstatIfExists(productRoot) === undefined) {
+    await restoreArchive(transaction.archive.path, restorePath, transaction.id, maxEntries, dependencies)
+    await rename(restorePath, productRoot)
+  }
   for (const residue of [transaction.validation, transaction.restore]) {
-    if (residue !== undefined) await removeOwnedTree(residue.path, productionDependencies())
+    if (residue !== undefined && residue.path !== restorePath) await removeOwnedTree(residue.path, productionDependencies())
   }
   if (transaction.tombstone !== undefined) await removeOwnedTree(transaction.tombstone.path, productionDependencies())
   await unlinkIfPresent(transaction.archive.path)
+}
+
+function restoreWorkspacePath(appData: string, transactionId: string): string {
+  return join(appData, `${RESTORE_PREFIX}${transactionId}-0000000000000000`)
 }
 
 async function assertNoReservedArtifacts(appData: string): Promise<void> {
