@@ -65,19 +65,19 @@ export interface HarnessSupervisorDependencies {
   probeReadiness(options: DesktopReadinessProbeOptions): Promise<{ version: string }>
   /** Maximum time to wait for an exit event after requesting termination. */
   shutdownTimeoutMs: number
-  /** Maximum time to wait for the canonical readiness line. */
+  /** Maximum time for endpoint discovery and authenticated readiness validation. */
   startupTimeoutMs: number
 }
 
 /** Optional caller-owned startup cancellation. */
 export interface HarnessStartOptions {
-  /** Cancels startup before the Harness announces readiness. */
+  /** Cancels startup until authenticated readiness succeeds. */
   readonly signal?: AbortSignal
 }
 
 /** A ready desktop Harness endpoint and its private capability. */
 export interface HarnessHandle {
-  /** Loopback URL announced by the child process. */
+  /** Loopback URL discovered from the child's canonical stdout line. */
   readonly endpoint: URL
   /** Per-process bearer capability; callers must not log or serialize it. */
   readonly capability: string
@@ -96,18 +96,18 @@ export class HarnessShutdownTimeoutError extends Error {
   }
 }
 
-/** Reports that the child did not announce readiness before the startup deadline. */
+/** Reports that the Harness runtime did not become ready before the startup deadline. */
 export class HarnessStartupTimeoutError extends Error {
   /**
    * @param timeoutMs - The elapsed readiness deadline.
    */
   constructor(timeoutMs: number) {
-    super(`Harness utility process did not announce readiness within ${timeoutMs}ms`)
+    super(`Harness utility process did not become ready before the ${timeoutMs}ms startup deadline`)
     this.name = 'HarnessStartupTimeoutError'
   }
 }
 
-/** Reports caller cancellation before the child announced readiness. */
+/** Reports caller cancellation before authenticated readiness succeeded. */
 export class HarnessStartupAbortedError extends Error {
   constructor() {
     super('Harness startup was aborted')
@@ -123,9 +123,10 @@ export class HarnessStartupAbortedError extends Error {
  * the Node-internals flag required by the Loader fallback and must not run untrusted code.
  * The canonical stdout URL only discovers the endpoint. Startup resolves after an
  * authenticated probe confirms the desktop product identity, expected version, and required API
- * capabilities. Probe rejection, caller cancellation, the original startup deadline, or
- * child exit rejects startup and requests child termination; rejection waits for child exit
- * or reports a shutdown timeout when cleanup cannot reach it.
+ * capabilities. Probe rejection, caller cancellation, or the startup deadline requests child
+ * termination and waits for exit, bounded by the shutdown timeout. A child that exits during
+ * startup is already stopped: startup cancels any probe, removes its listeners and timers, and
+ * rejects without sending another termination request.
  * @param launchSpec - Explicit CLI path, working directory, and sanitized environment.
  * @param options - Caller cancellation accepted through authenticated readiness.
  * @param overrides - Optional process, filesystem, randomness, and timeout operations replaced by focused tests.
@@ -257,6 +258,7 @@ export function startHarness(
     return stopPromise
   }
 
+  // The canonical stdout line discovers only the endpoint; authenticated validation owns readiness.
   const parser = createReadinessParser((url) => {
     const endpoint = new URL(url)
     void dependencies.probeReadiness({

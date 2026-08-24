@@ -220,8 +220,10 @@ describe('startHarness', () => {
         }),
       })
       const error = rejectedError(startHarness(dependencies))
+      const endpoint = 'http://127.0.0.1:4315'
+      const capability = Buffer.alloc(32, 0xab).toString('base64url')
       await vi.advanceTimersByTimeAsync(8)
-      child.stdout.write('dsh web: http://127.0.0.1:4315\n')
+      child.stdout.write(`dsh web: ${endpoint}\n`)
       await vi.advanceTimersByTimeAsync(2)
 
       expect(probeSignal?.aborted).toBe(true)
@@ -229,6 +231,9 @@ describe('startHarness', () => {
       child.exit()
       const actual = await error
       expect(actual).toBeInstanceOf(HarnessStartupTimeoutError)
+      expect(actual.message).toBe('Harness utility process did not become ready before the 10ms startup deadline')
+      expect(actual.message).not.toContain(endpoint)
+      expect(actual.message).not.toContain(capability)
       expect(vi.getTimerCount()).toBe(0)
     } finally {
       vi.useRealTimers()
@@ -250,6 +255,7 @@ describe('startHarness', () => {
     expect(actual.message).toMatch(/final diagnostic/)
     expect(actual.message).toMatch(/Harness exited before readiness.*17/u)
     expect(actual.message).not.toContain(secret)
+    expect(child.kill).not.toHaveBeenCalled()
     expect(Buffer.byteLength(actual.message)).toBeLessThanOrEqual(8 * 1024 + 100)
     expect(child.stdout.listenerCount('data')).toBe(0)
     expect(child.stderr.listenerCount('data')).toBe(0)
