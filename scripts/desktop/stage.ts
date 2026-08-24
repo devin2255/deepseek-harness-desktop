@@ -23,7 +23,7 @@ interface DeploymentManifest {
   readonly dependencies: Readonly<Record<string, string>>
 }
 
-interface MaterializationFileSystem {
+export interface MaterializationFileSystem {
   readonly cp: typeof cp
   readonly lstat: (path: string) => Promise<Stats>
   readonly mkdtemp: typeof mkdtemp
@@ -280,30 +280,34 @@ export async function validateRealAncestors(repositoryRoot: string, parent: stri
  * @param repositoryRoot - Repository that owns the artifact hierarchy.
  * @param stagePath - Exact stage directory to replace.
  */
-export async function resetStageDirectory(repositoryRoot: string, stagePath: string): Promise<void> {
+export async function resetStageDirectory(
+  repositoryRoot: string,
+  stagePath: string,
+  fileSystem: MaterializationFileSystem = nodeMaterializationFileSystem,
+): Promise<void> {
   const stage = resolve(stagePath)
   await validateRealAncestors(repositoryRoot, dirname(stage))
   await mkdir(dirname(stage), { recursive: true })
   await validateRealAncestors(repositoryRoot, dirname(stage))
   let stats
   try {
-    stats = await lstat(stage)
+    stats = await fileSystem.lstat(stage)
   } catch (error) {
     if (isMissing(error)) return
     throw error
   }
-  const quarantineParent = await mkdtemp(join(dirname(stage), '.dsh-remove-'))
+  const quarantineParent = await fileSystem.mkdtemp(join(dirname(stage), '.dsh-remove-'))
   const quarantinedStage = join(quarantineParent, 'stage')
   try {
-    await rename(stage, quarantinedStage)
-    stats = await lstat(quarantinedStage)
+    await fileSystem.rename(stage, quarantinedStage)
+    stats = await fileSystem.lstat(quarantinedStage)
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
-      await unlink(quarantinedStage)
+      await fileSystem.unlink(quarantinedStage)
     } else {
-      await rm(quarantinedStage, { recursive: true })
+      await fileSystem.rm(quarantinedStage, { recursive: true })
     }
   } finally {
-    await rm(quarantineParent, { recursive: true, force: true })
+    await fileSystem.rm(quarantineParent, { recursive: true, force: true })
   }
 }
 

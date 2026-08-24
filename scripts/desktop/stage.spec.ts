@@ -1,7 +1,7 @@
 /** Desktop production staging behavior and path-safety tests. */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
-import { lstat as lstatAsync } from 'node:fs/promises'
+import { lstat as lstatAsync, mkdtemp, rename, rm, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -167,6 +167,36 @@ describe('desktop production staging', () => {
 
     await resetStageDirectory(root, stage)
 
+    expect(existsSync(stage)).toBe(false)
+    expect(readFileSync(sentinel, 'utf8')).toBe('keep\n')
+  })
+
+  it('preserves an external target when the inspected directory is swapped to a junction before quarantine', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-repository-'))
+    const external = mkdtempSync(join(tmpdir(), 'dsh-desktop-external-'))
+    temporaryDirectories.push(root, external)
+    const stage = join(root, '.artifacts/desktop/stage')
+    const sentinel = join(external, 'sentinel.txt')
+    mkdirSync(stage, { recursive: true })
+    writeFileSync(sentinel, 'keep\n')
+    let swapped = false
+
+    await resetStageDirectory(root, stage, {
+      lstat: lstatAsync,
+      mkdtemp,
+      readlink: async () => { throw new Error('readlink is not used by reset') },
+      cp: async () => {},
+      rename: async (source, destination) => {
+        swapped = true
+        rmSync(source, { recursive: true })
+        symlinkSync(external, source, process.platform === 'win32' ? 'junction' : 'dir')
+        await rename(source, destination)
+      },
+      rm,
+      unlink,
+    })
+
+    expect(swapped).toBe(true)
     expect(existsSync(stage)).toBe(false)
     expect(readFileSync(sentinel, 'utf8')).toBe('keep\n')
   })
