@@ -4,6 +4,7 @@ import type { ApplicationMutexHandle } from './application-mutex.ts'
 import type { HarnessHandle, HarnessLaunchSpec, HarnessStartOptions } from './harness-supervisor.ts'
 import { createStartupState, reduceStartup, type DesktopStartupState } from './startup-state.ts'
 import type { StartupWindow, StartupWindowActions } from './startup-window.ts'
+import { classifyInstallerCloseIntent } from './installer-close-intent.ts'
 import type { DesktopWindow } from './window.ts'
 
 const DESKTOP_APP_USER_MODEL_ID = 'ai.deepseek.harness.desktop'
@@ -254,8 +255,9 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   })
   app.on('second-instance', (_event, commandLine?: string[]) => {
     try {
-      if (commandLine?.includes('--installer-request-close') === true) void quitAfterCleanup()
-      else focusLiveWindow()
+      const installerCloseIntent = classifyInstallerCloseIntent(commandLine?.slice(1) ?? [])
+      if (installerCloseIntent === 'exact') void quitAfterCleanup()
+      else if (installerCloseIntent === 'none') focusLiveWindow()
     } catch (error: unknown) { report('callback', error) }
   })
   app.on('window-all-closed', () => {

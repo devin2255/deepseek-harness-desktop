@@ -59,18 +59,61 @@ describe('desktop Main cleanup entry', () => {
   })
 })
 
+describe('desktop Main installer close entry', () => {
+  it('exits zero and releases a newly acquired lock without composing normal runtime state', async () => {
+    const setup = prepareEntry(['--installer-request-close'], '')
+
+    await import('../src/main.ts')
+
+    expect(setup.requestSingleInstanceLock).toHaveBeenCalledTimes(1)
+    expect(setup.releaseSingleInstanceLock).toHaveBeenCalledTimes(1)
+    expect(setup.exit).toHaveBeenCalledWith(0)
+    assertNormalCompositionUnused(setup)
+  })
+
+  it('exits zero immediately when Electron forwards the exact close intent to the existing instance', async () => {
+    const setup = prepareEntry(['--installer-request-close'], '')
+    setup.requestSingleInstanceLock.mockReturnValue(false)
+
+    await import('../src/main.ts')
+
+    expect(setup.releaseSingleInstanceLock).not.toHaveBeenCalled()
+    expect(setup.exit).toHaveBeenCalledWith(0)
+    assertNormalCompositionUnused(setup)
+  })
+
+  it.each([
+    ['--installer-request-close=1'],
+    ['--installer-request-close', '--unexpected'],
+    ['--installer-request-close', '--installer-request-close'],
+  ])('fails closed for malformed close-prefixed argv %j', async (...argv) => {
+    const setup = prepareEntry(argv, '')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await import('../src/main.ts')
+
+    expect(setup.requestSingleInstanceLock).not.toHaveBeenCalled()
+    expect(setup.exit).toHaveBeenCalledWith(1)
+    assertNormalCompositionUnused(setup)
+  })
+})
+
 function prepareEntry(argv: readonly string[], environmentToken: string): {
   readonly appData: string
   readonly createRequire: ReturnType<typeof vi.fn>
   readonly createStartupWindow: ReturnType<typeof vi.fn>
   readonly createWindow: ReturnType<typeof vi.fn>
   readonly exit: ReturnType<typeof vi.fn>
+  readonly releaseSingleInstanceLock: ReturnType<typeof vi.fn>
+  readonly requestSingleInstanceLock: ReturnType<typeof vi.fn>
   readonly resolveRuntimeContext: ReturnType<typeof vi.fn>
   readonly startDesktopMain: ReturnType<typeof vi.fn>
   readonly startHarness: ReturnType<typeof vi.fn>
 } {
   const appData = mkdtempSync(join(tmpdir(), 'dsh-main-cleanup-'))
   const exit = vi.fn()
+  const releaseSingleInstanceLock = vi.fn()
+  const requestSingleInstanceLock = vi.fn(() => true)
   const createRequire = vi.fn(() => { throw new Error('normal createRequire must remain lazy') })
   const resolveRuntimeContext = vi.fn(() => { throw new Error('normal runtime context must remain lazy') })
   const startDesktopMain = vi.fn()
@@ -81,7 +124,7 @@ function prepareEntry(argv: readonly string[], environmentToken: string): {
   process.env.APPDATA = appData
   process.env[UNINSTALL_CLEANUP_ENVIRONMENT_KEY] = environmentToken
   vi.doMock('electron', () => ({
-    app: { exit, isPackaged: true },
+    app: { exit, isPackaged: true, releaseSingleInstanceLock, requestSingleInstanceLock },
     shell: { openPath: vi.fn() },
   }))
   vi.doMock('node:module', () => ({ createRequire }))
@@ -90,7 +133,10 @@ function prepareEntry(argv: readonly string[], environmentToken: string): {
   vi.doMock('../src/harness-supervisor.ts', () => ({ startHarness }))
   vi.doMock('../src/startup-window.ts', () => ({ createStartupWindow }))
   vi.doMock('../src/window.ts', () => ({ createDesktopWindow: createWindow }))
-  return { appData, createRequire, createStartupWindow, createWindow, exit, resolveRuntimeContext, startDesktopMain, startHarness }
+  return {
+    appData, createRequire, createStartupWindow, createWindow, exit, releaseSingleInstanceLock,
+    requestSingleInstanceLock, resolveRuntimeContext, startDesktopMain, startHarness,
+  }
 }
 
 function assertNormalCompositionUnused(setup: ReturnType<typeof prepareEntry>): void {

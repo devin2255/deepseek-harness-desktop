@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { acquireApplicationMutex } from './application-mutex.ts'
 import { DesktopLog } from './desktop-log.ts'
 import { startHarness } from './harness-supervisor.ts'
+import { classifyInstallerCloseIntent } from './installer-close-intent.ts'
 import { startDesktopMain } from './main-lifecycle.ts'
 import { resolveRuntimeContext } from './runtime-context.ts'
 import { createStartupWindow } from './startup-window.ts'
@@ -19,6 +20,7 @@ const DESKTOP_LOG_MAX_BYTES = 1_048_576
 const DESKTOP_LOG_MAX_MESSAGE_CODE_UNITS = 16_384
 const DESKTOP_LOG_MAX_METADATA_CODE_UNITS = 128
 const desktopArguments = process.argv.slice(app.isPackaged ? 1 : 2)
+const installerCloseIntent = classifyInstallerCloseIntent(desktopArguments)
 
 if (isUninstallCleanupInvocation(desktopArguments)) {
   void runUninstallCleanup({
@@ -32,6 +34,15 @@ if (isUninstallCleanupInvocation(desktopArguments)) {
       app.exit(1)
     },
   )
+} else if (installerCloseIntent !== 'none') {
+  if (installerCloseIntent === 'malformed') {
+    console.error('DeepSeek Harness installer close request was rejected.')
+    app.exit(1)
+  } else {
+    const ownsInstance = app.requestSingleInstanceLock()
+    if (ownsInstance) app.releaseSingleInstanceLock()
+    app.exit(0)
+  }
 } else {
   startNormalDesktop()
 }

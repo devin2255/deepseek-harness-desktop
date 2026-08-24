@@ -1,10 +1,14 @@
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
 
+Var DshCloseTarget
+
 !ifdef BUILD_UNINSTALLER
   Var DshDeleteUserData
   Var DshCleanupToken
 !else
+  Var DshOldInstallLocation
+  Var DshOldAppExe
   Var DshDesktopShortcut
   Var DshStartMenuShortcut
   Var DshLaunchAtLogin
@@ -15,6 +19,8 @@
 
 !define DSH_RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
 !define DSH_RUN_VALUE "DeepSeek Harness"
+!define DSH_CLOSE_POLL_ATTEMPTS 20
+!define DSH_CLOSE_POLL_INTERVAL_MS 500
 
 !macro customInstallMode
   StrCpy $isForceCurrentInstall "1"
@@ -47,6 +53,12 @@
 !macroend
 
 !macro customInit
+  StrCpy $DshOldInstallLocation ""
+  StrCpy $DshOldAppExe ""
+  ReadRegStr $DshOldInstallLocation HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation"
+  ${if} $DshOldInstallLocation != ""
+    StrCpy $DshOldAppExe "$DshOldInstallLocation\${APP_EXECUTABLE_FILENAME}"
+  ${endif}
   ReadRegStr $0 HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   ${if} $0 != ""
     InitPluginsDir
@@ -102,18 +114,31 @@ Function DshOptionsLeave
 FunctionEnd
 !endif
 
-!macro DshRemoveOwnedShortcut Shortcut Target
+!macro DshRemoveOwnedShortcut Shortcut OldTarget NewTarget
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_SHORTCUT", w "${Shortcut}") i.r1'
-  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_TARGET_EXE", w "${Target}") i.r1'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_OLD_TARGET_EXE", w "${OldTarget}") i.r1'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_NEW_TARGET_EXE", w "${NewTarget}") i.r1'
   nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File $\"$PLUGINSDIR\dsh-inspect-shortcut.ps1$\"`
   Pop $0
   Pop $1
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_SHORTCUT", p 0) i.r1'
-  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_TARGET_EXE", p 0) i.r1'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_OLD_TARGET_EXE", p 0) i.r1'
+  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_NEW_TARGET_EXE", p 0) i.r1'
   ${if} $0 == "0"
   ${andIf} $1 == "owned"
     WinShell::UninstShortcut "${Shortcut}"
     Delete "${Shortcut}"
+  ${endif}
+!macroend
+
+!macro DshRemoveOwnedRunValue OldTarget NewTarget
+  ReadRegStr $0 HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}"
+  ${if} "${OldTarget}" != ""
+  ${andIf} $0 == '$\"${OldTarget}$\"'
+    DeleteRegValue HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}"
+  ${elseIf} "${NewTarget}" != ""
+  ${andIf} $0 == '$\"${NewTarget}$\"'
+    DeleteRegValue HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}"
   ${endif}
 !macroend
 
@@ -123,12 +148,13 @@ FunctionEnd
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "DshDesktopShortcut" "$DshDesktopShortcut"
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "DshStartMenuShortcut" "$DshStartMenuShortcut"
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "DshLaunchAtLogin" "$DshLaunchAtLogin"
+  WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
 
   ${if} $DshDesktopShortcut == ${BST_CHECKED}
     CreateShortcut "$DESKTOP\DeepSeek Harness.lnk" "$appExe" "" "$appExe" 0
     WinShell::SetLnkAUMI "$DESKTOP\DeepSeek Harness.lnk" "${APP_ID}"
   ${else}
-    !insertmacro DshRemoveOwnedShortcut "$DESKTOP\DeepSeek Harness.lnk" "$appExe"
+    !insertmacro DshRemoveOwnedShortcut "$DESKTOP\DeepSeek Harness.lnk" "$DshOldAppExe" "$appExe"
   ${endif}
 
   ${if} $DshStartMenuShortcut == ${BST_CHECKED}
@@ -136,17 +162,13 @@ FunctionEnd
     CreateShortcut "$SMPROGRAMS\DeepSeek Harness\DeepSeek Harness.lnk" "$appExe" "" "$appExe" 0
     WinShell::SetLnkAUMI "$SMPROGRAMS\DeepSeek Harness\DeepSeek Harness.lnk" "${APP_ID}"
   ${else}
-    !insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\DeepSeek Harness\DeepSeek Harness.lnk" "$appExe"
+    !insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\DeepSeek Harness\DeepSeek Harness.lnk" "$DshOldAppExe" "$appExe"
     RMDir "$SMPROGRAMS\DeepSeek Harness"
   ${endif}
 
+  !insertmacro DshRemoveOwnedRunValue "$DshOldAppExe" "$appExe"
   ${if} $DshLaunchAtLogin == ${BST_CHECKED}
     WriteRegStr HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}" '$\"$appExe$\"'
-  ${else}
-    ReadRegStr $0 HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}"
-    ${if} $0 == '$\"$appExe$\"'
-      DeleteRegValue HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}"
-    ${endif}
   ${endif}
 !macroend
 
@@ -186,18 +208,15 @@ FunctionEnd
       DshCleanupSkip:
     ${endif}
 
-    !insertmacro DshRemoveOwnedShortcut "$DESKTOP\DeepSeek Harness.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
-    !insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\DeepSeek Harness\DeepSeek Harness.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+    !insertmacro DshRemoveOwnedShortcut "$DESKTOP\DeepSeek Harness.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+    !insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\DeepSeek Harness\DeepSeek Harness.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
     RMDir "$SMPROGRAMS\DeepSeek Harness"
-    ReadRegStr $0 HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}"
-    ${if} $0 == '$\"$INSTDIR\${APP_EXECUTABLE_FILENAME}$\"'
-      DeleteRegValue HKCU "${DSH_RUN_KEY}" "${DSH_RUN_VALUE}"
-    ${endif}
+    !insertmacro DshRemoveOwnedRunValue "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
   ${endif}
 !macroend
 
-!macro DshQueryInstalledProcess ExitCode Status
-  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_TARGET_EXE", w "$INSTDIR\${APP_EXECUTABLE_FILENAME}") i.r1'
+!macro DshQueryInstalledProcess Target ExitCode Status
+  System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_TARGET_EXE", w "${Target}") i.r1'
   nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File $\"$PLUGINSDIR\dsh-query-process.ps1$\"`
   Pop ${ExitCode}
   Pop ${Status}
@@ -208,9 +227,17 @@ FunctionEnd
   DshCloseRetry:
   InitPluginsDir
   File /oname=$PLUGINSDIR\dsh-query-process.ps1 "${BUILD_RESOURCES_DIR}\query-installed-process.ps1"
+  !ifdef BUILD_UNINSTALLER
+  StrCpy $DshCloseTarget "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  !else
+  StrCpy $DshCloseTarget "$DshOldAppExe"
+  ${if} $DshOldAppExe == ""
+    StrCpy $DshCloseTarget "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  ${endif}
+  !endif
   StrCpy $1 0
   DshCloseWait:
-  !insertmacro DshQueryInstalledProcess $0 $3
+  !insertmacro DshQueryInstalledProcess "$DshCloseTarget" $0 $3
   StrCmp $0 "0" 0 DshQueryFailed
   StrCmp $3 "stopped" DshNotRunning
   StrCmp $3 "running" 0 DshQueryFailed
@@ -220,14 +247,14 @@ FunctionEnd
   ${if} $2 != 0
     System::Call 'kernel32::CloseHandle(p r2)'
   ${endif}
-  IfFileExists "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 DshCloseBlocked
+  IfFileExists "$DshCloseTarget" 0 DshAfterCloseRequest
   ClearErrors
-  ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-request-close' $0
+  Exec '"$DshCloseTarget" --installer-request-close'
   IfErrors DshCloseBlocked
   DshAfterCloseRequest:
-  Sleep 500
+  Sleep ${DSH_CLOSE_POLL_INTERVAL_MS}
   IntOp $1 $1 + 1
-  IntCmp $1 20 DshCloseBlocked DshCloseWait DshCloseBlocked
+  IntCmp $1 ${DSH_CLOSE_POLL_ATTEMPTS} DshCloseBlocked DshCloseWait DshCloseBlocked
   DshQueryFailed:
   MessageBox MB_RETRYCANCEL|MB_ICONSTOP "Setup could not query the exact DeepSeek Harness process path. Retry or cancel without replacing live files." /SD IDCANCEL IDRETRY DshCloseRetry
   Abort

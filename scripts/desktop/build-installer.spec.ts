@@ -67,7 +67,24 @@ async function queryInstalledProcess(target: string): Promise<string> {
 
 async function inspectShortcut(shortcut: string, target: string): Promise<string> {
   const result = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', inspectShortcutPath], {
-    env: { ...process.env, DSH_INSTALLER_SHORTCUT: shortcut, DSH_INSTALLER_TARGET_EXE: target },
+    env: {
+      ...process.env,
+      DSH_INSTALLER_SHORTCUT: shortcut,
+      DSH_INSTALLER_OLD_TARGET_EXE: target,
+      DSH_INSTALLER_NEW_TARGET_EXE: target,
+    },
+  })
+  return result.stdout.trim()
+}
+
+async function inspectShortcutTargets(shortcut: string, oldTarget: string, newTarget: string): Promise<string> {
+  const result = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', inspectShortcutPath], {
+    env: {
+      ...process.env,
+      DSH_INSTALLER_SHORTCUT: shortcut,
+      DSH_INSTALLER_OLD_TARGET_EXE: oldTarget,
+      DSH_INSTALLER_NEW_TARGET_EXE: newTarget,
+    },
   })
   return result.stdout.trim()
 }
@@ -224,10 +241,99 @@ describe('Windows installer configuration', () => {
     }
   })
 
+  it('recognizes old and new owned shortcut targets across a moved installation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-moved-shortcut-'))
+    const shortcut = join(directory, 'DeepSeek Harness.lnk')
+    const windows = process.env.SystemRoot ?? 'C:\\Windows'
+    const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
+    const newTarget = join(windows, 'System32/WindowsPowerShell/v1.0/powershell.exe')
+    const foreignTarget = join(windows, 'System32/cmd.exe')
+    try {
+      const createShortcut = '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DSH_TEST_SHORTCUT);$s.TargetPath=$env:DSH_TEST_TARGET;$s.Save()'
+      for (const [target, expected] of [[oldTarget, 'owned'], [newTarget, 'owned'], [foreignTarget, 'foreign']] as const) {
+        await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
+          env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: target },
+        })
+        await expect(inspectShortcutTargets(shortcut, oldTarget, newTarget)).resolves.toBe(expected)
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('captures the old location before builder registry replacement and cleans only quoted old or new Run values', async () => {
+    const source = await readFile(includePath, 'utf8')
+    const installerTemplate = await readFile(join(builderTemplateRoot, 'installer.nsi'), 'utf8')
+    const installSection = await readFile(join(builderTemplateRoot, 'installSection.nsh'), 'utf8')
+    const init = source.match(/!macro customInit(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    const install = source.match(/!macro customInstall\s*\r?\n(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(init).toMatch(/ReadRegStr \$DshOldInstallLocation HKCU "\$\{INSTALL_REGISTRY_KEY\}" "?InstallLocation"?/u)
+    expect(installerTemplate.indexOf('!insertmacro customInit')).toBeLessThan(installerTemplate.indexOf('Section "install"'))
+    expect(installSection.indexOf('!insertmacro registryAddInstallInfo')).toBeLessThan(installSection.indexOf('!insertmacro customInstall'))
+    expect(install).toMatch(/WriteRegStr HKCU "\$\{INSTALL_REGISTRY_KEY\}" "?InstallLocation"? "\$INSTDIR"/u)
+    expect(install).toContain('!insertmacro DshRemoveOwnedRunValue "$DshOldAppExe" "$appExe"')
+    const runCleanup = source.match(/!macro DshRemoveOwnedRunValue OldTarget NewTarget(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(runCleanup).toContain('ReadRegStr')
+    expect(runCleanup).toContain('$\\"${OldTarget}$\\"')
+    expect(runCleanup).toContain('$\\"${NewTarget}$\\"')
+    expect(runCleanup).toContain('DeleteRegValue')
+  })
+
+  it('applies moved-path ownership cleanup for every shortcut option branch', async () => {
+    const source = await readFile(includePath, 'utf8')
+    const install = source.match(/!macro customInstall\s*\r?\n(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(install.match(/DshRemoveOwnedShortcut[^\n]*\$DshOldAppExe[^\n]*\$appExe/gu)).toHaveLength(2)
+    const desktopBranch = install.slice(
+      install.indexOf('${if} $DshDesktopShortcut'),
+      install.indexOf('${if} $DshStartMenuShortcut'),
+    )
+    const startMenuBranch = install.slice(
+      install.indexOf('${if} $DshStartMenuShortcut'),
+      install.indexOf('!insertmacro DshRemoveOwnedRunValue'),
+    )
+    for (const branch of [desktopBranch, startMenuBranch]) {
+      expect(branch).toMatch(/CreateShortcut[^\n]*\$appExe/u)
+      expect(branch).toMatch(/else[\s\S]*?DshRemoveOwnedShortcut[^\n]*\$DshOldAppExe[^\n]*\$appExe/u)
+    }
+  })
+
+  it('launches the close helper without waiting and polls exact old process path for a fixed bound', async () => {
+    const source = await readFile(includePath, 'utf8')
+    const hook = source.match(/!macro customCheckAppRunning(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(hook).toContain('Exec \'"$DshCloseTarget" --installer-request-close\'')
+    expect(hook).not.toContain('ExecWait')
+    expect(hook).toMatch(/ClearErrors[\s\S]*?Exec [^\n]*--installer-request-close[\s\S]*?IfErrors DshCloseBlocked/u)
+    expect(hook).toMatch(/IntCmp \$1 \$\{DSH_CLOSE_POLL_ATTEMPTS\}/u)
+    expect(hook).toContain('Sleep ${DSH_CLOSE_POLL_INTERVAL_MS}')
+    expect(source).toMatch(/!define DSH_CLOSE_POLL_ATTEMPTS \d+/u)
+    expect(source).toMatch(/!define DSH_CLOSE_POLL_INTERVAL_MS \d+/u)
+    const installerBranchStart = hook.indexOf('!else', hook.indexOf('!ifdef BUILD_UNINSTALLER'))
+    const installerBranch = hook.slice(installerBranchStart, hook.indexOf('!endif', installerBranchStart))
+    const oldTarget = installerBranch.indexOf('StrCpy $DshCloseTarget "$DshOldAppExe"')
+    const emptyFallback = installerBranch.indexOf('$DshOldAppExe == ""')
+    const newTarget = installerBranch.indexOf('StrCpy $DshCloseTarget "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"')
+    expect(oldTarget).toBeGreaterThanOrEqual(0)
+    expect(oldTarget).toBeLessThan(emptyFallback)
+    expect(emptyFallback).toBeLessThan(newTarget)
+  })
+
+  it('declares only the close target needed by both generated programs outside the build condition', async () => {
+    const source = await readFile(includePath, 'utf8')
+    const conditionalDeclarations = source.indexOf('!ifdef BUILD_UNINSTALLER')
+    const closeTargetDeclaration = source.indexOf('Var DshCloseTarget')
+    expect(closeTargetDeclaration).toBeGreaterThanOrEqual(0)
+    expect(closeTargetDeclaration).toBeLessThan(conditionalDeclarations)
+    expect(source.indexOf('Var DshOldInstallLocation')).toBeGreaterThan(conditionalDeclarations)
+    expect(source.indexOf('Var DshOldAppExe')).toBeGreaterThan(conditionalDeclarations)
+    const hook = source.match(/!macro customCheckAppRunning(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(hook).toMatch(/!ifdef BUILD_UNINSTALLER[\s\S]*?StrCpy \$DshCloseTarget "\$INSTDIR/u)
+    expect(hook).toMatch(/!else[\s\S]*?StrCpy \$DshCloseTarget "\$DshOldAppExe"/u)
+  })
+
   it('removes shortcuts only through exact-target ownership checks', async () => {
     const source = await readFile(includePath, 'utf8')
-    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$DESKTOP\\DeepSeek Harness.lnk" "$appExe"')
-    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\\DeepSeek Harness\\DeepSeek Harness.lnk" "$appExe"')
+    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$DESKTOP\\DeepSeek Harness.lnk" "$DshOldAppExe" "$appExe"')
+    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\\DeepSeek Harness\\DeepSeek Harness.lnk" "$DshOldAppExe" "$appExe"')
     expect(source).not.toMatch(/Delete "\$(?:DESKTOP|SMPROGRAMS)\\DeepSeek Harness/u)
   })
 })

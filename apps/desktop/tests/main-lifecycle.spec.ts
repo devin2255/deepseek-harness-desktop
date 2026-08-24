@@ -506,6 +506,19 @@ describe('startDesktopMain', () => {
     expect(app.quit).toHaveBeenCalledTimes(1)
   })
 
+  it('does not focus or shut down for malformed installer close-prefixed second-instance argv', async () => {
+    const { app, dependencies, focus, stop } = fixture()
+    const desktop = startDesktopMain(dependencies)
+    await desktop.startup
+
+    app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close=unexpected'])
+    await flushLifecycle()
+
+    expect(stop).not.toHaveBeenCalled()
+    expect(focus).not.toHaveBeenCalled()
+    expect(app.quit).not.toHaveBeenCalled()
+  })
+
   it('aborts pending startup and completes one asynchronous stop before latched quit', async () => {
     const started = deferred<HarnessHandle>()
     const { app, dependencies, createWindow, harness, stop } = fixture({ startHarness: vi.fn(() => started.promise) })
