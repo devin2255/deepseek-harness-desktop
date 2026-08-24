@@ -14,10 +14,12 @@
   "main": "lib/main.js",
   "files": [
     "lib/*.js",
-    "lib/*.cjs"
+    "lib/*.cjs",
+    "lib/*.html",
+    "lib/*.css"
   ],
   "scripts": {
-    "build": "tsc -b && tsdown",
+    "build": "tsc -b && tsdown && node scripts/copy-startup-assets.mjs",
     "start": "electron .",
     "test": "vitest run --root ../.. apps/desktop/tests",
     "test:e2e": "vitest run --root ../.. --config vitest.desktop-e2e.config.ts",
