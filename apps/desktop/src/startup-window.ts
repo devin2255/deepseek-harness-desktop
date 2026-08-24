@@ -58,7 +58,7 @@ export interface StartupWindow {
   publish(state: DesktopStartupState): void
   /** Publish one renderer-safe failure state. */
   showFailure(failure: DesktopStartupFailure): void
-  /** Focus the ready desktop window, close this window, and await its closure. */
+  /** Focus the ready desktop window, destroy this window, and await handler disposal. */
   handoffTo(window: DesktopWindow): Promise<void>
 }
 
@@ -69,7 +69,7 @@ interface StartupNativeWindow {
     send(channel: string, state: DesktopStartupState): void
     setWindowOpenHandler(handler: (details: unknown) => { readonly action: 'deny' }): void
   }
-  close(): void
+  destroy(): void
   focus(): void
   isDestroyed(): boolean
   isMinimized(): boolean
@@ -130,36 +130,76 @@ export async function createStartupWindow(
     },
   })
 
-  const preventNavigation = (event: { preventDefault(): void }): void => {
-    event.preventDefault()
-  }
-  nativeWindow.webContents.on('will-navigate', preventNavigation)
-  nativeWindow.webContents.on('will-redirect', preventNavigation)
-  nativeWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-
   const registeredChannels: string[] = []
+  const cleanupErrors: unknown[] = []
+  const terminationErrors: unknown[] = []
   let closed = false
-  let settleClosed!: () => void
-  const closedPromise = new Promise<void>((resolve) => { settleClosed = resolve })
+  let handlersDisposed = false
+  let terminationRequested = false
+  let settleClosed!: (error?: AggregateError) => void
+  const closedPromise = new Promise<void>((resolve, reject) => {
+    settleClosed = (error) => {
+      if (error === undefined) resolve()
+      else reject(error)
+    }
+  })
+  // The public promise retains the rejection; this companion prevents an unobserved close from reaching the process.
+  void closedPromise.catch(() => {})
   const disposeHandlers = (): void => {
-    for (const channel of registeredChannels.splice(0)) dependencies.ipcMain.removeHandler(channel)
+    if (handlersDisposed) return
+    handlersDisposed = true
+    for (const channel of registeredChannels.splice(0)) {
+      try {
+        dependencies.ipcMain.removeHandler(channel)
+      } catch (error: unknown) {
+        cleanupErrors.push(error)
+      }
+    }
   }
-  nativeWindow.once('closed', () => {
+  const finalizeClosed = (): void => {
     if (closed) return
     closed = true
     disposeHandlers()
-    settleClosed()
-  })
+    settleClosed(cleanupErrors.length === 0
+      ? undefined
+      : new AggregateError([...cleanupErrors], 'Startup window IPC cleanup failed'))
+  }
+  const terminate = (): readonly unknown[] => {
+    if (terminationRequested) return terminationErrors
+    terminationRequested = true
+    disposeHandlers()
+    terminationErrors.push(...cleanupErrors)
+    if (!closed) {
+      try {
+        if (!nativeWindow.isDestroyed()) nativeWindow.destroy()
+      } catch (error: unknown) {
+        terminationErrors.push(error)
+      }
+    }
+    finalizeClosed()
+    return terminationErrors
+  }
 
   try {
+    const preventNavigation = (event: { preventDefault(): void }): void => {
+      event.preventDefault()
+    }
+    nativeWindow.webContents.on('will-navigate', preventNavigation)
+    nativeWindow.webContents.on('will-redirect', preventNavigation)
+    nativeWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    nativeWindow.once('closed', finalizeClosed)
     registerAction(dependencies, nativeWindow.webContents.id, STARTUP_RETRY_CHANNEL, () => actions.retry(), registeredChannels)
     registerAction(dependencies, nativeWindow.webContents.id, STARTUP_OPEN_LOGS_CHANNEL, () => actions.openLogs(), registeredChannels)
     registerAction(dependencies, nativeWindow.webContents.id, STARTUP_EXIT_CHANNEL, () => actions.exit(), registeredChannels)
     await nativeWindow.loadURL(htmlUrl.href)
   } catch (error: unknown) {
-    disposeHandlers()
-    if (!nativeWindow.isDestroyed()) nativeWindow.close()
-    throw error
+    const errors = terminate()
+    if (errors.length === 0) throw error
+    throw new AggregateError(
+      [error, ...errors],
+      'Startup window creation failed and cleanup also failed',
+      { cause: error },
+    )
   }
 
   return {
@@ -177,8 +217,9 @@ export async function createStartupWindow(
     },
     async handoffTo(window) {
       window.focus()
-      if (!closed && !nativeWindow.isDestroyed()) nativeWindow.close()
-      await closedPromise
+      const errors = terminate()
+      await closedPromise.catch((error: unknown) => { void error })
+      if (errors.length !== 0) throw new AggregateError([...errors], 'Startup window handoff failed')
     },
   }
 }

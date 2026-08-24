@@ -47,6 +47,7 @@
     "test:web:stress": "npm run build && vitest run --config vitest.web-stress.config.ts",
     "dev:desktop": "pnpm --filter @deepseek-ai/dsh-desktop start",
     "test:desktop": "pnpm --filter @deepseek-ai/dsh-desktop test",
+    "test:desktop:built": "pnpm --filter @deepseek-ai/dsh-desktop test:built",
     "test:desktop:e2e": "pnpm run build && pnpm --filter @deepseek-ai/dsh-desktop build && pnpm --filter @deepseek-ai/dsh-desktop test:e2e",
     "test:desktop:e2e:built": "pnpm --filter @deepseek-ai/dsh-desktop test:e2e",
     "test:desktop:e2e:ci": "pnpm --filter @deepseek-ai/dsh-desktop build && pnpm --filter @deepseek-ai/dsh-desktop test:e2e",

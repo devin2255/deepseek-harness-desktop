@@ -19,9 +19,10 @@
     "lib/*.css"
   ],
   "scripts": {
-    "build": "tsc -b && tsdown && node scripts/copy-startup-assets.mjs",
+    "build": "node scripts/clean-built-assets.mjs && tsc -b && tsdown && node scripts/copy-startup-assets.mjs && node scripts/verify-built-assets.mjs",
     "start": "electron .",
     "test": "vitest run --root ../.. apps/desktop/tests",
+    "test:built": "pnpm run build",
     "test:e2e": "vitest run --root ../.. --config vitest.desktop-e2e.config.ts",
     "typecheck": "tsc -p tsconfig.test.json --noEmit"
   },

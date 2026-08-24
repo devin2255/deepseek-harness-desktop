@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { DesktopStartupFailure, DesktopStartupState } from '../src/startup-state.ts'
@@ -113,18 +113,68 @@ describe('createStartupWindow', () => {
     const handoff = startup.handoffTo(desktop)
     await handoff
 
-    expect(fixture.steps.slice(-3)).toEqual(['desktop-focus', 'startup-close', 'startup-closed'])
+    expect(fixture.steps.slice(-3)).toEqual(['desktop-focus', 'startup-destroy', 'startup-closed'])
+  })
+
+  it('uses non-cancelable destruction so handoff cannot wait forever on a canceled close', async () => {
+    const fixture = startupFixture(undefined, { cancelClose: true })
+    const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
+    const desktop = {
+      focus: vi.fn(() => fixture.steps.push('desktop-focus')),
+      isMinimized: () => false,
+      onClosed: () => () => {},
+      restore: vi.fn(),
+    }
+
+    const handoff = startup.handoffTo(desktop)
+    const destroyedBeforeRelease = fixture.destroyed()
+    fixture.emitClosed()
+    await handoff
+
+    expect(destroyedBeforeRelease).toBe(true)
+    expect(fixture.steps).toContain('startup-destroy')
+  })
+
+  it('destroys after a failed load, disposes every handler once, and settles closure', async () => {
+    const loadFailure = new Error('load failed')
+    const fixture = startupFixture(undefined, { cancelClose: true, loadFailure })
+
+    await expect(createStartupWindow(fixture.actions, fixture.dependencies)).rejects.toBe(loadFailure)
+
+    expect(fixture.destroyed()).toBe(true)
+    expect(fixture.closedEmissions()).toBe(1)
+    expect(fixture.removedChannels).toEqual([
+      'dsh-startup:retry',
+      'dsh-startup:open-logs',
+      'dsh-startup:exit',
+    ])
+  })
+
+  it('aggregates load, handler cleanup, and destruction failures without repeating cleanup', async () => {
+    const loadFailure = new Error('load failed')
+    const cleanupFailure = new Error('cleanup failed')
+    const destroyFailure = new Error('destroy failed')
+    const fixture = startupFixture(undefined, {
+      destroyFailure,
+      loadFailure,
+      removeHandlerFailure: cleanupFailure,
+    })
+
+    const rejection = await createStartupWindow(fixture.actions, fixture.dependencies)
+      .catch((error: unknown) => error)
+
+    expect(rejection).toBeInstanceOf(AggregateError)
+    expect((rejection as AggregateError).errors).toEqual([loadFailure, cleanupFailure, destroyFailure])
+    expect(fixture.removedChannels).toEqual([
+      'dsh-startup:retry',
+      'dsh-startup:open-logs',
+      'dsh-startup:exit',
+    ])
+    expect(fixture.closedEmissions()).toBe(1)
   })
 })
 
 describe('startup assets', () => {
-  it('builds the real CommonJS preload and local HTML assets', async () => {
-    const lib = fileURLToPath(new URL('../lib/', import.meta.url))
-    await expect(access(`${lib}startup-preload.cjs`)).resolves.toBeUndefined()
-    await expect(access(`${lib}startup.html`)).resolves.toBeUndefined()
-    await expect(access(`${lib}startup.css`)).resolves.toBeUndefined()
-  })
-
   it('uses a restrictive CSP and no remote or inline script resources', async () => {
     const html = await readFile(fileURLToPath(new URL('../src/startup.html', import.meta.url)), 'utf8')
     expect(html).toContain('DeepSeek Harness')
@@ -142,10 +192,23 @@ describe('startup assets', () => {
 
 interface FakeIpcEvent { readonly sender: { readonly id: number } }
 
-function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
+interface StartupFixtureOptions {
+  readonly cancelClose?: boolean
+  readonly destroyFailure?: Error
+  readonly loadFailure?: Error
+  readonly removeHandlerFailure?: Error
+}
+
+function startupFixture(
+  htmlUrl = new URL('file:///C:/bundle/startup.html'),
+  fixtureOptions: StartupFixtureOptions = {},
+): {
   readonly actions: StartupWindowActions & { readonly retry: ReturnType<typeof vi.fn> }
   readonly close: () => void
+  readonly closedEmissions: () => number
   readonly dependencies: StartupWindowDependencies
+  readonly destroyed: () => boolean
+  readonly emitClosed: () => void
   readonly invoke: (channel: string, senderId: number) => Promise<void>
   readonly loaded: () => string
   readonly navigate: () => (event: { preventDefault(): void; readonly url: string }) => void
@@ -166,6 +229,17 @@ function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
   let redirect: ((event: { preventDefault(): void; readonly url: string }) => void) | undefined
   let open: (() => { readonly action: 'deny' }) | undefined
   let closeListener: (() => void) | undefined
+  let destroyed = false
+  let didEmitClosed = false
+  let didFailRemoval = false
+  let closedEmissions = 0
+  const emitClosed = (): void => {
+    if (didEmitClosed) return
+    didEmitClosed = true
+    closedEmissions += 1
+    steps.push('startup-closed')
+    closeListener?.()
+  }
   const actions = {
     retry: vi.fn(() => Promise.resolve()),
     openLogs: vi.fn(() => Promise.resolve()),
@@ -174,9 +248,9 @@ function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
   return {
     actions,
     close() {
-      steps.push('startup-closed')
-      closeListener?.()
+      emitClosed()
     },
+    closedEmissions: () => closedEmissions,
     dependencies: {
       createWindow(value) {
         steps.push('create')
@@ -184,11 +258,19 @@ function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
         return {
           close() {
             steps.push('startup-close')
-            steps.push('startup-closed')
-            closeListener?.()
+            if (fixtureOptions.cancelClose !== true) emitClosed()
+          },
+          destroy() {
+            steps.push('startup-destroy')
+            if (fixtureOptions.destroyFailure !== undefined) {
+              emitClosed()
+              throw fixtureOptions.destroyFailure
+            }
+            destroyed = true
+            emitClosed()
           },
           focus() { steps.push('startup-focus') },
-          isDestroyed: () => false,
+          isDestroyed: () => destroyed,
           isMinimized: () => false,
           restore() { steps.push('startup-restore') },
           once(_event, listener) { closeListener = listener },
@@ -201,7 +283,12 @@ function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
             send(channel, state) { sent.push([channel, state]) },
             setWindowOpenHandler(handler) { open = () => handler({}) },
           },
-          loadURL(url) { loaded = url; return Promise.resolve() },
+          loadURL(url) {
+            loaded = url
+            return fixtureOptions.loadFailure === undefined
+              ? Promise.resolve()
+              : Promise.reject(fixtureOptions.loadFailure)
+          },
         }
       },
       htmlUrl: () => htmlUrl,
@@ -213,6 +300,10 @@ function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
         removeHandler(channel) {
           removedChannels.push(channel)
           handlers.delete(channel)
+          if (fixtureOptions.removeHandlerFailure !== undefined && !didFailRemoval) {
+            didFailRemoval = true
+            throw fixtureOptions.removeHandlerFailure
+          }
         },
       },
       preloadPath: () => 'C:\\bundle\\startup-preload.cjs',
@@ -222,6 +313,8 @@ function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
       if (handler === undefined) throw new Error(`No handler: ${channel}`)
       await handler({ sender: { id: senderId } })
     },
+    destroyed: () => destroyed,
+    emitClosed,
     loaded() {
       if (loaded === undefined) throw new Error('Expected loaded URL')
       return loaded
