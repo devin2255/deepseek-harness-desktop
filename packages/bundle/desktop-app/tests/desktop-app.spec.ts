@@ -2,7 +2,7 @@
 
 import { once } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import type { IncomingMessage } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,6 +18,7 @@ import * as DesktopApp from '../src/index.ts'
 import { apply, CAPABILITY_ENV, inject } from '../src/index.ts'
 
 let environmentBeforeTest: string | undefined
+let versionEnvironmentBeforeTest: string | undefined
 let compositionRoot: string | undefined
 let composition: Context | undefined
 const contexts = new Set<Context>()
@@ -29,7 +30,11 @@ interface DesktopBundleManifest {
   dsh?: { bundle?: { patch?: unknown } }
 }
 
-beforeEach(() => { environmentBeforeTest = process.env[CAPABILITY_ENV] })
+beforeEach(() => {
+  environmentBeforeTest = process.env[CAPABILITY_ENV]
+  versionEnvironmentBeforeTest = process.env.DSH_DESKTOP_APP_VERSION
+  process.env.DSH_DESKTOP_APP_VERSION = '0.1.0-rc.7'
+})
 
 afterEach(async () => {
   const activeContexts = [...contexts]
@@ -46,6 +51,8 @@ afterEach(async () => {
     } finally {
       if (environmentBeforeTest === undefined) delete process.env.DSH_DESKTOP_CAPABILITY
       else process.env[CAPABILITY_ENV] = environmentBeforeTest
+      if (versionEnvironmentBeforeTest === undefined) delete process.env.DSH_DESKTOP_APP_VERSION
+      else process.env.DSH_DESKTOP_APP_VERSION = versionEnvironmentBeforeTest
     }
   }
 })
@@ -56,6 +63,26 @@ function request(authorization: string | undefined): IncomingMessage {
     headers: authorization === undefined ? {} : { authorization },
     headersDistinct: authorization === undefined ? {} : { authorization: [authorization] },
   } as IncomingMessage
+}
+
+/** Invoke a registered route with a response recorder. */
+async function invokeRoute(
+  route: Parameters<WebServer['register']>[0],
+  method: string,
+): Promise<{ status: number; headers: Record<string, string>; body: string }> {
+  let status = 200
+  let headers: Record<string, string> = {}
+  let body = ''
+  const response = {
+    writeHead(nextStatus: number, nextHeaders: Record<string, string> = {}) {
+      status = nextStatus
+      headers = nextHeaders
+      return response
+    },
+    end(chunk?: string) { body += chunk ?? '' },
+  } as unknown as ServerResponse
+  await route.handler({ method } as IncomingMessage, response)
+  return { status, headers, body }
 }
 
 /** Mount the plugin around a fake Web server and retain its registered guard. */
@@ -116,6 +143,7 @@ async function bootDesktopComposition(): Promise<Context> {
 
   composition = new Context()
   composition.baseUrl = pathToFileURL(compositionRoot).href + '/'
+  composition.provide('apiProxy', {})
   await composition.plugin(Loader)
   composition.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
@@ -139,7 +167,11 @@ async function bootDesktopComposition(): Promise<Context> {
 }
 
 /** Send raw HTTP header lines and return the server's status line. */
-async function rawRequest(port: number, authorization: readonly string[]): Promise<number> {
+async function rawRequest(
+  port: number,
+  authorization: readonly string[],
+  path = '/ready',
+): Promise<number> {
   const socket = connect(port, '127.0.0.1')
   socket.on('error', () => {})
   await once(socket, 'connect')
@@ -147,7 +179,7 @@ async function rawRequest(port: number, authorization: readonly string[]): Promi
   const chunks: Buffer[] = []
   socket.on('data', (chunk) => { chunks.push(Buffer.from(chunk)) })
   socket.write([
-    'GET /ready HTTP/1.1',
+    `GET ${path} HTTP/1.1`,
     `Host: 127.0.0.1:${String(port)}`,
     'Connection: close',
     ...authorization.map(value => `Authorization: ${value}`),
@@ -217,6 +249,16 @@ describe('desktop launch capability', () => {
     })
 
     expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(200)
+    expect(await rawRequest(
+      loaded.webServer.port,
+      ['Bearer launch-secret'],
+      '/.well-known/deepseek-harness-desktop/readiness',
+    )).toBe(200)
+    expect(await rawRequest(
+      loaded.webServer.port,
+      [],
+      '/.well-known/deepseek-harness-desktop/readiness',
+    )).toBe(401)
     expect(await rawRequest(loaded.webServer.port, [])).toBe(401)
     expect(await rawRequest(loaded.webServer.port, ['Basic launch-secret'])).toBe(401)
     expect(await rawRequest(loaded.webServer.port, ['Bearer other'])).toBe(401)
@@ -231,6 +273,45 @@ describe('desktop launch capability', () => {
     expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(401)
   })
 
+  it('registers an exact authenticated readiness route only while the API service is mounted', async () => {
+    process.env[CAPABILITY_ENV] = 'launch-secret'
+    const routes = new Map<string, Parameters<WebServer['register']>[0]>()
+    const ctx = new Context()
+    contexts.add(ctx)
+    ctx.provide('webServer', {
+      registerGuard: () => () => {},
+      register(route: Parameters<WebServer['register']>[0]) {
+        routes.set(route.path, route)
+        return () => { routes.delete(route.path) }
+      },
+    } as Pick<WebServer, 'register' | 'registerGuard'> as WebServer)
+    await ctx.plugin({ inject: [...inject], apply })
+    const path = '/.well-known/deepseek-harness-desktop/readiness'
+    expect(routes.has(path)).toBe(false)
+    const apiFiber = await ctx.plugin({
+      apply(apiCtx: Context) { apiCtx.provide('apiProxy', {}) },
+    })
+    const route = routes.get(path)
+    expect(route).toMatchObject({ kind: 'exact', path })
+    if (route === undefined) throw new Error('desktop readiness route was not registered')
+
+    const response = await invokeRoute(route, 'GET')
+    expect(response).toMatchObject({
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        product: 'deepseek-harness-desktop',
+        version: '0.1.0-rc.7',
+        capabilities: ['host.describe', 'session.list'],
+      }),
+    })
+    expect(await invokeRoute(route, 'POST')).toMatchObject({ status: 405 })
+
+    await apiFiber.dispose()
+    expect(routes.has(path)).toBe(false)
+    await disposeContext(ctx)
+  })
+
   it.each([undefined, '', ' ', 'launch+secret', 'launch/secret', 'launch=secret', '秘密'])('fails loud and removes an absent, empty, or non-base64url launch capability', async (capability) => {
     if (capability === undefined) delete process.env.DSH_DESKTOP_CAPABILITY
     else process.env[CAPABILITY_ENV] = capability
@@ -241,6 +322,21 @@ describe('desktop launch capability', () => {
     await expect(ctx.plugin({ inject: [...inject], apply }))
       .rejects.toThrow('desktop-app: DSH_DESKTOP_CAPABILITY must contain a per-launch capability')
     expect(process.env[CAPABILITY_ENV]).toBeUndefined()
+    await disposeContext(ctx)
+  })
+
+  it.each([undefined, '', 'x'.repeat(129)])('fails loud and removes an absent, empty, or oversized desktop version', async (version) => {
+    process.env[CAPABILITY_ENV] = 'launch-secret'
+    if (version === undefined) delete process.env.DSH_DESKTOP_APP_VERSION
+    else process.env.DSH_DESKTOP_APP_VERSION = version
+    const ctx = new Context()
+    contexts.add(ctx)
+    ctx.provide('webServer', { registerGuard: () => () => {} } as Pick<WebServer, 'registerGuard'> as WebServer)
+
+    await expect(ctx.plugin({ inject: [...inject], apply }))
+      .rejects.toThrow('desktop-app: DSH_DESKTOP_APP_VERSION must contain the desktop application version')
+    expect(process.env[CAPABILITY_ENV]).toBeUndefined()
+    expect(process.env.DSH_DESKTOP_APP_VERSION).toBeUndefined()
     await disposeContext(ctx)
   })
 

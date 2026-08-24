@@ -17,6 +17,7 @@ import {
   type HarnessStartOptions,
   type HarnessSupervisorDependencies,
 } from '../src/harness-supervisor.ts'
+import type { DesktopReadinessProbeOptions } from '../src/readiness-probe.ts'
 
 type TestHarnessDependencies = HarnessLaunchSpec & HarnessSupervisorDependencies
 
@@ -48,8 +49,9 @@ function harness(overrides: Partial<TestHarnessDependencies> = {}): {
     cliEntry: '/fixture/dsh/lib/bin.js',
     randomBytes: size => Buffer.alloc(size, 0xab),
     cwd: '/fixture/cwd',
-    environment: { FROM_PARENT: 'kept' },
+    environment: { FROM_PARENT: 'kept', DSH_DESKTOP_APP_VERSION: '0.1.0-rc.7' },
     lstat: () => ({ isFile: () => true, isSymbolicLink: () => false }),
+    probeReadiness: async () => ({ version: '0.1.0-rc.7' }),
     shutdownTimeoutMs: 10,
     startupTimeoutMs: 10,
     ...overrides,
@@ -84,6 +86,7 @@ describe('startHarness', () => {
       cwd: '/fixture/cwd',
       env: {
         FROM_PARENT: 'kept',
+        DSH_DESKTOP_APP_VERSION: '0.1.0-rc.7',
         DSH_DESKTOP_CAPABILITY: 'q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s',
       },
       execArgv: ['--expose-internals'],
@@ -91,7 +94,10 @@ describe('startHarness', () => {
       stdio: 'pipe',
     })
     expect(fork).toHaveBeenCalledTimes(1)
-    expect(dependencies.environment).toEqual({ FROM_PARENT: 'kept' })
+    expect(dependencies.environment).toEqual({
+      FROM_PARENT: 'kept',
+      DSH_DESKTOP_APP_VERSION: '0.1.0-rc.7',
+    })
 
     child.stdout.write('booting\ndsh web: http://127.0.0.1:4312\n')
     const handle = await start
@@ -117,6 +123,116 @@ describe('startHarness', () => {
     child.stdout.write('1:4301 (LAN: http://192.168.1.2:4301)\n')
 
     await expect(start).resolves.toMatchObject({ endpoint: new URL('http://127.0.0.1:4301') })
+  })
+
+  it('resolves only after probing the discovered endpoint with the attempt signal', async () => {
+    const controller = new AbortController()
+    let finishProbe: (() => void) | undefined
+    const probeReadiness = vi.fn((options: DesktopReadinessProbeOptions) => new Promise<{ version: string }>((resolve) => {
+      expect(options).toMatchObject({
+        endpoint: new URL('http://127.0.0.1:4313'),
+        expectedVersion: '0.1.0-rc.7',
+        requiredCapabilities: ['host.describe', 'session.list'],
+      })
+      expect(options.signal.aborted).toBe(false)
+      expect(options.capability).toHaveLength(43)
+      finishProbe = () => { resolve({ version: '0.1.0-rc.7' }) }
+    }))
+    const { child, dependencies } = harness({
+      environment: { DSH_DESKTOP_APP_VERSION: '0.1.0-rc.7' },
+      probeReadiness,
+    })
+    const start = startHarness(dependencies, { signal: controller.signal })
+    let settled = false
+    void start.finally(() => { settled = true })
+
+    child.stdout.write('dsh web: http://127.0.0.1:4313\n')
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(probeReadiness).toHaveBeenCalledTimes(1)
+
+    finishProbe?.()
+    await expect(start).resolves.toMatchObject({ endpoint: new URL('http://127.0.0.1:4313') })
+  })
+
+  it('kills the child and waits for exit when authenticated probing fails', async () => {
+    const { child, dependencies } = harness({
+      probeReadiness: async () => { throw new Error('probe rejected') },
+      shutdownTimeoutMs: 1_000,
+    })
+    const start = startHarness(dependencies)
+    const error = rejectedError(start)
+
+    child.stdout.write('dsh web: http://127.0.0.1:4314\n')
+    await vi.waitFor(() => { expect(child.kill).toHaveBeenCalledTimes(1) })
+    child.exit()
+
+    await expect(error).resolves.toMatchObject({ message: 'probe rejected' })
+    expect(child.listenerCount('exit')).toBe(0)
+  })
+
+  it('aborts an in-flight readiness request when the child exits', async () => {
+    let probeSignal: AbortSignal | undefined
+    const { child, dependencies } = harness({
+      probeReadiness: options => new Promise(() => { probeSignal = options.signal }),
+    })
+    const error = rejectedError(startHarness(dependencies))
+    child.stdout.write('dsh web: http://127.0.0.1:4316\n')
+    await vi.waitFor(() => { expect(probeSignal).toBeDefined() })
+
+    child.exit(23)
+
+    const actual = await error
+    expect(actual.message).toContain('exit code 23')
+    expect(probeSignal?.aborted).toBe(true)
+  })
+
+  it('propagates caller cancellation into an in-flight readiness request', async () => {
+    const controller = new AbortController()
+    let probeSignal: AbortSignal | undefined
+    const { child, dependencies } = harness({
+      probeReadiness: options => new Promise((_resolve, reject) => {
+        probeSignal = options.signal
+        options.signal.addEventListener('abort', () => { reject(new Error('probe aborted')) }, { once: true })
+      }),
+    })
+    const error = rejectedError(startHarness(dependencies, { signal: controller.signal }))
+    child.stdout.write('dsh web: http://127.0.0.1:4317\n')
+    await vi.waitFor(() => { expect(probeSignal).toBeDefined() })
+
+    controller.abort()
+    expect(probeSignal?.aborted).toBe(true)
+    child.exit()
+
+    await expect(error).resolves.toMatchObject({ name: 'AbortError' })
+    expect(child.kill).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the original startup deadline while probing instead of starting a second timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      let probeSignal: AbortSignal | undefined
+      const { child, dependencies } = harness({
+        startupTimeoutMs: 10,
+        probeReadiness: options => new Promise((_resolve, reject) => {
+          probeSignal = options.signal
+          options.signal.addEventListener('abort', () => { reject(new Error('probe aborted')) }, { once: true })
+        }),
+      })
+      const error = rejectedError(startHarness(dependencies))
+      await vi.advanceTimersByTimeAsync(8)
+      child.stdout.write('dsh web: http://127.0.0.1:4315\n')
+      await vi.advanceTimersByTimeAsync(2)
+
+      expect(probeSignal?.aborted).toBe(true)
+      expect(child.kill).toHaveBeenCalledTimes(1)
+      child.exit()
+      const actual = await error
+      expect(actual).toBeInstanceOf(HarnessStartupTimeoutError)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rejects an early exit with a bounded stderr tail and never exposes the capability', async () => {

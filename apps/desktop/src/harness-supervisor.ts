@@ -3,6 +3,7 @@
 import { randomBytes as nodeRandomBytes } from 'node:crypto'
 import { lstatSync } from 'node:fs'
 import { utilityProcess, type ForkOptions } from 'electron'
+import { probeDesktopReadiness, type DesktopReadinessProbeOptions } from './readiness-probe.ts'
 import { createReadinessParser } from './readiness.ts'
 import { RedactedStderrTail } from './sensitive-text-redactor.ts'
 
@@ -10,6 +11,7 @@ const CAPABILITY_BYTES = 32
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000
 const SENSITIVE_ENVIRONMENT_KEY = /KEY|SECRET|TOKEN|PASSWORD/iu
+const REQUIRED_DESKTOP_CAPABILITIES = ['host.describe', 'session.list'] as const
 
 /** Explicit Harness process inputs resolved by desktop composition. */
 export interface HarnessLaunchSpec {
@@ -59,6 +61,8 @@ export interface HarnessSupervisorDependencies {
   lstat(path: string): HarnessCliFileStatus
   /** Generates the per-process capability. */
   randomBytes(size: number): Buffer
+  /** Validates the authenticated desktop runtime identity after endpoint discovery. */
+  probeReadiness(options: DesktopReadinessProbeOptions): Promise<{ version: string }>
   /** Maximum time to wait for an exit event after requesting termination. */
   shutdownTimeoutMs: number
   /** Maximum time to wait for the canonical readiness line. */
@@ -131,7 +135,7 @@ export function startHarness(
   if (isSignalAborted(options.signal)) return Promise.reject(new HarnessStartupAbortedError())
   const dependencies = resolveDependencies(overrides)
   try {
-    assertOrdinaryCliEntry(launchSpec.cliEntry, dependencies.lstat)
+    assertOrdinaryCliEntry(launchSpec.cliEntry, path => dependencies.lstat(path))
   } catch (error: unknown) {
     return Promise.reject(asError(error, launchSpec.cliEntry))
   }
@@ -159,6 +163,7 @@ export function startHarness(
   let startupFailure: Error | undefined
   let startupShutdownTimer: ReturnType<typeof setTimeout> | undefined
   let killRequested = false
+  const readinessController = new AbortController()
   const stderrTail = new RedactedStderrTail(redactionPatterns(capability, launchSpec.environment))
   const startupPromise = new Promise((resolve: (handle: HarnessHandle) => void, reject: (reason: Error) => void) => {
     completeStartup = resolve
@@ -195,6 +200,7 @@ export function startHarness(
   const failStartup = (error: Error): void => {
     if (startupSettled) return
     startupSettled = true
+    readinessController.abort()
     clearStartupControls()
     removeOutputListeners()
     child.off('exit', onStartupExit)
@@ -204,6 +210,7 @@ export function startHarness(
   const beginStartupFailure = (error: Error): void => {
     if (startupSettled || startupFailure !== undefined) return
     startupFailure = error
+    readinessController.abort()
     clearTimeout(startupTimer)
     options.signal?.removeEventListener('abort', onAbort)
     removeOutputListeners()
@@ -247,7 +254,18 @@ export function startHarness(
   }
 
   const parser = createReadinessParser((url) => {
-    finishStartup({ endpoint: new URL(url), capability, stop })
+    const endpoint = new URL(url)
+    void dependencies.probeReadiness({
+      endpoint,
+      capability,
+      expectedVersion: launchSpec.environment.DSH_DESKTOP_APP_VERSION ?? '',
+      requiredCapabilities: REQUIRED_DESKTOP_CAPABILITIES,
+      signal: readinessController.signal,
+    }).then(() => {
+      finishStartup({ endpoint, capability, stop })
+    }, (error: unknown) => {
+      beginStartupFailure(error instanceof Error ? error : new Error('Desktop readiness validation failed'))
+    })
   })
   const stdoutDecoder = new TextDecoder()
   const onStdout = (chunk: unknown): void => {
@@ -257,6 +275,7 @@ export function startHarness(
     stderrTail.write(chunk)
   }
   const onAbort = (): void => {
+    readinessController.abort()
     beginStartupFailure(new HarnessStartupAbortedError())
   }
 
@@ -279,6 +298,7 @@ function resolveDependencies(overrides: Partial<HarnessSupervisorDependencies>):
     fork: (entry, args, options) => utilityProcess.fork(entry, args, options),
     lstat: path => lstatSync(path),
     randomBytes: nodeRandomBytes,
+    probeReadiness: probeDesktopReadiness,
     shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
     startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
     ...overrides,
