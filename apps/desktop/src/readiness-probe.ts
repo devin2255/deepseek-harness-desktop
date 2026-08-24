@@ -129,8 +129,11 @@ function parseReadiness(body: Uint8Array): DesktopReadinessResponse {
     throw new Error('Desktop readiness returned malformed JSON')
   }
   if (!isRecord(value)
+    || !Object.hasOwn(value, 'product')
     || typeof value.product !== 'string'
+    || !Object.hasOwn(value, 'version')
     || typeof value.version !== 'string'
+    || !Object.hasOwn(value, 'capabilities')
     || !Array.isArray(value.capabilities)
     || value.capabilities.some(capability => typeof capability !== 'string')) {
     throw new Error('Desktop readiness returned malformed JSON fields')

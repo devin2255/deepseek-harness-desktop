@@ -116,14 +116,18 @@ export class HarnessStartupAbortedError extends Error {
 }
 
 /**
- * Fork the desktop profile and wait for its canonical loopback readiness line.
+ * Fork the desktop profile and validate its authenticated loopback runtime.
  * The caller must invoke this only after Electron's `app.whenReady()` resolves,
  * because Electron permits `utilityProcess.fork()` only after app readiness.
  * The entry must be the trusted packaged Harness CLI: its utility child alone receives
  * the Node-internals flag required by the Loader fallback and must not run untrusted code.
- * Rejects for an early child exit, startup timeout, caller abort, or shutdown timeout.
+ * The canonical stdout URL only discovers the endpoint. Startup resolves after an
+ * authenticated probe confirms the desktop product identity, expected version, and required API
+ * capabilities. Probe rejection, caller cancellation, the original startup deadline, or
+ * child exit rejects startup and requests child termination; rejection waits for child exit
+ * or reports a shutdown timeout when cleanup cannot reach it.
  * @param launchSpec - Explicit CLI path, working directory, and sanitized environment.
- * @param options - Caller cancellation accepted until readiness; timeout and cancellation kill the child and wait for exit.
+ * @param options - Caller cancellation accepted through authenticated readiness.
  * @param overrides - Optional process, filesystem, randomness, and timeout operations replaced by focused tests.
  * @returns The ready loopback endpoint and an idempotent asynchronous shutdown handle.
  */

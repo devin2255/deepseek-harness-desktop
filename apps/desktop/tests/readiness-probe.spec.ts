@@ -68,6 +68,8 @@ describe('probeDesktopReadiness', () => {
     ['wrong version', 200, 'application/json', jsonResponse({ version: '0.1.0-rc.6' })],
     ['missing capability', 200, 'application/json', jsonResponse({ capabilities: ['host.describe'] })],
     ['malformed JSON', 200, 'application/json', '{broken'],
+    ['null JSON value', 200, 'application/json', 'null'],
+    ['array JSON value', 200, 'application/json', '[]'],
   ])('rejects a %s without exposing request authority', async (_name, status, contentType, body) => {
     const url = await endpoint((_req, res) => {
       res.writeHead(status, { 'content-type': contentType })
@@ -87,6 +89,33 @@ describe('probeDesktopReadiness', () => {
     })
 
     await expect(probe(url)).rejects.toThrow('response exceeded')
+  })
+
+  it('rejects readiness fields inherited from Object.prototype', async () => {
+    const fields = ['product', 'version', 'capabilities'] as const
+    const originalDescriptors = new Map(fields.map(field => [
+      field,
+      Object.getOwnPropertyDescriptor(Object.prototype, field),
+    ]))
+    try {
+      Object.defineProperties(Object.prototype, {
+        product: { configurable: true, value: 'deepseek-harness-desktop' },
+        version: { configurable: true, value: VERSION },
+        capabilities: { configurable: true, value: REQUIRED },
+      })
+      const url = await endpoint((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end('{}')
+      })
+
+      await expect(probe(url)).rejects.toThrow('malformed JSON fields')
+    } finally {
+      for (const field of fields) {
+        const descriptor = originalDescriptors.get(field)
+        if (descriptor === undefined) Reflect.deleteProperty(Object.prototype, field)
+        else Object.defineProperty(Object.prototype, field, descriptor)
+      }
+    }
   })
 
   it('rejects caller abort without exposing the bearer capability', async () => {
