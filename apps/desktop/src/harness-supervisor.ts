@@ -1,7 +1,7 @@
 /** Starts and stops the desktop-scoped DeepSeek Harness utility process after Electron is ready. */
 
 import { randomBytes as nodeRandomBytes } from 'node:crypto'
-import { createRequire } from 'node:module'
+import { lstatSync } from 'node:fs'
 import { utilityProcess, type ForkOptions } from 'electron'
 import { createReadinessParser } from './readiness.ts'
 import { RedactedStderrTail } from './sensitive-text-redactor.ts'
@@ -10,7 +10,24 @@ const CAPABILITY_BYTES = 32
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000
 const SENSITIVE_ENVIRONMENT_KEY = /KEY|SECRET|TOKEN|PASSWORD/iu
-const dshRequire = createRequire(import.meta.url)
+
+/** Explicit Harness process inputs resolved by desktop composition. */
+export interface HarnessLaunchSpec {
+  /** Trusted CLI entry to execute. */
+  readonly cliEntry: string
+  /** Stable child working directory. */
+  readonly cwd: string
+  /** Sanitized environment copied for the child. */
+  readonly environment: NodeJS.ProcessEnv
+}
+
+/** File properties required to reject directories and link-shaped CLI entries. */
+export interface HarnessCliFileStatus {
+  /** Whether the entry is an ordinary file. */
+  isFile(): boolean
+  /** Whether the entry is a symbolic link or Windows junction. */
+  isSymbolicLink(): boolean
+}
 
 /** A process output stream used for the readiness signal and diagnostics. */
 export interface HarnessOutput {
@@ -38,14 +55,10 @@ export interface HarnessUtilityProcess {
 export interface HarnessSupervisorDependencies {
   /** Forks the desktop Harness process. Call only after Electron app readiness. */
   fork(entry: string, args: string[], options: ForkOptions): HarnessUtilityProcess
-  /** Resolves the installed Harness CLI entry. */
-  resolveCli(): string
+  /** Read file properties without following the final symbolic-link component. */
+  lstat(path: string): HarnessCliFileStatus
   /** Generates the per-process capability. */
   randomBytes(size: number): Buffer
-  /** Returns the working directory for the child process. */
-  cwd(): string
-  /** Parent environment copied before the capability is added. */
-  environment: NodeJS.ProcessEnv
   /** Maximum time to wait for an exit event after requesting termination. */
   shutdownTimeoutMs: number
   /** Maximum time to wait for the canonical readiness line. */
@@ -105,20 +118,27 @@ export class HarnessStartupAbortedError extends Error {
  * The entry must be the trusted packaged Harness CLI: its utility child alone receives
  * the Node-internals flag required by the Loader fallback and must not run untrusted code.
  * Rejects for an early child exit, startup timeout, caller abort, or shutdown timeout.
- * @param overrides - Optional production dependencies replaced by focused tests. Fork errors propagate to the caller.
+ * @param launchSpec - Explicit CLI path, working directory, and sanitized environment.
  * @param options - Caller cancellation accepted until readiness; timeout and cancellation kill the child and wait for exit.
+ * @param overrides - Optional process, filesystem, randomness, and timeout operations replaced by focused tests.
  * @returns The ready loopback endpoint and an idempotent asynchronous shutdown handle.
  */
 export function startHarness(
-  overrides: Partial<HarnessSupervisorDependencies> = {},
+  launchSpec: HarnessLaunchSpec,
   options: HarnessStartOptions = {},
+  overrides: Partial<HarnessSupervisorDependencies> = {},
 ): Promise<HarnessHandle> {
   if (isSignalAborted(options.signal)) return Promise.reject(new HarnessStartupAbortedError())
   const dependencies = resolveDependencies(overrides)
+  try {
+    assertOrdinaryCliEntry(launchSpec.cliEntry, dependencies.lstat)
+  } catch (error: unknown) {
+    return Promise.reject(asError(error, launchSpec.cliEntry))
+  }
   const capability = dependencies.randomBytes(CAPABILITY_BYTES).toString('base64url')
-  const child = dependencies.fork(dependencies.resolveCli(), ['--profile', 'desktop', '--port', '0'], {
-    cwd: dependencies.cwd(),
-    env: { ...dependencies.environment, DSH_DESKTOP_CAPABILITY: capability },
+  const child = dependencies.fork(launchSpec.cliEntry, ['--profile', 'desktop', '--port', '0'], {
+    cwd: launchSpec.cwd,
+    env: { ...launchSpec.environment, DSH_DESKTOP_CAPABILITY: capability },
     // Electron's ABI cannot load the host-Node `node-addon-require-builtin` binary used by
     // `@deepseek-ai/loader` for `ModuleLoader.fromInternal()`. Scope the pure Node-internals
     // fallback to this trusted Harness utility child instead of exposing it to other children.
@@ -139,7 +159,7 @@ export function startHarness(
   let startupFailure: Error | undefined
   let startupShutdownTimer: ReturnType<typeof setTimeout> | undefined
   let killRequested = false
-  const stderrTail = new RedactedStderrTail(redactionPatterns(capability, dependencies.environment))
+  const stderrTail = new RedactedStderrTail(redactionPatterns(capability, launchSpec.environment))
   const startupPromise = new Promise((resolve: (handle: HarnessHandle) => void, reject: (reason: Error) => void) => {
     completeStartup = resolve
     rejectStartup = reject
@@ -257,14 +277,26 @@ export function startHarness(
 function resolveDependencies(overrides: Partial<HarnessSupervisorDependencies>): HarnessSupervisorDependencies {
   return {
     fork: (entry, args, options) => utilityProcess.fork(entry, args, options),
-    resolveCli: () => dshRequire.resolve('@deepseek-ai/dsh/lib/bin.js'),
+    lstat: path => lstatSync(path),
     randomBytes: nodeRandomBytes,
-    cwd: () => process.cwd(),
-    environment: process.env,
     shutdownTimeoutMs: DEFAULT_SHUTDOWN_TIMEOUT_MS,
     startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
     ...overrides,
   }
+}
+
+/** Reject CLI entries that could redirect execution through a directory or link-shaped path. */
+function assertOrdinaryCliEntry(entry: string, lstat: (path: string) => HarnessCliFileStatus): void {
+  const status = lstat(entry)
+  if (!status.isFile() || status.isSymbolicLink()) {
+    throw new Error(`Harness CLI entry is not an ordinary file: ${entry}`)
+  }
+}
+
+/** Preserve filesystem failures while ensuring the rejected message names the CLI entry. */
+function asError(error: unknown, entry: string): Error {
+  if (error instanceof Error && error.message.includes(entry)) return error
+  return new Error(`Cannot inspect Harness CLI entry: ${entry}`, { cause: error })
 }
 
 /** Read cancellation state through a call so the abort event race remains observable after startup setup. */

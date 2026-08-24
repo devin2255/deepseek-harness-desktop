@@ -6,7 +6,7 @@ import {
   type DesktopMainDependencies,
   type DesktopQuitEvent,
 } from '../src/main-lifecycle.ts'
-import { HarnessShutdownTimeoutError, type HarnessHandle } from '../src/harness-supervisor.ts'
+import { HarnessShutdownTimeoutError, type HarnessHandle, type HarnessLaunchSpec } from '../src/harness-supervisor.ts'
 import type { DesktopWindow } from '../src/window.ts'
 
 function deferred<T>(): {
@@ -25,6 +25,9 @@ function deferred<T>(): {
 
 class FakeApp extends EventEmitter implements DesktopApp {
   readonly calls: string[] = []
+  readonly setAppUserModelId = vi.fn(() => {
+    this.calls.push('setAppUserModelId')
+  })
   readonly enableSandbox = vi.fn(() => {
     this.calls.push('enableSandbox')
   })
@@ -87,8 +90,14 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const startHarness = vi.fn(async () => harness)
   const createWindow = vi.fn(async () => window)
   const reportFailure = vi.fn()
+  const launchSpec: HarnessLaunchSpec = {
+    cliEntry: 'C:\\Program Files\\DeepSeek Harness\\resources\\app\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+    cwd: 'C:\\Users\\tester',
+    environment: { DSH_HOME: 'C:\\Users\\tester\\AppData\\Roaming\\DeepSeek Harness\\Harness' },
+  }
   const dependencies: DesktopMainDependencies = {
     app,
+    launchSpec,
     platform: 'win32',
     startHarness,
     createWindow,
@@ -121,7 +130,7 @@ async function flushLifecycle(): Promise<void> {
 }
 
 describe('startDesktopMain', () => {
-  it('enables the Chromium sandbox before readiness and starts one Harness before one window', async () => {
+  it('sets the stable app ID and enables the Chromium sandbox before readiness, Harness, and window creation', async () => {
     const ready = deferred<undefined>()
     const events: string[] = []
     const { app, dependencies, harness, createWindow, startHarness } = fixture({
@@ -142,7 +151,8 @@ describe('startDesktopMain', () => {
 
     const desktop = startDesktopMain(dependencies)
 
-    expect(app.calls.slice(0, 2)).toEqual(['enableSandbox', 'requestSingleInstanceLock'])
+    expect(app.calls.slice(0, 3)).toEqual(['setAppUserModelId', 'enableSandbox', 'requestSingleInstanceLock'])
+    expect(app.setAppUserModelId).toHaveBeenCalledWith('ai.deepseek.harness.desktop')
     expect(events).toEqual(['ready-wait'])
     expect(startHarness).not.toHaveBeenCalled()
 
@@ -151,6 +161,7 @@ describe('startDesktopMain', () => {
 
     expect(events).toEqual(['ready-wait', 'ready', 'harness', 'window'])
     expect(startHarness).toHaveBeenCalledTimes(1)
+    expect(startHarness).toHaveBeenCalledWith(dependencies.launchSpec, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(createWindow).toHaveBeenCalledWith(harness.endpoint, harness.capability)
   })
 
@@ -187,7 +198,7 @@ describe('startDesktopMain', () => {
     const { app, dependencies, createWindow, harness, stop } = fixture({ startHarness: vi.fn(() => started.promise) })
     const desktop = startDesktopMain(dependencies)
     await flushLifecycle()
-    const signal = vi.mocked(dependencies.startHarness).mock.calls[0]?.[0].signal
+    const signal = vi.mocked(dependencies.startHarness).mock.calls[0]?.[1].signal
 
     const first = app.emitBeforeQuit()
     const second = app.emitBeforeQuit()
@@ -243,7 +254,7 @@ describe('startDesktopMain', () => {
   it('reports a child-that-never-exits abort rejection once and still latches quit', async () => {
     const failure = new HarnessShutdownTimeoutError(10)
     const { app, dependencies, reportFailure } = fixture({
-      startHarness: vi.fn<DesktopMainDependencies['startHarness']>(({ signal }) => new Promise<HarnessHandle>((_resolve, reject) => {
+      startHarness: vi.fn<DesktopMainDependencies['startHarness']>((_launchSpec, { signal }) => new Promise<HarnessHandle>((_resolve, reject) => {
         signal?.addEventListener('abort', () => { reject(failure) }, { once: true })
       })),
     })

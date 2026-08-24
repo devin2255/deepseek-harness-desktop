@@ -1,7 +1,9 @@
 /** Coordinates Electron application events with one supervised Harness and one desktop window. */
 
-import type { HarnessHandle, HarnessStartOptions } from './harness-supervisor.ts'
+import type { HarnessHandle, HarnessLaunchSpec, HarnessStartOptions } from './harness-supervisor.ts'
 import type { DesktopWindow } from './window.ts'
+
+const DESKTOP_APP_USER_MODEL_ID = 'ai.deepseek.harness.desktop'
 
 /** The Electron quit event operation used to defer exit until asynchronous cleanup settles. */
 export interface DesktopQuitEvent {
@@ -11,6 +13,8 @@ export interface DesktopQuitEvent {
 
 /** Electron application operations owned by the desktop lifecycle. */
 export interface DesktopApp {
+  /** Set the stable Windows application identity before startup creates native resources. */
+  setAppUserModelId(id: string): void
   /** Enable Chromium's process sandbox before application readiness. */
   enableSandbox(): void
   /** Acquire the application-wide single-instance lock. */
@@ -29,10 +33,12 @@ export interface DesktopApp {
 export interface DesktopMainDependencies {
   /** Electron application singleton. */
   readonly app: DesktopApp
+  /** Explicit runtime inputs resolved once during Electron composition. */
+  readonly launchSpec: HarnessLaunchSpec
   /** Runtime operating-system identifier. */
   readonly platform: NodeJS.Platform
   /** Start the desktop Harness under caller-owned startup cancellation. */
-  readonly startHarness: (options: HarnessStartOptions) => Promise<HarnessHandle>
+  readonly startHarness: (launchSpec: HarnessLaunchSpec, options: HarnessStartOptions) => Promise<HarnessHandle>
   /** Create the authorized desktop window for a ready Harness. */
   readonly createWindow: (endpoint: URL, capability: string) => Promise<DesktopWindow>
   /** Report contained startup, shutdown, and event-callback failures. */
@@ -136,6 +142,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       })
   }
 
+  app.setAppUserModelId(DESKTOP_APP_USER_MODEL_ID)
   app.enableSandbox()
   const ownsInstance = app.requestSingleInstanceLock()
 
@@ -184,7 +191,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     try {
       await waitForReadiness(() => app.whenReady(), startupController.signal)
       if (startupWasAborted()) return
-      harness = await dependencies.startHarness({ signal: startupController.signal })
+      harness = await dependencies.startHarness(dependencies.launchSpec, { signal: startupController.signal })
       if (startupWasAborted()) return
       await createHarnessWindow()
     } catch (error: unknown) {

@@ -12,9 +12,13 @@ vi.mock('electron', () => ({
 import {
   HarnessShutdownTimeoutError,
   HarnessStartupTimeoutError,
-  startHarness,
+  startHarness as startHarnessProduction,
+  type HarnessLaunchSpec,
+  type HarnessStartOptions,
   type HarnessSupervisorDependencies,
 } from '../src/harness-supervisor.ts'
+
+type TestHarnessDependencies = HarnessLaunchSpec & HarnessSupervisorDependencies
 
 class FakeOutput extends EventEmitter {
   write(chunk: string | Uint8Array): void {
@@ -32,24 +36,33 @@ class FakeUtilityProcess extends EventEmitter {
   }
 }
 
-function harness(overrides: Partial<HarnessSupervisorDependencies> = {}): {
+function harness(overrides: Partial<TestHarnessDependencies> = {}): {
   readonly child: FakeUtilityProcess
-  readonly dependencies: HarnessSupervisorDependencies
+  readonly dependencies: TestHarnessDependencies
   readonly fork: HarnessSupervisorDependencies['fork']
 } {
   const child = new FakeUtilityProcess()
   const fork = vi.fn<HarnessSupervisorDependencies['fork']>(() => child)
-  const dependencies: HarnessSupervisorDependencies = {
+  const dependencies: TestHarnessDependencies = {
     fork,
-    resolveCli: () => '/fixture/dsh/lib/bin.js',
+    cliEntry: '/fixture/dsh/lib/bin.js',
     randomBytes: size => Buffer.alloc(size, 0xab),
-    cwd: () => '/fixture/cwd',
+    cwd: '/fixture/cwd',
     environment: { FROM_PARENT: 'kept' },
+    lstat: () => ({ isFile: () => true, isSymbolicLink: () => false }),
     shutdownTimeoutMs: 10,
     startupTimeoutMs: 10,
     ...overrides,
   }
   return { child, dependencies, fork }
+}
+
+function startHarness(
+  dependencies: TestHarnessDependencies,
+  options: HarnessStartOptions = {},
+): ReturnType<typeof startHarnessProduction> {
+  const { cliEntry, cwd, environment, ...overrides } = dependencies
+  return startHarnessProduction({ cliEntry, cwd, environment }, options, overrides)
 }
 
 async function rejectedError(promise: Promise<unknown>): Promise<Error> {
@@ -86,20 +99,14 @@ describe('startHarness', () => {
     expect(handle.capability).toHaveLength(43)
   })
 
-  it('resolves the installed Harness CLI when tests inject only the fork boundary', async () => {
-    const { child, fork } = harness()
-    const start = startHarness({
-      fork,
-      randomBytes: size => Buffer.alloc(size, 0xab),
-      cwd: () => '/fixture/cwd',
-      environment: { FROM_PARENT: 'kept' },
-      shutdownTimeoutMs: 10,
-      startupTimeoutMs: 10,
-    })
+  it.each([
+    ['directory', { isFile: () => false, isSymbolicLink: () => false }],
+    ['symbolic link or junction', { isFile: () => true, isSymbolicLink: () => true }],
+  ])('rejects a CLI entry that is a %s before fork', async (_description, status) => {
+    const { dependencies, fork } = harness({ lstat: () => status })
 
-    expect(fork).toHaveBeenCalledWith(expect.stringMatching(/apps[\\/]cli[\\/]lib[\\/]bin\.js$/u), expect.any(Array), expect.any(Object))
-    child.stdout.write('dsh web: http://127.0.0.1:4313\n')
-    await expect(start).resolves.toMatchObject({ endpoint: new URL('http://127.0.0.1:4313') })
+    await expect(startHarness(dependencies)).rejects.toThrow('/fixture/dsh/lib/bin.js')
+    expect(fork).not.toHaveBeenCalled()
   })
 
   it('waits for a readiness line split across stdout chunks and ignores other output', async () => {
@@ -370,7 +377,8 @@ describe('startHarness', () => {
     const fork = vi.fn()
     const randomBytes = vi.fn(() => Buffer.alloc(32))
 
-    const error = await rejectedError(startHarness({ fork, randomBytes }, { signal: controller.signal }))
+    const { dependencies } = harness({ fork, randomBytes })
+    const error = await rejectedError(startHarness(dependencies, { signal: controller.signal }))
 
     expect(error.name).toBe('AbortError')
     expect(fork).not.toHaveBeenCalled()
