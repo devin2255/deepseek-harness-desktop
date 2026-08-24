@@ -2057,7 +2057,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'webServer',
     summary: 'The browser HTTP carrier service.',
-    description: 'The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber.',
+    description: 'The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and after guard admission the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A missing or rejecting guard answers 401 before routing. A listen failure rejects initialization, and the boot process reports the failed fiber.',
     methods: [
       {
         signature: 'register(route: WebRoute): () => void',
@@ -2070,6 +2070,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Register an exact-path HTTP upgrade route. Duplicate paths throw because one socket can have only one protocol owner.',
         parameters: [{ name: 'route', description: 'pathname and handler owning negotiation plus socket use.' }],
         returns: 'the disposer removing the route.',
+      },
+      {
+        signature: 'registerGuard(name: string, guard: WebRequestGuard): () => void',
+        description: 'Register one named request guard. Every registered guard must authorize a request before HTTP or upgrade dispatch continues; a duplicate name is a composition error.',
+        parameters: [{ name: 'name', description: 'unique guard registration name.' }, { name: 'guard', description: 'synchronous authorization decision for each request.' }],
+        returns: 'the disposer removing the guard.',
       },
       {
         signature: 'registerFallback(handler: WebRoute[\'handler\']): () => void',
@@ -4556,6 +4562,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WebFetchResultView',
     declaration: 'export interface WebFetchResultView {\n    card: \'web\';\n    kind: \'fetch\';\n    title?: string;\n    url: string;\n    statusCode: number;\n    truncated: boolean;\n}',
+  },
+  {
+    name: 'WebRequestGuard',
+    declaration: 'export type WebRequestGuard = (req: IncomingMessage) => boolean;',
   },
   {
     name: 'WebResultView',

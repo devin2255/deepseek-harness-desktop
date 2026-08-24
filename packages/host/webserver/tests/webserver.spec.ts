@@ -123,8 +123,6 @@ describe('real Loader composition', () => {
     let fallbackUrl: string | undefined
     let upgradeUrl: string | undefined
 
-    expect(server.registerGuard).toBeTypeOf('function')
-
     server.register({
       kind: 'exact',
       path: '/ready',

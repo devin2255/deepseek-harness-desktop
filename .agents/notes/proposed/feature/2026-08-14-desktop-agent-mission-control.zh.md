@@ -16,13 +16,13 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 每个根任务拥有一个集成 worktree。只读子 Agent 可以共享它的快照，一个写 Agent 可以直接修改它。工作流需要多个写 Agent 并行时，每个写 Agent 使用从同一基准创建的子 worktree，并由显式 Integration 节点在审查前把结果合入任务 worktree。声明的路径范围只用于提前发现可能的重叠，不能替代 Git 合并与验证。
 
-桌面壳使用 Electron，因为已发布的 Host、PTY、插件运行时和客户端构建已经依赖 Node 与兼容 Chromium 的 Web API。Electron Main 监管一个运行 desktop profile 的 Node `utilityProcess`，沙箱 Renderer 运行现有插件组合的 React 客户端。Preload bridge 只暴露经过验证的桌面引导和窗口操作，Renderer 不启用 Node 集成。
+已交付的桌面基础使用 Electron，因为 Host、PTY、插件运行时和客户端构建已经依赖 Node 与兼容 Chromium 的 Web API。Electron Main 监管一个运行桌面 profile 的 Node `utilityProcess`，以及一个运行现有插件组合 React 客户端的沙箱 Renderer。冻结的 preload 桥接只暴露当前平台标识。Renderer 启用上下文隔离与 Chromium 沙箱，不启用 Node 集成或通用 Electron IPC。
 
-Harness 进程监听随机 loopback 端口，并在 Origin 检查之外要求每次 HTTP 和 WebSocket 连接携带本次启动生成的 capability。隔离的 Electron session 只为该准确 origin 注入 capability header，因此该值不进入 Renderer 或 Preload API、URL、日志、设置或 Session 事件。Electron 业务行为继续由 Cordis 插件承担；Main 只拥有窗口生命周期、进程监管、通知、深链接和更新。
+已交付的 Harness 进程监听由操作系统分配的回环端口，并要求每次 HTTP 和 WebSocket 连接携带本次启动生成的 Bearer 能力凭证。隔离的 Electron 会话只为该精确源注入能力凭证请求头；导航、重定向、新窗口和该源之外的权限请求都会被拒绝。该值不进入 Renderer 或 Preload API、URL、日志、设置或 Session 事件。Electron Main 当前只拥有单实例应用生命周期、一个窗口，以及受监管的 Harness 启动和停止；产品状态仍归 Cordis 插件所有。
 
-存在活动工作时，关闭最后一个窗口会让 Main 与 Harness 进程继续驻留系统托盘或 macOS 菜单栏。显式退出会报告活动任务数量，并要求用户选择继续运行、停止后退出或取消。异常退出后，恢复流程根据已经记录的事实报告 interrupted、failed 或 settled 状态，不重放未经确认的工具调用。
+当前基础没有感知任务的托盘生命周期：在 Windows 和 Linux 上关闭最后一个窗口会退出，macOS 则保留应用并在激活时重建窗口。Mission Control 将让活动工作继续驻留系统托盘或 macOS 菜单栏，在显式退出时报告活动任务数量，并提供继续运行、停止后退出或取消选项。其恢复流程将根据已记录的事实报告 interrupted、failed 或 settled 状态，不重放未经确认的工具调用。
 
-实现从安全的桌面基础垂直切片开始：受监管的 Harness 进程、启动范围的 loopback 授权，以及承载现有客户端的沙箱 Renderer。可执行步骤位于[桌面基础计划](../../../../docs/superpowers/plans/2026-08-14-desktop-foundation.md)；Task 投影、worktree 所有权、Mission Control UI、审查与分发保持为独立的后续切片，避免 Electron Main 和 preload 获得产品领域状态。
+安全的桌面基础垂直切片已实现：它提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 投影、应用所有的 worktree、感知任务的托盘行为、Mission Control UI、审查、Harness Studio、签名和更新仍是未实现的后续切片。它们保持在 Electron Main 和 preload 之外，避免这些组件获得产品领域状态。
 
 ## 产品结构
 

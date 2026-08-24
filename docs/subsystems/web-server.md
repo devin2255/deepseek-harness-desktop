@@ -14,6 +14,11 @@ type WebRouteKind = 'exact' | 'prefix'
 ```
 
 ```ts type-equiv
+/** One pre-dispatch authorization decision shared by HTTP and upgrade requests. */
+type WebRequestGuard = (req: IncomingMessage) => boolean
+```
+
+```ts type-equiv
 /** One named route registration. */
 interface WebRoute {
   kind: WebRouteKind
@@ -24,7 +29,7 @@ interface WebRoute {
 }
 ```
 
-Match order is fixed: exact table first, then longest matching prefix, then the registered fallback. Registration order carries no request-facing semantics — named routes are composed to be disjoint, and the fallback seat answers anything no named route claims; one owner only, a second registration throws. The shipped Web composition claims the seat with [`dsh-host-frontend-static`](../../packages/host/frontend-static/src/index.ts), the SPA dist server with locked semantics: non-GET/HEAD is 405, traversal outside the dist root is 403, any miss falls back to `index.html` with HTTP 200 (SPA routing), and unknown extensions ship as octet-stream.
+Configured request guards run before route matching for HTTP and upgrade traffic. Every guard must authorize the request; a missing required guard or any rejection fails closed with HTTP 401 or a closed upgrade socket. Guards cannot select or mutate routing. After admission, match order is fixed: exact table first, then longest matching prefix, then the registered fallback. Registration order carries no request-facing semantics — named routes are composed to be disjoint, and the fallback seat answers anything no named route claims; one owner only, a second registration throws. The shipped Web composition claims the seat with [`dsh-host-frontend-static`](../../packages/host/frontend-static/src/index.ts), the SPA dist server with locked semantics: non-GET/HEAD is 405, traversal outside the dist root is 403, any miss falls back to `index.html` with HTTP 200 (SPA routing), and unknown extensions ship as octet-stream.
 
 ## Config
 
@@ -35,14 +40,16 @@ interface Config {
   host: '127.0.0.1' | '0.0.0.0'
   /** Listen port; zero requests an OS-assigned port. */
   port: number
+  /** Guard registrations required before this server authorizes any request. */
+  requiredGuards: string[]
 }
 ```
 
-`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate network exposure); there is no TLS, auth, or origin policy, so a non-loopback bind exposes the server to that network. The dist location is an assembly fact of the frontend plugin that claims the seat.
+`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate network exposure); there is no built-in TLS or origin policy, so a non-loopback bind exposes the server to that network. `requiredGuards` defaults to an empty list, rejects duplicate names at activation, and keeps the server fail-closed until every named guard is registered. The dist location is an assembly fact of the frontend plugin that claims the seat.
 
 ## The service
 
-`WebServer` (`ctx.webServer`) listens immediately on activation; a listen failure (EADDRINUSE…) rejects initialization, and the boot process reports the failed fiber. `register(route)` adds one named route and returns its disposer; a duplicate `(kind, path)` throws because route patterns are a composition-level contract and a collision is a misconfiguration. `tapIndex(transform)` adds a pure html-to-html transform applied to every index response — `/` and each SPA fallback — in registration order; [dsh-client-modules](../../packages/client/modules) uses it to inject the boot manifest. `port` reads the listening port, including the port assigned by the OS when `config.port` is 0.
+`WebServer` (`ctx.webServer`) listens immediately on activation; a listen failure (EADDRINUSE…) rejects initialization, and the boot process reports the failed fiber. `registerGuard(name, guard)` adds a synchronous authorization decision and returns its disposer; duplicate names throw. `register(route)` adds one named route and returns its disposer; a duplicate `(kind, path)` throws because route patterns are a composition-level contract and a collision is a misconfiguration. `tapIndex(transform)` adds a pure html-to-html transform applied to every index response — `/` and each SPA fallback — in registration order; [dsh-client-modules](../../packages/client/modules) uses it to inject the boot manifest. `port` reads the listening port, including the port assigned by the OS when `config.port` is 0.
 
 A request whose handling throws (a malformed %-escape hitting `decodeURIComponent`, a client dropping mid-body) is logged as a warning and answered 400 — or the socket destroyed when headers are already out — never a process exit. Disposal pairs `close()` with `closeAllConnections()` because a handler may hold its response open (SSE) and such connections never end on their own; without the force-close, teardown would hang. The package never prints: the URL line belongs to the shell. Per-package operational detail, including the dev-mode bundle watch pipeline, stays in the [README](../../packages/host/webserver/README.md).
 
@@ -58,7 +65,7 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 ### `ctx.webServer` — `WebServer`
 
-The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber.
+The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and after guard admission the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A missing or rejecting guard answers 401 before routing. A listen failure rejects initialization, and the boot process reports the failed fiber.
 
 ```ts cordis-catalog
 /**
@@ -76,6 +83,16 @@ register(route: WebRoute): () => void
  * @returns the disposer removing the route.
  */
 registerUpgrade(route: WebUpgradeRoute): () => void
+
+/**
+ * Register one named request guard. Every registered guard must authorize a
+ * request before HTTP or upgrade dispatch continues; a duplicate name is a
+ * composition error.
+ * @param name - unique guard registration name.
+ * @param guard - synchronous authorization decision for each request.
+ * @returns the disposer removing the guard.
+ */
+registerGuard(name: string, guard: WebRequestGuard): () => void
 
 /**
  * Claim the fallback seat: the handler answering every request no named
@@ -104,5 +121,5 @@ tapIndex(transform: (html: string) => string): () => void
 applyIndexTaps(html: string): string
 ```
 
-Source: [`packages/host/webserver/src/index.ts:59`](../../packages/host/webserver/src/index.ts)
+Source: [`packages/host/webserver/src/index.ts:65`](../../packages/host/webserver/src/index.ts)
 <!-- END GENERATED cordis-surface -->
