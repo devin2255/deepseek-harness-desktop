@@ -28,10 +28,12 @@ export interface DesktopLogConfig {
   readonly maxMetadataCodeUnits: number
 }
 
-/** Replaceable pure operations used to prove bounded input handling in focused tests. */
-export interface DesktopLogDependencies {
-  /** Redact sensitive literals from a message selected after input-limit checks. */
-  readonly redactText: (text: string, patterns: readonly string[]) => string
+/** Bounded message selected before the mandatory persistence redactor runs. */
+export interface DesktopLogMessageSelection {
+  /** Original message reference or the fixed input-limit marker. */
+  readonly message: string
+  /** Whether the original message was replaced before redaction. */
+  readonly truncated: boolean
 }
 
 /** One desktop lifecycle record persisted as a JSON line. */
@@ -52,15 +54,13 @@ export class DesktopLog {
   readonly #maxBytes: number
   readonly #maxMessageCodeUnits: number
   readonly #maxMetadataCodeUnits: number
-  readonly #redactText: DesktopLogDependencies['redactText']
   readonly #sensitiveValues: readonly string[]
 
   /**
    * Create the owned log directory and bind explicit rotation settings.
    * @param config - Product-owned directory, byte and input thresholds, and sensitive literals.
-   * @param overrides - Optional pure operations replaced by focused tests.
    */
-  constructor(config: DesktopLogConfig, overrides: Partial<DesktopLogDependencies> = {}) {
+  constructor(config: DesktopLogConfig) {
     if (!Number.isSafeInteger(config.maxBytes) || config.maxBytes <= 0) {
       throw new Error('Desktop log maxBytes must be a positive integer')
     }
@@ -76,7 +76,6 @@ export class DesktopLog {
     this.#maxBytes = config.maxBytes
     this.#maxMessageCodeUnits = config.maxMessageCodeUnits
     this.#maxMetadataCodeUnits = config.maxMetadataCodeUnits
-    this.#redactText = overrides.redactText ?? redactSensitiveText
     this.#sensitiveValues = [...config.sensitiveValues]
   }
 
@@ -91,7 +90,6 @@ export class DesktopLog {
       this.#maxBytes,
       this.#maxMessageCodeUnits,
       this.#maxMetadataCodeUnits,
-      this.#redactText,
     )
     this.#assertOwnedPaths()
     this.#rotateFor(Buffer.byteLength(line))
@@ -134,18 +132,15 @@ function serializeBoundedEvent(
   maxBytes: number,
   maxMessageCodeUnits: number,
   maxMetadataCodeUnits: number,
-  redactText: DesktopLogDependencies['redactText'],
 ): string {
   const timestamp = event.timestamp
   const type = event.type
   if (timestamp.length > maxMetadataCodeUnits || type.length > maxMetadataCodeUnits) {
     throw new Error('Desktop log metadata exceeds configured input limit')
   }
-  const inputMessage = event.message
-  const inputSuppressed = inputMessage.length > maxMessageCodeUnits
-  const selectedMessage = inputSuppressed ? SUPPRESSED_INPUT_MESSAGE : inputMessage
-  const message = redactText(selectedMessage, sensitiveValues)
-  const complete = serializeRecord(timestamp, type, message, inputSuppressed)
+  const selection = selectMessageForRedaction(event.message, maxMessageCodeUnits)
+  const message = redactSensitiveText(selection.message, sensitiveValues)
+  const complete = serializeRecord(timestamp, type, message, selection.truncated)
   if (Buffer.byteLength(complete) <= maxBytes) return complete
 
   const empty = serializeRecord(timestamp, type, '', true)
@@ -167,6 +162,23 @@ function serializeBoundedEvent(
     }
   }
   return bounded
+}
+
+/**
+ * Select a bounded message for mandatory redaction using only an O(1) code-unit length check.
+ * This pure operation cannot persist the returned text or replace the production redactor.
+ * @param message - Caller-owned diagnostic message.
+ * @param maxMessageCodeUnits - Explicit positive UTF-16 code-unit ceiling.
+ * @returns The original reference when bounded, otherwise a fixed suppression marker.
+ */
+export function selectMessageForRedaction(
+  message: string,
+  maxMessageCodeUnits: number,
+): DesktopLogMessageSelection {
+  assertPositiveInputLimit(maxMessageCodeUnits, 'maxMessageCodeUnits')
+  return message.length > maxMessageCodeUnits
+    ? { message: SUPPRESSED_INPUT_MESSAGE, truncated: true }
+    : { message, truncated: false }
 }
 
 /** Serialize one complete JSON line with an explicit truncation marker when required. */

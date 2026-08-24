@@ -10,8 +10,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { DesktopLog } from '../src/desktop-log.ts'
-import { redactSensitiveText } from '../src/sensitive-text-redactor.ts'
+import { DesktopLog, selectMessageForRedaction, type DesktopLogConfig } from '../src/desktop-log.ts'
 
 const temporaryDirectories: string[] = []
 const INPUT_LIMITS = { maxMessageCodeUnits: 20_000, maxMetadataCodeUnits: 128 } as const
@@ -35,6 +34,15 @@ function lifecycleEvent(message: string) {
 }
 
 describe('DesktopLog', () => {
+  it('does not expose a constructor override for mandatory redaction', () => {
+    if (false) {
+      const config = {} as DesktopLogConfig
+      // @ts-expect-error DesktopLog always owns the production redactor.
+      new DesktopLog(config, { redactText: (text: string) => text })
+    }
+    expect(DesktopLog).toBeTypeOf('function')
+  })
+
   it('creates the owned directory and appends one redacted JSON line per lifecycle event', () => {
     const directory = makeLogDirectory()
     const secret = 'sk-private-value'
@@ -181,37 +189,32 @@ describe('DesktopLog', () => {
     expect(record.message).not.toContain('\uFFFD')
   })
 
-  it('suppresses an over-limit message before passing fixed text to the redactor', () => {
-    const directory = makeLogDirectory()
-    const redactedInputs: string[] = []
+  it('selects a fixed marker for an over-limit message without copying its contents', () => {
     const secret = 'secret-at-input-tail'
     const message = `input-start-${'x'.repeat(5_000_000)}-${secret}`
-    const log = new DesktopLog(
-      {
-        directory,
-        maxBytes: 256,
-        sensitiveValues: [secret],
-        maxMessageCodeUnits: 1_024,
-        maxMetadataCodeUnits: 128,
-      },
-      {
-        redactText: (text, patterns) => {
-          redactedInputs.push(text)
-          return redactSensitiveText(text, patterns)
-        },
-      },
-    )
 
-    log.append(lifecycleEvent(message))
-
-    const persisted = readFileSync(log.currentPath(), 'utf8')
-    expect(redactedInputs).toEqual(['[message suppressed: input limit exceeded]'])
-    expect(JSON.parse(persisted)).toMatchObject({
+    expect(selectMessageForRedaction(message, 1_024)).toEqual({
       message: '[message suppressed: input limit exceeded]',
       truncated: true,
     })
-    expect(persisted).not.toMatch(/input-start|secret-at-input-tail/iu)
-    expect(statSync(log.currentPath()).size).toBeLessThanOrEqual(256)
+  })
+
+  it('always applies the production redactor to an input-limit marker before persistence', () => {
+    const directory = makeLogDirectory()
+    const marker = '[message suppressed: input limit exceeded]'
+    const log = new DesktopLog({
+      directory,
+      maxBytes: 256,
+      sensitiveValues: [marker],
+      maxMessageCodeUnits: 8,
+      maxMetadataCodeUnits: 128,
+    })
+
+    log.append(lifecycleEvent('message exceeding eight code units'))
+
+    const persisted = readFileSync(log.currentPath(), 'utf8')
+    expect(JSON.parse(persisted)).toMatchObject({ message: '[redacted]', truncated: true })
+    expect(persisted).not.toContain(marker)
   })
 
   it.each([
