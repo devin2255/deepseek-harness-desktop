@@ -4,6 +4,18 @@ import { join } from 'node:path'
 
 const PRODUCT_DIRECTORY = 'DeepSeek Harness'
 const DEVELOPMENT_CLI_SPECIFIER = '@deepseek-ai/dsh/lib/bin.js'
+const REDIRECTING_ENVIRONMENT_KEYS = new Set([
+  'DSH_HOME',
+  'DSH_DESKTOP_APP_VERSION',
+  'NODE_PATH',
+  'PNPM_HOME',
+  'INIT_CWD',
+  'NPM_CONFIG_LOCAL_PREFIX',
+  'NPM_PACKAGE_JSON',
+  'NPM_LIFECYCLE_EVENT',
+  'NPM_LIFECYCLE_SCRIPT',
+  'PNPM_SCRIPT_SRC_DIR',
+])
 /** Electron application paths and metadata consumed without importing the live singleton. */
 export interface DesktopRuntimeApp {
   /** Whether Electron is running from a packaged application. */
@@ -52,16 +64,10 @@ export function resolveRuntimeContext(
 ): DesktopRuntimeContext {
   const productData = join(app.getPath('appData'), PRODUCT_DIRECTORY)
   const harnessHome = join(productData, 'Harness')
-  const environment = { ...runtimeProcess.environment }
-  delete environment.DSH_HOME
-  delete environment.NODE_PATH
-  delete environment.PNPM_HOME
-  delete environment.INIT_CWD
-  delete environment.npm_config_local_prefix
-  delete environment.npm_package_json
-  delete environment.npm_lifecycle_event
-  delete environment.npm_lifecycle_script
-  delete environment.PNPM_SCRIPT_SRC_DIR
+  const environment = Object.fromEntries(
+    Object.entries(runtimeProcess.environment)
+      .filter(([key]) => !REDIRECTING_ENVIRONMENT_KEYS.has(key.toUpperCase())),
+  )
   environment.DSH_HOME = harnessHome
   environment.DSH_DESKTOP_APP_VERSION = app.getVersion()
 

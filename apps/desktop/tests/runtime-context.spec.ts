@@ -75,4 +75,36 @@ describe('resolveRuntimeContext', () => {
     expect(environment).toEqual({ DEEPSEEK_API_KEY: 'credential' })
     expect(resolveDevelopmentCli).toHaveBeenCalledWith('@deepseek-ai/dsh/lib/bin.js')
   })
+
+  it('scrubs redirecting Windows environment keys case-insensitively without mutating the input', () => {
+    const environment: NodeJS.ProcessEnv = {
+      dSh_HoMe: 'C:\\Users\\tester\\.dsh',
+      dsh_desktop_app_version: 'spoofed',
+      Node_Path: 'C:\\node',
+      pnPm_Home: 'C:\\pnpm',
+      init_cwd: 'D:\\repository',
+      NPM_CONFIG_LOCAL_PREFIX: 'D:\\repository',
+      Npm_Package_Json: 'D:\\repository\\package.json',
+      NPM_LIFECYCLE_EVENT: 'start',
+      Npm_Lifecycle_Script: 'electron .',
+      pnpm_script_src_dir: 'D:\\repository',
+      DEEPSEEK_API_KEY: 'credential',
+      Ordinary_Value: 'kept',
+    }
+    const originalEnvironment = { ...environment }
+
+    const context = resolveRuntimeContext(fakeApp(), {
+      resourcesPath: 'C:\\Program Files\\DeepSeek Harness\\resources',
+      environment,
+      resolveDevelopmentCli: vi.fn(() => 'must-not-resolve'),
+    })
+
+    expect(context.environment).toEqual({
+      DEEPSEEK_API_KEY: 'credential',
+      Ordinary_Value: 'kept',
+      DSH_HOME: join('C:\\Users\\tester\\AppData\\Roaming', 'DeepSeek Harness', 'Harness'),
+      DSH_DESKTOP_APP_VERSION: '1.2.3',
+    })
+    expect(environment).toEqual(originalEnvironment)
+  })
 })
