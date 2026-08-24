@@ -107,7 +107,12 @@ export async function createStartupWindow(
 ): Promise<StartupWindow> {
   const dependencies = resolveDependencies(overrides)
   const htmlUrl = dependencies.htmlUrl()
-  if (htmlUrl.protocol !== 'file:' || htmlUrl.username !== '' || htmlUrl.password !== '') {
+  if (
+    htmlUrl.protocol !== 'file:'
+    || htmlUrl.username !== ''
+    || htmlUrl.password !== ''
+    || htmlUrl.hostname !== ''
+  ) {
     throw new Error('Startup window requires a local file URL')
   }
   const nativeWindow = dependencies.createWindow({

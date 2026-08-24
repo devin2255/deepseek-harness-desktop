@@ -38,6 +38,19 @@ describe('createStartupWindow', () => {
     expect(fixture.steps[0]).toBe('create')
   })
 
+  it('rejects UNC file URLs before creating a window while allowing normalized localhost file URLs', async () => {
+    const remote = startupFixture(new URL('file://server/share/startup.html'))
+
+    await expect(createStartupWindow(remote.actions, remote.dependencies)).rejects.toThrow(
+      'Startup window requires a local file URL',
+    )
+    expect(remote.steps).toEqual([])
+
+    const local = startupFixture(new URL('file://localhost/C:/bundle/startup.html'))
+    await createStartupWindow(local.actions, local.dependencies)
+    expect(local.loaded()).toBe('file:///C:/bundle/startup.html')
+  })
+
   it('denies every renderer navigation and new-window request', async () => {
     const fixture = startupFixture()
     await createStartupWindow(fixture.actions, fixture.dependencies)
@@ -129,7 +142,7 @@ describe('startup assets', () => {
 
 interface FakeIpcEvent { readonly sender: { readonly id: number } }
 
-function startupFixture(): {
+function startupFixture(htmlUrl = new URL('file:///C:/bundle/startup.html')): {
   readonly actions: StartupWindowActions & { readonly retry: ReturnType<typeof vi.fn> }
   readonly close: () => void
   readonly dependencies: StartupWindowDependencies
@@ -191,7 +204,7 @@ function startupFixture(): {
           loadURL(url) { loaded = url; return Promise.resolve() },
         }
       },
-      htmlUrl: () => new URL('file:///C:/bundle/startup.html'),
+      htmlUrl: () => htmlUrl,
       ipcMain: {
         handle(channel, handler) {
           if (handlers.has(channel)) throw new Error(`Duplicate handler: ${channel}`)
