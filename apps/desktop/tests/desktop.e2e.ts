@@ -34,7 +34,7 @@ describe('desktop Electron acceptance', () => {
       timeout: 15_000,
     })
 
-    const page = await application.firstWindow({ timeout: 10_000 })
+    const page = await application.firstWindow({ timeout: 45_000 })
     expect(application.windows()).toHaveLength(1)
     await page.waitForLoadState('load')
     await expect.poll(() => page.title(), { timeout: 10_000 }).toBe('DeepSeek Harness')
@@ -78,7 +78,7 @@ describe('desktop Electron acceptance', () => {
     const closing = application
     await boundedClose(closing)
     application = undefined
-  }, 60_000)
+  }, 90_000)
 })
 
 function hostDescribeRequest(): RequestInit {

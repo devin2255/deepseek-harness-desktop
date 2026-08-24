@@ -101,6 +101,16 @@ describe('gate graph validation', () => {
     expect(byId.get('duplication')?.allowFailure).toBe(true)
   })
 
+  it('runs the built desktop Electron E2E after the Windows artifact build', () => {
+    const subject = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
+
+    expect(subject.find(item => item.id === 'desktop-e2e')).toMatchObject({
+      displayCommand: 'pnpm run test:desktop:e2e:ci',
+      args: ['/private/pnpm.cjs', 'run', 'test:desktop:e2e:ci'],
+      needs: ['build'],
+    })
+  })
+
   it.each([
     ['empty', [], /gate graph has no gates/],
     ['duplicate ids', [gate('same'), gate('same')], /duplicate gate id "same"/],

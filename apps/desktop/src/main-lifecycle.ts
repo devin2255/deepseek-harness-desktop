@@ -127,7 +127,8 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     windowFocusRequest ??= createHarnessWindow()
       .then((window) => {
         if (windowInteractionAllowed() && activeWindow === window) focusWindow(window)
-      }, (error: unknown) => {
+      })
+      .catch((error: unknown) => {
         report('callback', error)
       })
       .finally(() => {
@@ -181,7 +182,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
 
   async function startOwnedInstance(): Promise<void> {
     try {
-      await app.whenReady()
+      await waitForReadiness(() => app.whenReady(), startupController.signal)
       if (startupWasAborted()) return
       harness = await dependencies.startHarness({ signal: startupController.signal })
       if (startupWasAborted()) return
@@ -237,4 +238,36 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
 /** Identify the cancellation form emitted by the supervised Harness startup path. */
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+/** Wait for Electron readiness while allowing owned shutdown to release its startup wait. */
+function waitForReadiness(whenReady: () => Promise<void>, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const settle = (callback: () => void): void => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      callback()
+    }
+    const onAbort = (): void => {
+      settle(resolve)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    try {
+      void whenReady().then(
+        () => { settle(resolve) },
+        (error: unknown) => { settle(() => { reject(asError(error, 'Electron readiness failed')) }) },
+      )
+    } catch (error: unknown) {
+      settle(() => { reject(asError(error, 'Electron readiness failed')) })
+    }
+    if (signal.aborted) onAbort()
+  })
+}
+
+/** Retain native errors while giving lifecycle failures the Error form expected by reporters. */
+function asError(error: unknown, message: string): Error {
+  return error instanceof Error ? error : new Error(message, { cause: error })
 }

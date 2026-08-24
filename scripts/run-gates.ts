@@ -435,9 +435,18 @@ function ciWindowsCompleteGates(): Gate[] {
   return [
     pnpmScript('build', 'build'),
     pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
+    desktopE2EGate(['build']),
     ...coverageGates(),
     ...observational,
   ]
+}
+
+/** Run the real Electron application only after the Windows lane has prepared its built artifacts. */
+function desktopE2EGate(needs: string[]): Gate {
+  return pnpmScript('desktop-e2e', 'test:desktop:e2e:ci', {
+    label: 'desktop Electron E2E',
+    needs,
+  })
 }
 
 function ciWindowsObservationalGates(): Gate[] {

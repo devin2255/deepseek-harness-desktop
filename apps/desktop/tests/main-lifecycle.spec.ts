@@ -207,6 +207,39 @@ describe('startDesktopMain', () => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
+  it('settles latched shutdown while Electron readiness remains unresolved', async () => {
+    const ready = deferred<undefined>()
+    const { app, dependencies, startHarness } = fixture()
+    app.whenReady.mockReturnValue(ready.promise)
+    const desktop = startDesktopMain(dependencies)
+    await flushLifecycle()
+
+    app.emitBeforeQuit()
+
+    await expect(Promise.race([
+      desktop.shutdown.then(() => 'settled'),
+      flushLifecycle().then(() => 'pending'),
+    ])).resolves.toBe('settled')
+    await desktop.startup
+    expect(startHarness).not.toHaveBeenCalled()
+    expect(app.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a non-Error Electron readiness rejection as an Error', async () => {
+    const { app, dependencies, reportFailure, startHarness } = fixture()
+    app.whenReady.mockRejectedValue('Electron readiness rejected')
+    const desktop = startDesktopMain(dependencies)
+
+    await desktop.startup
+
+    expect(reportFailure).toHaveBeenCalledWith('startup', expect.objectContaining({
+      cause: 'Electron readiness rejected',
+      message: 'Electron readiness failed',
+    }))
+    expect(startHarness).not.toHaveBeenCalled()
+    expect(app.quit).toHaveBeenCalledTimes(1)
+  })
+
   it('reports a child-that-never-exits abort rejection once and still latches quit', async () => {
     const failure = new HarnessShutdownTimeoutError(10)
     const { app, dependencies, reportFailure } = fixture({
@@ -324,6 +357,27 @@ describe('startDesktopMain', () => {
     expect(createWindow).toHaveBeenCalledTimes(2)
     expect(createWindow).toHaveBeenLastCalledWith(harness.endpoint, harness.capability)
     expect(second.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('contains a delayed macOS recreate focus failure', async () => {
+    const first = fixture()
+    const second = fixture()
+    const delayedWindow = deferred<DesktopWindow>()
+    const failure = new Error('recreated window focus failed')
+    second.focus.mockImplementation(() => { throw failure })
+    const createWindow = vi.fn()
+      .mockResolvedValueOnce(first.window)
+      .mockReturnValueOnce(delayedWindow.promise)
+    const { app, dependencies, reportFailure } = fixture({ platform: 'darwin', createWindow })
+    const desktop = startDesktopMain(dependencies)
+    await desktop.startup
+    first.closeWindow()
+
+    app.emit('activate')
+    delayedWindow.resolve(second.window)
+    await flushLifecycle()
+
+    expect(reportFailure).toHaveBeenCalledWith('callback', failure)
   })
 
   it('recreates a macOS window for a second instance without calling the stale handle', async () => {
