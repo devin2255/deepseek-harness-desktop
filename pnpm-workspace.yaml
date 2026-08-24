@@ -39,6 +39,9 @@ peerDependencyRules:
 # (git hooks) genuinely need theirs.
 allowBuilds:
   electron: true
+  # electron-builder includes the optional Squirrel.Windows backend; the desktop
+  # installer uses NSIS, so its host-architecture 7-Zip copy is not needed.
+  electron-winstaller: false
   esbuild: true
   lefthook: true
   # Cross-platform boundary for the persistent PTY backend, including ConPTY on Windows.
