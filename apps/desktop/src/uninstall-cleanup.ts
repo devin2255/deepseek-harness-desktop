@@ -61,6 +61,22 @@ interface ArchiveReadState {
   readonly paths: Set<string>
 }
 
+type ReservedArtifactKind = 'archive' | 'tombstone' | 'validation' | 'restore'
+
+interface ReservedArtifact {
+  readonly id: string
+  readonly kind: ReservedArtifactKind
+  readonly path: string
+}
+
+interface ReservedTransaction {
+  readonly id: string
+  readonly archive?: ReservedArtifact
+  readonly tombstone?: ReservedArtifact
+  readonly validation?: ReservedArtifact
+  readonly restore?: ReservedArtifact
+}
+
 /** Detect any cleanup switch so malformed requests fail closed instead of starting the app. */
 export function isUninstallCleanupInvocation(argv: readonly string[]): boolean {
   return argv.some(argument => argument.startsWith('--uninstall-delete-user-data'))
@@ -91,6 +107,7 @@ export async function runUninstallCleanup(
   assertContainedProductRoot(appData, productRoot)
   await assertOrdinaryDirectoryChain(appData)
   await recoverInterruptedTransactions(appData, productRoot, request.maxSnapshotEntries)
+  await assertNoReservedArtifacts(appData)
   const productStatus = await lstatIfExists(productRoot)
   if (productStatus === undefined) return true
   assertOrdinaryDirectory(productRoot, productStatus)
@@ -151,6 +168,7 @@ export async function runUninstallCleanup(
     await unlinkIfPresent(archivePath)
     throw new Error('Uninstall cleanup final commit failed and canonical data was restored', { cause: error })
   }
+  await assertNoReservedArtifacts(appData)
   return true
 }
 
@@ -444,30 +462,83 @@ async function restoreCanonicalOrThrow(
 }
 
 async function recoverInterruptedTransactions(appData: string, productRoot: string, maxEntries: number): Promise<void> {
-  const entries = await readdir(appData)
-  for (const name of entries) {
-    const match = /^\.DeepSeek Harness\.uninstall-archive-([0-9a-f]{32})$/u.exec(name)
-    if (match === null) continue
-    const transactionId = match[1]
-    if (transactionId === undefined) continue
-    const archivePath = join(appData, name)
-    const status = await lstat(archivePath)
-    if (status.isSymbolicLink() || !status.isFile()) {
-      throw new Error('Uninstall cleanup archive candidate is not an ordinary file')
-    }
-    const verificationPath = join(appData, `${RESTORE_PREFIX}${transactionId}-${randomBytes(8).toString('hex')}`)
-    await restoreArchive(archivePath, verificationPath, transactionId, maxEntries)
-    if (await lstatIfExists(productRoot) === undefined) await rename(verificationPath, productRoot)
-    else await removeOwnedTree(verificationPath, productionDependencies())
-    for (const residue of entries) {
-      if (residue !== `${VALIDATION_PREFIX}${transactionId}`
-        && !residue.startsWith(`${RESTORE_PREFIX}${transactionId}-`)) continue
-      await removeOwnedTree(join(appData, residue), productionDependencies())
-    }
-    const tombstonePath = join(appData, `${TOMBSTONE_PREFIX}${transactionId}`)
-    if (await lstatIfExists(tombstonePath) !== undefined) await removeOwnedTree(tombstonePath, productionDependencies())
-    await unlinkIfPresent(archivePath)
+  const transaction = await scanReservedTransaction(appData)
+  if (transaction === undefined) return
+  if (transaction.archive === undefined) {
+    throw new Error('Uninstall cleanup refuses an orphan transaction artifact')
   }
+  const verificationPath = join(appData, `${RESTORE_PREFIX}${transaction.id}-${randomBytes(8).toString('hex')}`)
+  await restoreArchive(transaction.archive.path, verificationPath, transaction.id, maxEntries)
+  if (await lstatIfExists(productRoot) === undefined) await rename(verificationPath, productRoot)
+  else await removeOwnedTree(verificationPath, productionDependencies())
+  for (const residue of [transaction.validation, transaction.restore]) {
+    if (residue !== undefined) await removeOwnedTree(residue.path, productionDependencies())
+  }
+  if (transaction.tombstone !== undefined) await removeOwnedTree(transaction.tombstone.path, productionDependencies())
+  await unlinkIfPresent(transaction.archive.path)
+}
+
+async function assertNoReservedArtifacts(appData: string): Promise<void> {
+  if (await scanReservedTransaction(appData) !== undefined) {
+    throw new Error('Uninstall cleanup transaction artifacts remain after deletion')
+  }
+}
+
+async function scanReservedTransaction(appData: string): Promise<ReservedTransaction | undefined> {
+  const artifacts: ReservedArtifact[] = []
+  for (const name of await readdir(appData)) {
+    const parsed = parseReservedArtifact(name)
+    if (parsed === undefined) continue
+    const path = join(appData, name)
+    const status = await lstat(path)
+    if (parsed.kind === 'archive') {
+      if (status.isSymbolicLink() || !status.isFile()) {
+        throw new Error('Uninstall cleanup archive artifact is not an ordinary file')
+      }
+    } else if (status.isSymbolicLink() || !status.isDirectory()) {
+      throw new Error('Uninstall cleanup transaction artifact is not an ordinary directory')
+    }
+    artifacts.push({ ...parsed, path })
+  }
+  if (artifacts.length === 0) return undefined
+  const ids = new Set(artifacts.map(artifact => artifact.id))
+  if (ids.size !== 1) throw new Error('Uninstall cleanup refuses conflicting transaction artifacts')
+  const id = artifacts[0]?.id
+  if (id === undefined) return undefined
+  const transaction: {
+    id: string
+    archive?: ReservedArtifact
+    tombstone?: ReservedArtifact
+    validation?: ReservedArtifact
+    restore?: ReservedArtifact
+  } = { id }
+  for (const artifact of artifacts) {
+    if (transaction[artifact.kind] !== undefined) {
+      throw new Error('Uninstall cleanup refuses duplicate transaction artifacts')
+    }
+    transaction[artifact.kind] = artifact
+  }
+  return transaction
+}
+
+function parseReservedArtifact(name: string): Pick<ReservedArtifact, 'id' | 'kind'> | undefined {
+  const prefixes: readonly [ReservedArtifactKind, string][] = [
+    ['archive', ARCHIVE_PREFIX],
+    ['tombstone', TOMBSTONE_PREFIX],
+    ['validation', VALIDATION_PREFIX],
+    ['restore', RESTORE_PREFIX],
+  ]
+  for (const [kind, prefix] of prefixes) {
+    if (!name.startsWith(prefix)) continue
+    const suffix = name.slice(prefix.length)
+    const match = kind === 'restore'
+      ? /^([0-9a-f]{32})-[0-9a-f]{16}$/u.exec(suffix)
+      : /^([0-9a-f]{32})$/u.exec(suffix)
+    const id = match?.[1]
+    if (id === undefined) throw new Error('Uninstall cleanup refuses an invalid reserved transaction artifact')
+    return { id, kind }
+  }
+  return undefined
 }
 
 async function removeOwnedTree(directory: string, dependencies: UninstallCleanupDependencies): Promise<void> {

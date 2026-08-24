@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { rmdir, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
@@ -306,6 +306,87 @@ describe('runUninstallCleanup', () => {
     await expect(invoke(appData)).rejects.toThrow(/archive/iu)
     expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
     expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep')
+  })
+
+  it.each([
+    ['tombstone', 'directory', false],
+    ['tombstone', 'file', true],
+    ['tombstone', 'link', false],
+    ['validation', 'directory', true],
+    ['validation', 'file', false],
+    ['validation', 'link', true],
+    ['restore', 'directory', false],
+    ['restore', 'file', true],
+    ['restore', 'link', false],
+  ] as const)('rejects and preserves an orphan %s %s artifact', async (kind, artifactType, canonicalExists) => {
+    const appData = mkdtempSync(join(tmpdir(), `dsh-cleanup-orphan-${kind}-${artifactType}-`))
+    const product = join(appData, 'DeepSeek Harness')
+    const external = mkdtempSync(join(tmpdir(), 'dsh-cleanup-orphan-target-'))
+    const transactionId = '0123456789abcdef0123456789abcdef'
+    const suffix = kind === 'restore' ? `${transactionId}-0123456789abcdef` : transactionId
+    const artifact = join(appData, `.DeepSeek Harness.uninstall-${kind}-${suffix}`)
+    if (canonicalExists) {
+      mkdirSync(product)
+      writeFileSync(join(product, 'owned.txt'), 'owned')
+    }
+    writeFileSync(join(external, 'sentinel.txt'), 'keep')
+    if (artifactType === 'directory') {
+      mkdirSync(artifact)
+      writeFileSync(join(artifact, 'artifact.txt'), 'artifact')
+    } else if (artifactType === 'file') {
+      writeFileSync(artifact, 'artifact')
+    } else {
+      symlinkSync(external, artifact, process.platform === 'win32' ? 'junction' : 'dir')
+    }
+
+    await expect(invoke(appData)).rejects.toThrow(/artifact|transaction/iu)
+    if (canonicalExists) expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    if (artifactType === 'directory') expect(readFileSync(join(artifact, 'artifact.txt'), 'utf8')).toBe('artifact')
+    else if (artifactType === 'file') expect(readFileSync(artifact, 'utf8')).toBe('artifact')
+    else expect(lstatSync(artifact).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep')
+  })
+
+  it('rejects a malformed reserved artifact name without deleting canonical data', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-malformed-artifact-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const artifact = join(appData, '.DeepSeek Harness.uninstall-tombstone-not-a-transaction')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(artifact, 'unknown')
+
+    await expect(invoke(appData)).rejects.toThrow(/artifact|transaction/iu)
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    expect(readFileSync(artifact, 'utf8')).toBe('unknown')
+  })
+
+  it('rejects duplicate restore artifacts without touching either directory', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-duplicate-artifact-'))
+    const transactionId = '0123456789abcdef0123456789abcdef'
+    const first = join(appData, `.DeepSeek Harness.uninstall-restore-${transactionId}-0123456789abcdef`)
+    const second = join(appData, `.DeepSeek Harness.uninstall-restore-${transactionId}-fedcba9876543210`)
+    mkdirSync(first)
+    mkdirSync(second)
+    writeFileSync(join(first, 'first.txt'), 'first')
+    writeFileSync(join(second, 'second.txt'), 'second')
+
+    await expect(invoke(appData)).rejects.toThrow(/duplicate/iu)
+    expect(readFileSync(join(first, 'first.txt'), 'utf8')).toBe('first')
+    expect(readFileSync(join(second, 'second.txt'), 'utf8')).toBe('second')
+  })
+
+  it('rejects conflicting transaction ids without touching either artifact', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-conflicting-artifact-'))
+    const tombstone = join(appData, '.DeepSeek Harness.uninstall-tombstone-0123456789abcdef0123456789abcdef')
+    const validation = join(appData, '.DeepSeek Harness.uninstall-validation-fedcba9876543210fedcba9876543210')
+    mkdirSync(tombstone)
+    mkdirSync(validation)
+    writeFileSync(join(tombstone, 'tombstone.txt'), 'tombstone')
+    writeFileSync(join(validation, 'validation.txt'), 'validation')
+
+    await expect(invoke(appData)).rejects.toThrow(/conflicting/iu)
+    expect(readFileSync(join(tombstone, 'tombstone.txt'), 'utf8')).toBe('tombstone')
+    expect(readFileSync(join(validation, 'validation.txt'), 'utf8')).toBe('validation')
   })
 })
 
