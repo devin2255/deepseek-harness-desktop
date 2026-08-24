@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RedactedStderrTail } from '../src/sensitive-text-redactor.ts'
+import { redactSensitiveText, RedactedStderrTail } from '../src/sensitive-text-redactor.ts'
 
 describe('RedactedStderrTail', () => {
   it('redacts overlapping, shared-prefix, and Unicode literals across chunks', () => {
@@ -47,5 +47,11 @@ describe('RedactedStderrTail', () => {
     tail.write('must not appear')
 
     expect(tail.finish()).toBe('[stderr suppressed]')
+  })
+})
+
+describe('redactSensitiveText', () => {
+  it('redacts sensitive literals before a complete message is persisted', () => {
+    expect(redactSensitiveText('credential=secret-value', ['secret-value'])).toBe('credential=[redacted]')
   })
 })
