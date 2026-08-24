@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { rmdir, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
@@ -38,6 +38,7 @@ describe('runUninstallCleanup', () => {
 
     expect(() => readFileSync(join(product, 'owned.txt'))).toThrow()
     expect(readFileSync(join(appData, 'sibling.txt'), 'utf8')).toBe('keep')
+    expect(transactionArtifacts(appData)).toEqual([])
   })
 
   it.each([
@@ -164,7 +165,7 @@ describe('runUninstallCleanup', () => {
       maxSnapshotEntries: 100,
     }, {
       unlink: async () => { throw new Error('injected snapshot cleanup failure') },
-    })).rejects.toThrow(/validation/iu)
+    })).rejects.toThrow(/link|junction|reparse/iu)
 
     expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
     expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep')
@@ -186,14 +187,34 @@ describe('runUninstallCleanup', () => {
     expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
   })
 
-  it('reports committed success rather than rollback failure when tombstone purge fails', async () => {
-    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-post-commit-'))
+  it('restores the exact canonical tree and rejects when tombstone deletion fails', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-tombstone-failure-'))
     const product = join(appData, 'DeepSeek Harness')
-    const external = mkdtempSync(join(tmpdir(), 'dsh-cleanup-post-commit-external-'))
-    mkdirSync(product)
+    mkdirSync(join(product, 'nested'), { recursive: true })
     writeFileSync(join(product, 'owned.txt'), 'owned')
-    writeFileSync(join(external, 'sentinel.txt'), 'keep')
-    symlinkSync(external, join(product, 'external'), process.platform === 'win32' ? 'junction' : 'dir')
+    writeFileSync(join(product, 'nested', 'second.txt'), 'second')
+
+    await expect(runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      rmdir: async (path) => {
+        if (String(path).includes('uninstall-tombstone')) throw new Error('injected tombstone rmdir failure')
+        await rmdir(path)
+      },
+    })).rejects.toThrow(/restored|transaction/iu)
+
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    expect(readFileSync(join(product, 'nested', 'second.txt'), 'utf8')).toBe('second')
+  })
+
+  it('restores the exact canonical tree and rejects when final archive unlink fails', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-archive-failure-'))
+    const product = join(appData, 'DeepSeek Harness')
+    mkdirSync(join(product, 'nested'), { recursive: true })
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(join(product, 'nested', 'second.txt'), 'second')
 
     await expect(runUninstallCleanup({
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
@@ -201,12 +222,93 @@ describe('runUninstallCleanup', () => {
       maxSnapshotEntries: 100,
     }, {
       unlink: async (path) => {
-        if (String(path).includes('uninstall-committed')) throw new Error('injected post-commit purge failure')
+        if (String(path).includes('uninstall-archive')) throw new Error('injected final archive unlink failure')
         await unlink(path)
       },
-    })).resolves.toBe(true)
+    })).rejects.toThrow(/restored|transaction/iu)
 
-    expect(() => readFileSync(join(product, 'owned.txt'))).toThrow()
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    expect(readFileSync(join(product, 'nested', 'second.txt'), 'utf8')).toBe('second')
+  })
+
+  it('rejects any descendant link before mutation and preserves the external target', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-descendant-link-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const external = mkdtempSync(join(tmpdir(), 'dsh-cleanup-descendant-external-'))
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(join(external, 'sentinel.txt'), 'keep')
+    symlinkSync(external, join(product, 'external'), process.platform === 'win32' ? 'junction' : 'dir')
+
+    await expect(invoke(appData)).rejects.toThrow(/link|junction|reparse/iu)
+
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep')
+  })
+
+  it('recovers an authenticated interrupted transaction before starting a fresh cleanup', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-interrupted-'))
+    const product = join(appData, 'DeepSeek Harness')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    let savedArchive: string | undefined
+
+    await expect(runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      rename: async () => {
+        const archive = transactionArtifacts(appData).find(name => name.includes('uninstall-archive'))
+        if (archive === undefined) throw new Error('archive was not created')
+        savedArchive = join(appData, 'saved-archive')
+        copyFileSync(join(appData, archive), savedArchive)
+        throw new Error('simulated interruption before commit')
+      },
+    })).rejects.toThrow(/commit/iu)
+
+    const transactionId = '0123456789abcdef0123456789abcdef'
+    const archive = join(appData, `.DeepSeek Harness.uninstall-archive-${transactionId}`)
+    const tombstone = join(appData, `.DeepSeek Harness.uninstall-tombstone-${transactionId}`)
+    copyFileSync(savedArchive!, archive)
+    const bytes = readFileSync(archive)
+    Buffer.from(transactionId, 'ascii').copy(bytes, 8)
+    writeFileSync(archive, bytes)
+    renameSync(product, tombstone)
+
+    await expect(invoke(appData)).resolves.toBe(true)
+    expect(transactionArtifacts(appData)).toEqual([])
+  })
+
+  it('does not touch an unknown file that imitates a transaction archive name', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-unknown-archive-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const archive = join(appData, '.DeepSeek Harness.uninstall-archive-0123456789abcdef0123456789abcdef')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(archive, 'not an owned transaction')
+
+    await expect(invoke(appData)).rejects.toThrow(/archive/iu)
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    expect(readFileSync(archive, 'utf8')).toBe('not an owned transaction')
+  })
+
+  it('does not follow an unknown link that imitates a transaction archive name', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-unknown-archive-link-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const external = mkdtempSync(join(tmpdir(), 'dsh-cleanup-unknown-archive-target-'))
+    const archive = join(appData, '.DeepSeek Harness.uninstall-archive-0123456789abcdef0123456789abcdef')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(join(external, 'sentinel.txt'), 'keep')
+    symlinkSync(join(external, 'sentinel.txt'), archive, 'file')
+
+    await expect(invoke(appData)).rejects.toThrow(/archive/iu)
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
     expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep')
   })
 })
+
+function transactionArtifacts(appData: string): string[] {
+  return readdirSync(appData).filter(name => name.startsWith('.DeepSeek Harness.uninstall-'))
+}

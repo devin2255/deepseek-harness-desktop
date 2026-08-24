@@ -1,35 +1,42 @@
-/** Authenticates uninstall cleanup and commits product-root removal without partial failure states. */
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+/** Authenticates uninstall cleanup and provides rollback for every reported failure. */
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { Stats } from 'node:fs'
 import {
   lstat,
-  link,
   mkdir,
+  open,
   readdir,
-  readlink,
   rename,
   rmdir,
-  symlink,
   unlink,
+  type FileHandle,
 } from 'node:fs/promises'
-import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 
 const CLEANUP_ARGUMENT_PREFIX = '--uninstall-delete-user-data='
 const CONFIRMATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u
 const PRODUCT_DIRECTORY = 'DeepSeek Harness'
-const SNAPSHOT_PREFIX = '.DeepSeek Harness.uninstall-validation-'
-const COMMITTED_PREFIX = '.DeepSeek Harness.uninstall-committed-'
+const ARCHIVE_PREFIX = '.DeepSeek Harness.uninstall-archive-'
+const TOMBSTONE_PREFIX = '.DeepSeek Harness.uninstall-tombstone-'
+const VALIDATION_PREFIX = '.DeepSeek Harness.uninstall-validation-'
+const RESTORE_PREFIX = '.DeepSeek Harness.uninstall-restore-'
+const ARCHIVE_MAGIC = Buffer.from('DSHUA001', 'ascii')
+const ARCHIVE_END = 0
+const ARCHIVE_DIRECTORY = 1
+const ARCHIVE_FILE = 2
+const IO_CHUNK_BYTES = 64 * 1024
+const RESTORE_ATTEMPTS = 3
 
 /** Environment key used as the second authorization channel for uninstall cleanup. */
 export const UNINSTALL_CLEANUP_ENVIRONMENT_KEY = 'DSH_UNINSTALL_CLEANUP_TOKEN'
 
-/** Process inputs and rollback-snapshot limits accepted by the uninstall-only entry. */
+/** Process inputs and archive limits accepted by the uninstall-only entry. */
 export interface UninstallCleanupRequest {
   /** Application arguments after Electron's executable and development entry. */
   readonly argv: readonly string[]
   /** Environment inherited only by the uninstaller cleanup child. */
   readonly environment: NodeJS.ProcessEnv
-  /** Maximum files, directories, and links copied for destructive-operation validation. */
+  /** Maximum files and directories recorded in one streaming recovery archive. */
   readonly maxSnapshotEntries: number
 }
 
@@ -39,12 +46,19 @@ export interface UninstallCleanupDependencies {
   readonly rename: typeof rename
   /** Remove one empty ordinary directory from a validated tree. */
   readonly rmdir: typeof rmdir
-  /** Remove one ordinary file or link without following it. */
+  /** Remove one ordinary file without following it. */
   readonly unlink: typeof unlink
 }
 
-interface SnapshotBudget {
+interface ArchiveWriteState {
   entries: number
+  position: number
+}
+
+interface ArchiveReadState {
+  entries: number
+  position: number
+  readonly paths: Set<string>
 }
 
 /** Detect any cleanup switch so malformed requests fail closed instead of starting the app. */
@@ -53,19 +67,19 @@ export function isUninstallCleanupInvocation(argv: readonly string[]): boolean {
 }
 
 /**
- * Authenticate one exact cleanup request and atomically remove the canonical product root.
- * Destructive-operation failures discovered on the bounded physical snapshot reject before the
- * canonical directory moves. Once the canonical rename commits removal, later tombstone-purge
- * failures do not report a rollback-capable failure.
- * @param request - Arguments, environment confirmation, and explicit snapshot resource limits.
+ * Authenticate one exact cleanup request and delete the canonical product data transactionally.
+ * A streaming archive is fsynced and restored once for verification before mutation. Any later
+ * tombstone or final archive deletion failure restores and atomically republishes the canonical
+ * tree before rejecting. Success means canonical data and every transaction artifact are absent.
+ * @param request - Arguments, environment confirmation, and explicit archive entry limit.
  * @param overrides - Filesystem mutations replaced by focused fault-injection tests.
- * @returns `true` after the canonical product root is absent.
+ * @returns `true` only after canonical data and the recovery archive are deleted.
  */
 export async function runUninstallCleanup(
   request: UninstallCleanupRequest,
   overrides: Partial<UninstallCleanupDependencies> = {},
 ): Promise<true> {
-  assertSnapshotLimits(request)
+  assertEntryLimit(request.maxSnapshotEntries)
   const argumentToken = parseAuthorizedToken(request.argv)
   const environmentToken = request.environment[UNINSTALL_CLEANUP_ENVIRONMENT_KEY]
   if (!isValidToken(environmentToken) || !tokensMatch(argumentToken, environmentToken)) {
@@ -76,39 +90,76 @@ export async function runUninstallCleanup(
   const productRoot = resolve(appData, PRODUCT_DIRECTORY)
   assertContainedProductRoot(appData, productRoot)
   await assertOrdinaryDirectoryChain(appData)
+  await recoverInterruptedTransactions(appData, productRoot, request.maxSnapshotEntries)
   const productStatus = await lstatIfExists(productRoot)
   if (productStatus === undefined) return true
   assertOrdinaryDirectory(productRoot, productStatus)
 
-  const nonce = randomBytes(16).toString('hex')
-  const snapshot = join(appData, `${SNAPSHOT_PREFIX}${nonce}`)
-  const committed = join(appData, `${COMMITTED_PREFIX}${nonce}`)
+  const transactionId = randomBytes(16).toString('hex')
+  const archivePath = join(appData, `${ARCHIVE_PREFIX}${transactionId}`)
+  const tombstonePath = join(appData, `${TOMBSTONE_PREFIX}${transactionId}`)
+  const validationPath = join(appData, `${VALIDATION_PREFIX}${transactionId}`)
+  await createArchive(productRoot, archivePath, transactionId, request.maxSnapshotEntries)
   try {
-    await createValidationSnapshot(productRoot, snapshot, request)
-    await removeOwnedTree(snapshot, dependencies)
+    await restoreArchive(archivePath, validationPath, transactionId, request.maxSnapshotEntries)
+    await removeOwnedTree(validationPath, dependencies)
   } catch (error: unknown) {
-    await removeOwnedTreeIfPresent(snapshot, { rename, rmdir, unlink })
-    throw new Error('Uninstall cleanup snapshot destructive-operation validation failed', { cause: error })
+    try {
+      if (await lstatIfExists(validationPath) !== undefined) await removeOwnedTree(validationPath, productionDependencies())
+    } catch (cleanupError: unknown) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `Fatal uninstall cleanup validation recovery failure; verified archive retained at ${archivePath}`,
+        { cause: error },
+      )
+    }
+    await unlinkIfPresent(archivePath)
+    throw new Error('Uninstall cleanup archive validation failed before mutation', { cause: error })
   }
 
   await assertOrdinaryDirectoryChain(appData)
   assertSameDirectory(productStatus, await lstat(productRoot))
   try {
-    await dependencies.rename(productRoot, committed)
+    await dependencies.rename(productRoot, tombstonePath)
   } catch (error: unknown) {
-    throw new Error('Uninstall cleanup atomic commit failed', { cause: error })
+    await unlinkIfPresent(archivePath)
+    throw new Error('Uninstall cleanup atomic commit rename failed before mutation', { cause: error })
   }
+
   try {
-    assertSameDirectory(productStatus, await lstat(committed))
-    await removeOwnedTree(committed, dependencies)
-  } catch {
-    // The canonical-path removal is already committed; reporting failure would promise rollback.
+    assertSameDirectory(productStatus, await lstat(tombstonePath))
+    await removeOwnedTree(tombstonePath, dependencies)
+  } catch (error: unknown) {
+    await restoreCanonicalOrThrow(archivePath, productRoot, transactionId, request.maxSnapshotEntries, error)
+    try {
+      if (await lstatIfExists(tombstonePath) !== undefined) await removeOwnedTree(tombstonePath, productionDependencies())
+    } catch (cleanupError: unknown) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `Fatal uninstall cleanup tombstone recovery failure; verified archive retained at ${archivePath}`,
+        { cause: error },
+      )
+    }
+    await unlinkIfPresent(archivePath)
+    throw new Error('Uninstall cleanup transaction failed and canonical data was restored', { cause: error })
+  }
+
+  try {
+    await dependencies.unlink(archivePath)
+  } catch (error: unknown) {
+    await restoreCanonicalOrThrow(archivePath, productRoot, transactionId, request.maxSnapshotEntries, error)
+    await unlinkIfPresent(archivePath)
+    throw new Error('Uninstall cleanup final commit failed and canonical data was restored', { cause: error })
   }
   return true
 }
 
-function assertSnapshotLimits(request: UninstallCleanupRequest): void {
-  if (!Number.isSafeInteger(request.maxSnapshotEntries) || request.maxSnapshotEntries <= 0) {
+function productionDependencies(): UninstallCleanupDependencies {
+  return { rename, rmdir, unlink }
+}
+
+function assertEntryLimit(value: number): void {
+  if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error('Uninstall cleanup maxSnapshotEntries must be a positive safe integer')
   }
 }
@@ -158,7 +209,7 @@ async function assertOrdinaryDirectoryChain(directory: string): Promise<void> {
 }
 
 function assertOrdinaryDirectory(path: string, status: Stats): void {
-  if (status.isSymbolicLink()) throw new Error(`Uninstall cleanup refuses a link or reparse point: ${path}`)
+  if (status.isSymbolicLink()) throw new Error(`Uninstall cleanup refuses a link, junction, or reparse point: ${path}`)
   if (!status.isDirectory()) throw new Error(`Uninstall cleanup path is not an ordinary directory: ${path}`)
 }
 
@@ -169,43 +220,254 @@ function assertSameDirectory(before: Stats, after: Stats): void {
   }
 }
 
-async function createValidationSnapshot(
-  source: string,
-  destination: string,
-  limits: Pick<UninstallCleanupRequest, 'maxSnapshotEntries'>,
-): Promise<void> {
-  const budget: SnapshotBudget = { entries: 0 }
-  await copyTree(source, destination, budget, limits)
+async function createArchive(source: string, archivePath: string, transactionId: string, maxEntries: number): Promise<void> {
+  const archive = await open(archivePath, 'wx', 0o600)
+  const state: ArchiveWriteState = { entries: 0, position: 0 }
+  try {
+    consumeEntry(state, maxEntries)
+    state.position = await writeBuffer(archive, Buffer.concat([ARCHIVE_MAGIC, Buffer.from(transactionId, 'ascii')]), state.position)
+    await appendDirectory(archive, source, '', state, maxEntries)
+    state.position = await writeBuffer(archive, Buffer.from([ARCHIVE_END]), state.position)
+    await archive.sync()
+  } catch (error: unknown) {
+    await archive.close().catch(() => {})
+    await unlinkIfPresent(archivePath)
+    throw error
+  }
+  await archive.close()
 }
 
-async function copyTree(
+async function appendDirectory(
+  archive: FileHandle,
   source: string,
-  destination: string,
-  budget: SnapshotBudget,
-  limits: Pick<UninstallCleanupRequest, 'maxSnapshotEntries'>,
+  relativePath: string,
+  state: ArchiveWriteState,
+  maxEntries: number,
 ): Promise<void> {
-  consumeEntry(budget, limits)
-  const sourceStatus = await lstat(source)
-  if (sourceStatus.isSymbolicLink()) {
-    const target = await readlink(source)
-    await symlink(target, destination, process.platform === 'win32' ? 'junction' : undefined)
-    return
+  const before = await lstat(source)
+  assertOrdinaryDirectory(source, before)
+  for (const name of (await readdir(source)).sort()) {
+    const childSource = join(source, name)
+    const childRelative = relativePath === '' ? name : `${relativePath}/${name}`
+    const status = await lstat(childSource)
+    consumeEntry(state, maxEntries)
+    if (status.isSymbolicLink()) throw new Error(`Uninstall cleanup refuses a descendant link or junction: ${childSource}`)
+    if (status.isDirectory()) {
+      state.position = await writeRecordPath(archive, ARCHIVE_DIRECTORY, childRelative, state.position)
+      await appendDirectory(archive, childSource, childRelative, state, maxEntries)
+    } else if (status.isFile()) {
+      state.position = await appendFile(archive, childSource, childRelative, status, state.position)
+    } else {
+      throw new Error(`Uninstall cleanup archive refuses a special file: ${childSource}`)
+    }
   }
-  if (sourceStatus.isDirectory()) {
+  assertSameDirectory(before, await lstat(source))
+}
+
+function consumeEntry(state: { entries: number }, maxEntries: number): void {
+  state.entries += 1
+  if (state.entries > maxEntries) throw new Error('Uninstall cleanup recovery archive snapshot entry limit exceeded')
+}
+
+async function writeRecordPath(archive: FileHandle, type: number, path: string, position: number): Promise<number> {
+  const pathBytes = Buffer.from(path, 'utf8')
+  if (pathBytes.length === 0 || pathBytes.length > 0xffff_ffff) throw new Error('Uninstall cleanup archive path is invalid')
+  const header = Buffer.alloc(5)
+  header.writeUInt8(type, 0)
+  header.writeUInt32BE(pathBytes.length, 1)
+  return writeBuffer(archive, pathBytes, await writeBuffer(archive, header, position))
+}
+
+async function appendFile(
+  archive: FileHandle,
+  source: string,
+  relativePath: string,
+  expected: Stats,
+  position: number,
+): Promise<number> {
+  let next = await writeRecordPath(archive, ARCHIVE_FILE, relativePath, position)
+  const size = Buffer.alloc(8)
+  size.writeBigUInt64BE(BigInt(expected.size))
+  next = await writeBuffer(archive, size, next)
+  const input = await open(source, 'r')
+  const hash = createHash('sha256')
+  try {
+    const opened = await input.stat()
+    if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino || opened.size !== expected.size) {
+      throw new Error(`Uninstall cleanup source file changed during archive: ${source}`)
+    }
+    const chunk = Buffer.allocUnsafe(IO_CHUNK_BYTES)
+    let sourcePosition = 0
+    while (sourcePosition < expected.size) {
+      const read = await input.read(chunk, 0, Math.min(chunk.length, expected.size - sourcePosition), sourcePosition)
+      if (read.bytesRead === 0) throw new Error(`Uninstall cleanup source file ended early: ${source}`)
+      const bytes = chunk.subarray(0, read.bytesRead)
+      hash.update(bytes)
+      next = await writeBuffer(archive, bytes, next)
+      sourcePosition += read.bytesRead
+    }
+  } finally {
+    await input.close()
+  }
+  return writeBuffer(archive, hash.digest(), next)
+}
+
+async function restoreArchive(
+  archivePath: string,
+  destination: string,
+  transactionId: string,
+  maxEntries: number,
+): Promise<void> {
+  const archive = await open(archivePath, 'r')
+  const state: ArchiveReadState = { entries: 0, paths: new Set(), position: 0 }
+  let destinationCreated = false
+  try {
+    const prefix = await readExact(archive, ARCHIVE_MAGIC.length + transactionId.length, state)
+    if (!prefix.subarray(0, ARCHIVE_MAGIC.length).equals(ARCHIVE_MAGIC)
+      || prefix.subarray(ARCHIVE_MAGIC.length).toString('ascii') !== transactionId) {
+      throw new Error('Uninstall cleanup archive identity is invalid')
+    }
     await mkdir(destination)
-    for (const name of await readdir(source)) await copyTree(join(source, name), join(destination, name), budget, limits)
-    return
+    destinationCreated = true
+    while (true) {
+      const type = (await readExact(archive, 1, state)).readUInt8(0)
+      if (type === ARCHIVE_END) break
+      if (type !== ARCHIVE_DIRECTORY && type !== ARCHIVE_FILE) throw new Error('Uninstall cleanup archive record type is invalid')
+      consumeEntry(state, maxEntries)
+      const pathLength = (await readExact(archive, 4, state)).readUInt32BE(0)
+      const relativePath = (await readExact(archive, pathLength, state)).toString('utf8')
+      assertArchivePath(relativePath, state.paths)
+      const target = archiveTarget(destination, relativePath)
+      if (type === ARCHIVE_DIRECTORY) await mkdir(target)
+      else await restoreFile(archive, target, state)
+    }
+    const trailing = Buffer.alloc(1)
+    if ((await archive.read(trailing, 0, 1, state.position)).bytesRead !== 0) {
+      throw new Error('Uninstall cleanup archive has trailing data')
+    }
+  } catch (error: unknown) {
+    await archive.close().catch(() => {})
+    if (destinationCreated) await removeOwnedTreeIfPresent(destination, productionDependencies())
+    throw error
   }
-  if (!sourceStatus.isFile()) throw new Error(`Uninstall cleanup snapshot refuses a special file: ${source}`)
-  await link(source, destination)
+  await archive.close()
 }
 
-function consumeEntry(
-  budget: SnapshotBudget,
-  limits: Pick<UninstallCleanupRequest, 'maxSnapshotEntries'>,
-): void {
-  budget.entries += 1
-  if (budget.entries > limits.maxSnapshotEntries) throw new Error('Uninstall cleanup snapshot entry limit exceeded')
+function assertArchivePath(path: string, paths: Set<string>): void {
+  if (path === '' || path.includes('\\') || path.split('/').some(part => part === '' || part === '.' || part === '..')) {
+    throw new Error('Uninstall cleanup archive path is unsafe')
+  }
+  if (paths.has(path)) throw new Error('Uninstall cleanup archive contains duplicate paths')
+  paths.add(path)
+}
+
+function archiveTarget(root: string, path: string): string {
+  const target = resolve(root, ...path.split('/'))
+  const child = relative(root, target)
+  if (child.startsWith(`..${sep}`) || isAbsolute(child)) throw new Error('Uninstall cleanup archive target escapes restore root')
+  return target
+}
+
+async function restoreFile(archive: FileHandle, target: string, state: ArchiveReadState): Promise<void> {
+  const encodedSize = (await readExact(archive, 8, state)).readBigUInt64BE(0)
+  if (encodedSize > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Uninstall cleanup archive file is too large')
+  const size = Number(encodedSize)
+  const output = await open(target, 'wx', 0o600)
+  const hash = createHash('sha256')
+  try {
+    let remaining = size
+    let outputPosition = 0
+    while (remaining > 0) {
+      const bytes = await readExact(archive, Math.min(IO_CHUNK_BYTES, remaining), state)
+      hash.update(bytes)
+      await writeBuffer(output, bytes, outputPosition)
+      outputPosition += bytes.length
+      remaining -= bytes.length
+    }
+    await output.sync()
+  } finally {
+    await output.close()
+  }
+  const expectedDigest = await readExact(archive, 32, state)
+  if (!timingSafeEqual(hash.digest(), expectedDigest)) throw new Error('Uninstall cleanup archive file checksum failed')
+}
+
+async function writeBuffer(handle: FileHandle, buffer: Buffer, position: number): Promise<number> {
+  let offset = 0
+  while (offset < buffer.length) {
+    const written = await handle.write(buffer, offset, buffer.length - offset, position + offset)
+    if (written.bytesWritten === 0) throw new Error('Uninstall cleanup archive write made no progress')
+    offset += written.bytesWritten
+  }
+  return position + buffer.length
+}
+
+async function readExact(handle: FileHandle, length: number, state: { position: number }): Promise<Buffer> {
+  const buffer = Buffer.allocUnsafe(length)
+  let offset = 0
+  while (offset < length) {
+    const read = await handle.read(buffer, offset, length - offset, state.position + offset)
+    if (read.bytesRead === 0) throw new Error('Uninstall cleanup archive ended early')
+    offset += read.bytesRead
+  }
+  state.position += length
+  return buffer
+}
+
+async function restoreCanonicalOrThrow(
+  archivePath: string,
+  productRoot: string,
+  transactionId: string,
+  maxEntries: number,
+  originalError: unknown,
+): Promise<void> {
+  let lastError: unknown = originalError
+  for (let attempt = 1; attempt <= RESTORE_ATTEMPTS; attempt += 1) {
+    const restorePath = join(dirname(productRoot), `${RESTORE_PREFIX}${transactionId}-${randomBytes(8).toString('hex')}`)
+    let archiveRestored = false
+    try {
+      await restoreArchive(archivePath, restorePath, transactionId, maxEntries)
+      archiveRestored = true
+      if (await lstatIfExists(productRoot) !== undefined) throw new Error('Canonical product root unexpectedly exists during restore')
+      await rename(restorePath, productRoot)
+      return
+    } catch (error: unknown) {
+      lastError = error
+      if (archiveRestored) await removeOwnedTreeIfPresent(restorePath, productionDependencies())
+    }
+  }
+  throw new AggregateError(
+    [originalError, lastError],
+    `Fatal uninstall cleanup recovery failure; verified archive retained at ${archivePath}`,
+    { cause: originalError },
+  )
+}
+
+async function recoverInterruptedTransactions(appData: string, productRoot: string, maxEntries: number): Promise<void> {
+  const entries = await readdir(appData)
+  for (const name of entries) {
+    const match = /^\.DeepSeek Harness\.uninstall-archive-([0-9a-f]{32})$/u.exec(name)
+    if (match === null) continue
+    const transactionId = match[1]
+    if (transactionId === undefined) continue
+    const archivePath = join(appData, name)
+    const status = await lstat(archivePath)
+    if (status.isSymbolicLink() || !status.isFile()) {
+      throw new Error('Uninstall cleanup archive candidate is not an ordinary file')
+    }
+    const verificationPath = join(appData, `${RESTORE_PREFIX}${transactionId}-${randomBytes(8).toString('hex')}`)
+    await restoreArchive(archivePath, verificationPath, transactionId, maxEntries)
+    if (await lstatIfExists(productRoot) === undefined) await rename(verificationPath, productRoot)
+    else await removeOwnedTree(verificationPath, productionDependencies())
+    for (const residue of entries) {
+      if (residue !== `${VALIDATION_PREFIX}${transactionId}`
+        && !residue.startsWith(`${RESTORE_PREFIX}${transactionId}-`)) continue
+      await removeOwnedTree(join(appData, residue), productionDependencies())
+    }
+    const tombstonePath = join(appData, `${TOMBSTONE_PREFIX}${transactionId}`)
+    if (await lstatIfExists(tombstonePath) !== undefined) await removeOwnedTree(tombstonePath, productionDependencies())
+    await unlinkIfPresent(archivePath)
+  }
 }
 
 async function removeOwnedTree(directory: string, dependencies: UninstallCleanupDependencies): Promise<void> {
@@ -213,18 +475,22 @@ async function removeOwnedTree(directory: string, dependencies: UninstallCleanup
   for (const name of await readdir(directory)) {
     const child = join(directory, name)
     const status = await lstat(child)
-    if (status.isSymbolicLink() || !status.isDirectory()) await dependencies.unlink(child)
-    else await removeOwnedTree(child, dependencies)
+    if (status.isSymbolicLink()) throw new Error(`Uninstall cleanup refuses a descendant link or junction: ${child}`)
+    if (status.isDirectory()) await removeOwnedTree(child, dependencies)
+    else if (status.isFile()) await dependencies.unlink(child)
+    else throw new Error(`Uninstall cleanup refuses a special file: ${child}`)
   }
   assertOrdinaryDirectory(directory, await lstat(directory))
   await dependencies.rmdir(directory)
 }
 
 async function removeOwnedTreeIfPresent(path: string, dependencies: UninstallCleanupDependencies): Promise<void> {
-  try {
-    await removeOwnedTree(path, dependencies)
-  } catch {
-    // Validation residue is non-canonical; cleanup failure cannot justify mutating product data.
+  try { await removeOwnedTree(path, dependencies) } catch { /* Recovery residue remains private and never follows links. */ }
+}
+
+async function unlinkIfPresent(path: string): Promise<void> {
+  try { await unlink(path) } catch (error: unknown) {
+    if (!isNodeError(error) || error.code !== 'ENOENT') throw error
   }
 }
 
