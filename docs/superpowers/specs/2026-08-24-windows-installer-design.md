@@ -2,7 +2,7 @@
 
 English | [中文](2026-08-24-windows-installer-design.zh.md)
 
-Status: product and technical design approved on 2026-08-24; awaiting written-spec review.
+Status: product, technical design, and written specification approved on 2026-08-24.
 
 ## Decision summary
 

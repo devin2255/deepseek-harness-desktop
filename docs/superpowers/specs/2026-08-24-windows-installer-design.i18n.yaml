@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/superpowers/specs/2026-08-24-windows-installer-design.md
-2026-08-24-windows-installer-design.md: 38bcd26d0a78f35d3df4984b450a807021c2c771
-2026-08-24-windows-installer-design.zh.md: 63d2ede3216ac68fb47bd04456e6108b460c32f8
+2026-08-24-windows-installer-design.md: b2689115c43777478113d5d28fb1b0a58ade73b9
+2026-08-24-windows-installer-design.zh.md: 95d78351611ec687c8861ced5168cb00716d7ae8
