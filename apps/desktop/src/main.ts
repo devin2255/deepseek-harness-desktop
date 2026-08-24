@@ -1,6 +1,7 @@
 /** Electron entry binding cleanup mode or the normal retryable desktop lifecycle. */
 import { app, shell } from 'electron'
 import { createRequire } from 'node:module'
+import { acquireApplicationMutex } from './application-mutex.ts'
 import { DesktopLog } from './desktop-log.ts'
 import { startHarness } from './harness-supervisor.ts'
 import { startDesktopMain } from './main-lifecycle.ts'
@@ -52,6 +53,7 @@ function startNormalDesktop(): void {
   })
   startDesktopMain({
     app,
+    acquireApplicationMutex,
     launchSpec: runtimeContext,
     platform: process.platform,
     startHarness: (launchSpec, options) => startHarness(launchSpec, options),

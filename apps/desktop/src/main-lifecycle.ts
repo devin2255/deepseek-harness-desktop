@@ -1,5 +1,6 @@
 /** Coordinates Electron application events with retryable, attempt-owned Harness startup. */
 import type { DesktopLog, DesktopLogEvent } from './desktop-log.ts'
+import type { ApplicationMutexHandle } from './application-mutex.ts'
 import type { HarnessHandle, HarnessLaunchSpec, HarnessStartOptions } from './harness-supervisor.ts'
 import { createStartupState, reduceStartup, type DesktopStartupState } from './startup-state.ts'
 import type { StartupWindow, StartupWindowActions } from './startup-window.ts'
@@ -27,14 +28,18 @@ export interface DesktopApp {
   quit(): void
   /** Subscribe to asynchronous quit interception. */
   on(event: 'before-quit', listener: (event: DesktopQuitEvent) => void): this
+  /** Subscribe to a second-instance launch, including its explicit command line. */
+  on(event: 'second-instance', listener: (event: unknown, commandLine: string[]) => void): this
   /** Subscribe to application lifecycle events without consumed payloads. */
-  on(event: 'second-instance' | 'window-all-closed' | 'activate', listener: () => void): this
+  on(event: 'window-all-closed' | 'activate', listener: () => void): this
 }
 
 /** Replaceable operations at the Electron Main composition boundary. */
 export interface DesktopMainDependencies {
   /** Electron application singleton. */
   readonly app: DesktopApp
+  /** Acquire the product-owned stable application mutex for the owned instance. */
+  readonly acquireApplicationMutex: () => Promise<ApplicationMutexHandle>
   /** Explicit Harness child paths and environment. */
   readonly launchSpec: HarnessLaunchSpec
   /** Runtime operating-system identifier. */
@@ -96,6 +101,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   let resolveShutdown!: () => void
   const shutdown = new Promise<void>((resolve) => { resolveShutdown = resolve })
   let quitLatched = false
+  let applicationMutex: ApplicationMutexHandle | undefined
 
   const report = (phase: 'startup' | 'shutdown' | 'callback', error: unknown): void => {
     try { dependencies.reportFailure(phase, error) } catch { /* Reporting must not escape Electron dispatch. */ }
@@ -216,6 +222,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       try {
         await withTimeout((async () => {
           if (attempt !== undefined) { await attempt.settled; await stopAttempt(attempt) }
+          await applicationMutex?.release()
         })(), dependencies.cleanupTimeoutMs)
       } catch (error: unknown) { report('shutdown', error) } finally {
         quitLatched = true
@@ -245,7 +252,12 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       report('callback', error); void quitAfterCleanup()
     }
   })
-  app.on('second-instance', () => { try { focusLiveWindow() } catch (error: unknown) { report('callback', error) } })
+  app.on('second-instance', (_event, commandLine?: string[]) => {
+    try {
+      if (commandLine?.includes('--installer-request-close') === true) void quitAfterCleanup()
+      else focusLiveWindow()
+    } catch (error: unknown) { report('callback', error) }
+  })
   app.on('window-all-closed', () => {
     try { if (dependencies.platform !== 'darwin') app.quit() } catch (error: unknown) { report('callback', error) }
   })
@@ -256,8 +268,10 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
 
   async function startOwnedInstance(): Promise<void> {
     try {
+      const mutexTask = dependencies.acquireApplicationMutex()
       await waitForReadiness(() => app.whenReady(), readinessController.signal)
-      if (readinessController.signal.aborted) return
+      applicationMutex = await mutexTask
+      if (readinessController.signal.aborted) { await applicationMutex.release(); return }
       startupWindow = await dependencies.createStartupWindow(actions)
       await beginAttempt().settled
     } catch (error: unknown) {

@@ -1,0 +1,30 @@
+appId: ai.deepseek.harness.desktop
+productName: DeepSeek Harness
+artifactName: DeepSeek-Harness-Setup-${version}-x64.${ext}
+asar: false
+npmRebuild: false
+electronDist: node_modules/electron/dist
+directories:
+  app: ../../.artifacts/desktop/stage
+  output: ../../.artifacts/desktop/installer
+  buildResources: build
+win:
+  executableName: DeepSeek Harness
+  icon: icon.ico
+  requestedExecutionLevel: asInvoker
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: true
+  guid: 5e7c4c1c-7429-5bb9-9c22-4e1bf4e2e478
+  include: installer.nsh
+  createDesktopShortcut: false
+  createStartMenuShortcut: false
+  deleteAppDataOnUninstall: false
+  differentialPackage: false

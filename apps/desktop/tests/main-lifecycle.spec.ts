@@ -79,6 +79,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly stop: HarnessHandle['stop']
 } {
   const app = new FakeApp()
+  const acquireApplicationMutex = vi.fn(async () => ({ release: vi.fn(async () => {}) }))
   const stop = vi.fn(async () => {})
   const harness: HarnessHandle = {
     endpoint: new URL('http://127.0.0.1:4312'),
@@ -136,6 +137,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     environment: { DSH_HOME: 'C:\\Users\\tester\\AppData\\Roaming\\DeepSeek Harness\\Harness' },
   }
   const dependencies: DesktopMainDependencies = {
+    acquireApplicationMutex,
     app,
     launchSpec,
     platform: 'win32',
@@ -489,6 +491,19 @@ describe('startDesktopMain', () => {
     expect(focus).toHaveBeenCalledTimes(1)
     expect(startHarness).toHaveBeenCalledTimes(1)
     expect(createWindow).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats the exact installer close intent as bounded owned shutdown', async () => {
+    const { app, dependencies, focus, stop } = fixture()
+    const desktop = startDesktopMain(dependencies)
+    await desktop.startup
+
+    app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close'])
+    await desktop.shutdown
+
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(focus).not.toHaveBeenCalled()
+    expect(app.quit).toHaveBeenCalledTimes(1)
   })
 
   it('aborts pending startup and completes one asynchronous stop before latched quit', async () => {

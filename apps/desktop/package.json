@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "build": "node scripts/clean-built-assets.mjs && tsc -b && tsdown && node scripts/copy-startup-assets.mjs && node scripts/verify-built-assets.mjs",
+    "build:icon": "tsx ../../scripts/desktop/generate-icon.ts",
     "start": "electron .",
     "test": "vitest run --root ../.. apps/desktop/tests",
     "test:built": "pnpm run build",
@@ -35,6 +36,7 @@
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
     "playwright": "^1.49.0",
+    "sharp": "0.35.3",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

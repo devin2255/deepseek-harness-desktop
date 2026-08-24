@@ -242,7 +242,12 @@ export async function materializeWorkspaceLinks(
   }
 }
 
-async function validateRealAncestors(repositoryRoot: string, parent: string): Promise<void> {
+/**
+ * Reject a generated-output parent reached through a link or outside its repository.
+ * @param repositoryRoot - Repository that owns the output hierarchy.
+ * @param parent - Generated-output parent whose existing ancestors are inspected.
+ */
+export async function validateRealAncestors(repositoryRoot: string, parent: string): Promise<void> {
   const root = resolve(repositoryRoot)
   const destinationParent = resolve(parent)
   if (!strictDescendant(root, destinationParent)) {
