@@ -12,6 +12,7 @@ const MINIMUM_RECORD_BYTES = Buffer.byteLength(
     truncated: true,
   })}\n`,
 )
+const SUPPRESSED_INPUT_MESSAGE = '[message suppressed: input limit exceeded]'
 
 /** Explicit storage and redaction settings for desktop diagnostics. */
 export interface DesktopLogConfig {
@@ -21,6 +22,16 @@ export interface DesktopLogConfig {
   readonly maxBytes: number
   /** Literal values removed from lifecycle messages before persistence. */
   readonly sensitiveValues: readonly string[]
+  /** Maximum UTF-16 code units accepted from one message before fixed suppression. */
+  readonly maxMessageCodeUnits: number
+  /** Maximum UTF-16 code units accepted from each timestamp or event-type field. */
+  readonly maxMetadataCodeUnits: number
+}
+
+/** Replaceable pure operations used to prove bounded input handling in focused tests. */
+export interface DesktopLogDependencies {
+  /** Redact sensitive literals from a message selected after input-limit checks. */
+  readonly redactText: (text: string, patterns: readonly string[]) => string
 }
 
 /** One desktop lifecycle record persisted as a JSON line. */
@@ -39,17 +50,23 @@ export class DesktopLog {
   readonly #currentPath: string
   readonly #rotatedPath: string
   readonly #maxBytes: number
+  readonly #maxMessageCodeUnits: number
+  readonly #maxMetadataCodeUnits: number
+  readonly #redactText: DesktopLogDependencies['redactText']
   readonly #sensitiveValues: readonly string[]
 
   /**
    * Create the owned log directory and bind explicit rotation settings.
-   * @param config - Product-owned directory, byte threshold, and sensitive literals.
+   * @param config - Product-owned directory, byte and input thresholds, and sensitive literals.
+   * @param overrides - Optional pure operations replaced by focused tests.
    */
-  constructor(config: DesktopLogConfig) {
+  constructor(config: DesktopLogConfig, overrides: Partial<DesktopLogDependencies> = {}) {
     if (!Number.isSafeInteger(config.maxBytes) || config.maxBytes <= 0) {
       throw new Error('Desktop log maxBytes must be a positive integer')
     }
     if (config.maxBytes < MINIMUM_RECORD_BYTES) throw new Error('Desktop log maxBytes is too small for a valid record')
+    assertPositiveInputLimit(config.maxMessageCodeUnits, 'maxMessageCodeUnits')
+    assertPositiveInputLimit(config.maxMetadataCodeUnits, 'maxMetadataCodeUnits')
     this.#directory = resolve(config.directory)
     ensureOrdinaryDirectory(this.#directory)
     this.#currentPath = resolve(this.#directory, 'desktop.log')
@@ -57,6 +74,9 @@ export class DesktopLog {
     assertOrdinaryLogFile(this.#currentPath)
     assertOrdinaryLogFile(this.#rotatedPath)
     this.#maxBytes = config.maxBytes
+    this.#maxMessageCodeUnits = config.maxMessageCodeUnits
+    this.#maxMetadataCodeUnits = config.maxMetadataCodeUnits
+    this.#redactText = overrides.redactText ?? redactSensitiveText
     this.#sensitiveValues = [...config.sensitiveValues]
   }
 
@@ -65,7 +85,14 @@ export class DesktopLog {
    * @param event - Lifecycle fields to serialize as one JSON line.
    */
   append(event: DesktopLogEvent): void {
-    const line = serializeBoundedEvent(event, this.#sensitiveValues, this.#maxBytes)
+    const line = serializeBoundedEvent(
+      event,
+      this.#sensitiveValues,
+      this.#maxBytes,
+      this.#maxMessageCodeUnits,
+      this.#maxMetadataCodeUnits,
+      this.#redactText,
+    )
     this.#assertOwnedPaths()
     this.#rotateFor(Buffer.byteLength(line))
     this.#assertOwnedPaths()
@@ -105,12 +132,23 @@ function serializeBoundedEvent(
   event: DesktopLogEvent,
   sensitiveValues: readonly string[],
   maxBytes: number,
+  maxMessageCodeUnits: number,
+  maxMetadataCodeUnits: number,
+  redactText: DesktopLogDependencies['redactText'],
 ): string {
-  const message = redactSensitiveText(event.message, sensitiveValues)
-  const complete = serializeRecord(event, message, false)
+  const timestamp = event.timestamp
+  const type = event.type
+  if (timestamp.length > maxMetadataCodeUnits || type.length > maxMetadataCodeUnits) {
+    throw new Error('Desktop log metadata exceeds configured input limit')
+  }
+  const inputMessage = event.message
+  const inputSuppressed = inputMessage.length > maxMessageCodeUnits
+  const selectedMessage = inputSuppressed ? SUPPRESSED_INPUT_MESSAGE : inputMessage
+  const message = redactText(selectedMessage, sensitiveValues)
+  const complete = serializeRecord(timestamp, type, message, inputSuppressed)
   if (Buffer.byteLength(complete) <= maxBytes) return complete
 
-  const empty = serializeRecord(event, '', true)
+  const empty = serializeRecord(timestamp, type, '', true)
   if (Buffer.byteLength(empty) > maxBytes) {
     throw new Error('Desktop log lifecycle metadata exceeds maxBytes')
   }
@@ -120,7 +158,7 @@ function serializeBoundedEvent(
   let bounded = empty
   while (lower <= upper) {
     const middle = Math.floor((lower + upper) / 2)
-    const candidate = serializeRecord(event, codePoints.slice(0, middle).join(''), true)
+    const candidate = serializeRecord(timestamp, type, codePoints.slice(0, middle).join(''), true)
     if (Buffer.byteLength(candidate) <= maxBytes) {
       bounded = candidate
       lower = middle + 1
@@ -132,11 +170,16 @@ function serializeBoundedEvent(
 }
 
 /** Serialize one complete JSON line with an explicit truncation marker when required. */
-function serializeRecord(event: DesktopLogEvent, message: string, truncated: boolean): string {
+function serializeRecord(timestamp: string, type: string, message: string, truncated: boolean): string {
   const record = truncated
-    ? { timestamp: event.timestamp, type: event.type, message, truncated: true }
-    : { timestamp: event.timestamp, type: event.type, message }
+    ? { timestamp, type, message, truncated: true }
+    : { timestamp, type, message }
   return `${JSON.stringify(record)}\n`
+}
+
+/** Validate an explicit code-unit input ceiling before creating filesystem state. */
+function assertPositiveInputLimit(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`Desktop log ${name} must be a positive integer`)
 }
 
 /** Create missing path components while rejecting links and non-directory ancestors. */
