@@ -105,6 +105,39 @@ async function mountedDesktopRuntime(): Promise<{ ctx: Context; guard: WebReques
   return { ctx, guard, removed: () => !registered }
 }
 
+/** Mount independently disposable desktop and API fibers over an observable route registry. */
+async function mountedReadinessRuntime(): Promise<{
+  readonly apiFiber: Awaited<ReturnType<Context['plugin']>>
+  readonly ctx: Context
+  readonly desktopFiber: Awaited<ReturnType<Context['plugin']>>
+  readonly isApiMounted: () => boolean
+  readonly routes: Map<string, Parameters<WebServer['register']>[0]>
+}> {
+  process.env[CAPABILITY_ENV] = 'launch-secret'
+  const routes = new Map<string, Parameters<WebServer['register']>[0]>()
+  const ctx = new Context()
+  contexts.add(ctx)
+  ctx.provide('webServer', {
+    registerGuard: () => () => {},
+    register(route: Parameters<WebServer['register']>[0]) {
+      routes.set(route.path, route)
+      return () => { routes.delete(route.path) }
+    },
+  } as Pick<WebServer, 'register' | 'registerGuard'> as WebServer)
+  const desktopFiber = await ctx.plugin({ inject: [...inject], apply })
+  let apiMounted = false
+  const apiFiber = await ctx.plugin({
+    apply(apiCtx: Context) {
+      apiCtx.effect(() => {
+        apiMounted = true
+        return () => { apiMounted = false }
+      }, 'desktop-app test: API service mounted')
+      apiCtx.provide('apiProxy', {})
+    },
+  })
+  return { apiFiber, ctx, desktopFiber, isApiMounted: () => apiMounted, routes }
+}
+
 /** Release one test context without scheduling a second teardown. */
 async function disposeContext(ctx: Context): Promise<void> {
   contexts.delete(ctx)
@@ -273,24 +306,9 @@ describe('desktop launch capability', () => {
     expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(401)
   })
 
-  it('registers an exact authenticated readiness route only while the API service is mounted', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
-    const routes = new Map<string, Parameters<WebServer['register']>[0]>()
-    const ctx = new Context()
-    contexts.add(ctx)
-    ctx.provide('webServer', {
-      registerGuard: () => () => {},
-      register(route: Parameters<WebServer['register']>[0]) {
-        routes.set(route.path, route)
-        return () => { routes.delete(route.path) }
-      },
-    } as Pick<WebServer, 'register' | 'registerGuard'> as WebServer)
-    await ctx.plugin({ inject: [...inject], apply })
+  it('removes the exact readiness route when the desktop plugin is disposed while the API service remains mounted', async () => {
+    const { apiFiber, ctx, desktopFiber, isApiMounted, routes } = await mountedReadinessRuntime()
     const path = '/.well-known/deepseek-harness-desktop/readiness'
-    expect(routes.has(path)).toBe(false)
-    const apiFiber = await ctx.plugin({
-      apply(apiCtx: Context) { apiCtx.provide('apiProxy', {}) },
-    })
     const route = routes.get(path)
     expect(route).toMatchObject({ kind: 'exact', path })
     if (route === undefined) throw new Error('desktop readiness route was not registered')
@@ -307,7 +325,20 @@ describe('desktop launch capability', () => {
     })
     expect(await invokeRoute(route, 'POST')).toMatchObject({ status: 405 })
 
+    await desktopFiber.dispose()
+    expect(isApiMounted()).toBe(true)
+    expect(routes.has(path)).toBe(false)
     await apiFiber.dispose()
+    await disposeContext(ctx)
+  })
+
+  it('removes the exact readiness route when the API service is disposed', async () => {
+    const { apiFiber, ctx, routes } = await mountedReadinessRuntime()
+    const path = '/.well-known/deepseek-harness-desktop/readiness'
+    expect(routes.get(path)).toMatchObject({ kind: 'exact', path })
+
+    await apiFiber.dispose()
+
     expect(routes.has(path)).toBe(false)
     await disposeContext(ctx)
   })
