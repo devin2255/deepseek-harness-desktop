@@ -1,6 +1,7 @@
 /** Desktop production staging behavior and path-safety tests. */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { lstat as lstatAsync } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +14,14 @@ import {
   DESKTOP_STAGE,
   REPOSITORY_ROOT,
 } from './packaging-layout.ts'
-import { assertRelocatableLink, deploymentManifest, pnpmInvocation, resolveBundleManifest } from './stage.ts'
+import {
+  assertRelocatableLink,
+  deploymentManifest,
+  materializeWorkspaceLinks,
+  pnpmInvocation,
+  resetStageDirectory,
+  resolveBundleManifest,
+} from './stage.ts'
 
 const repositoryRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 const sourceManifest = JSON.parse(readFileSync(join(repositoryRoot, 'apps/desktop/package.json'), 'utf8')) as Record<string, unknown>
@@ -111,7 +119,81 @@ describe('desktop production staging', () => {
       process.platform === 'win32' ? 'junction' : 'dir',
     )
 
-    await expect(resolveBundleManifest('@deepseek-ai/dsh-base', join(logicalDsh, 'package.json')))
+    await expect(resolveBundleManifest('@deepseek-ai/dsh-base', join(logicalDsh, 'package.json'), stage))
       .resolves.toBe(join(bundle, 'package.json'))
+  })
+
+  it('rejects a bundle manifest resolved only from ancestor node_modules', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-resolution-'))
+    temporaryDirectories.push(root)
+    const stage = join(root, 'stage')
+    const dsh = join(stage, 'node_modules/@deepseek-ai/dsh')
+    const ancestorBundle = join(root, 'node_modules/@deepseek-ai/dsh-base')
+    mkdirSync(dsh, { recursive: true })
+    mkdirSync(ancestorBundle, { recursive: true })
+    writeFileSync(join(dsh, 'package.json'), '{"name":"@deepseek-ai/dsh"}\n')
+    writeFileSync(join(ancestorBundle, 'package.json'), '{"name":"@deepseek-ai/dsh-base"}\n')
+
+    await expect(resolveBundleManifest('@deepseek-ai/dsh-base', join(dsh, 'package.json'), stage))
+      .rejects.toThrow('outside staged runtime')
+  })
+
+  it('refuses deletion through a link-shaped artifact ancestor', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-repository-'))
+    const external = mkdtempSync(join(tmpdir(), 'dsh-desktop-external-'))
+    temporaryDirectories.push(root, external)
+    const artifactLink = join(root, '.artifacts')
+    const externalStage = join(external, 'desktop/stage')
+    const sentinel = join(externalStage, 'sentinel.txt')
+    mkdirSync(externalStage, { recursive: true })
+    writeFileSync(sentinel, 'keep\n')
+    symlinkSync(external, artifactLink, process.platform === 'win32' ? 'junction' : 'dir')
+
+    await expect(resetStageDirectory(root, join(root, '.artifacts/desktop/stage')))
+      .rejects.toThrow('link-shaped ancestor')
+    expect(readFileSync(sentinel, 'utf8')).toBe('keep\n')
+    unlinkSync(artifactLink)
+  })
+
+  it('unlinks a link-shaped stage leaf without modifying its target', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-repository-'))
+    const external = mkdtempSync(join(tmpdir(), 'dsh-desktop-external-'))
+    temporaryDirectories.push(root, external)
+    const stage = join(root, '.artifacts/desktop/stage')
+    const sentinel = join(external, 'sentinel.txt')
+    mkdirSync(dirname(stage), { recursive: true })
+    writeFileSync(sentinel, 'keep\n')
+    symlinkSync(external, stage, process.platform === 'win32' ? 'junction' : 'dir')
+
+    await resetStageDirectory(root, stage)
+
+    expect(existsSync(stage)).toBe(false)
+    expect(readFileSync(sentinel, 'utf8')).toBe('keep\n')
+  })
+
+  it('refuses materialization when a scanned link changes before replacement', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-repository-'))
+    const victim = mkdtempSync(join(tmpdir(), 'dsh-desktop-victim-'))
+    temporaryDirectories.push(root, victim)
+    const stage = join(root, '.artifacts/desktop/stage')
+    const source = join(root, 'vendor/cosmokit')
+    const link = join(stage, 'node_modules/@deepseek-ai/cosmokit')
+    const sentinel = join(victim, 'sentinel.txt')
+    mkdirSync(source, { recursive: true })
+    mkdirSync(dirname(link), { recursive: true })
+    writeFileSync(join(source, 'package.json'), '{"name":"@deepseek-ai/cosmokit"}\n')
+    writeFileSync(sentinel, 'keep\n')
+    symlinkSync(source, link, process.platform === 'win32' ? 'junction' : 'dir')
+
+    await expect(materializeWorkspaceLinks(stage, root, {
+      lstat: async (path) => {
+        const stats = await lstatAsync(path)
+        unlinkSync(path)
+        symlinkSync(victim, path, process.platform === 'win32' ? 'junction' : 'dir')
+        return stats
+      },
+    })).rejects.toThrow('changed before replacement')
+    expect(readFileSync(sentinel, 'utf8')).toBe('keep\n')
+    unlinkSync(link)
   })
 })

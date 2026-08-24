@@ -1,14 +1,14 @@
 /** Assemble and validate a relocatable production deployment for the desktop app. */
 
 import { spawnSync } from 'node:child_process'
-import { cp, lstat, mkdir, readFile, readdir, readlink, realpath, rm, writeFile } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import {
   assertOwnedOutput,
-  DESKTOP_ARTIFACT_ROOT,
   DESKTOP_STAGE,
   REPOSITORY_ROOT,
 } from './packaging-layout.ts'
@@ -21,6 +21,38 @@ interface DeploymentManifest {
   readonly main: string
   readonly license?: string | undefined
   readonly dependencies: Readonly<Record<string, string>>
+}
+
+interface MaterializationFileSystem {
+  readonly cp: typeof cp
+  readonly lstat: (path: string) => Promise<Stats>
+  readonly mkdtemp: typeof mkdtemp
+  readonly readlink: typeof readlink
+  readonly rename: typeof rename
+  readonly rm: typeof rm
+  readonly unlink: typeof unlink
+}
+
+const nodeMaterializationFileSystem: MaterializationFileSystem = {
+  cp,
+  lstat,
+  mkdtemp,
+  readlink,
+  rename,
+  rm,
+  unlink,
+}
+
+function strictDescendant(root: string, candidate: string): boolean {
+  const descendant = relative(root, candidate)
+  return descendant !== ''
+    && descendant !== '..'
+    && !descendant.startsWith(`..${sep}`)
+    && !isAbsolute(descendant)
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
 }
 
 function requiredString(manifest: Readonly<Record<string, unknown>>, key: string): string {
@@ -103,9 +135,18 @@ export function assertRelocatableLink(linkPath: string, target: string): void {
  * @param dshManifestPath - Logical or real path to the staged dsh manifest.
  * @returns Absolute path to the resolved bundle manifest.
  */
-export async function resolveBundleManifest(packageName: string, dshManifestPath: string): Promise<string> {
+export async function resolveBundleManifest(
+  packageName: string,
+  dshManifestPath: string,
+  stageRoot: string = DESKTOP_STAGE,
+): Promise<string> {
+  const realStageRoot = await realpath(stageRoot)
   const realDshManifest = await realpath(dshManifestPath)
-  return createRequire(realDshManifest).resolve(`${packageName}/package.json`)
+  const manifestPath = await realpath(createRequire(realDshManifest).resolve(`${packageName}/package.json`))
+  if (!strictDescendant(realStageRoot, manifestPath)) {
+    throw new Error(`desktop staging: resolved bundle manifest is outside staged runtime: ${manifestPath}`)
+  }
+  return manifestPath
 }
 
 function assertExactStage(path: string): void {
@@ -138,42 +179,126 @@ async function verifyRelocatableLinks(directory: string): Promise<void> {
   }
 }
 
-async function escapingLinks(directory: string): Promise<Array<{ readonly path: string; readonly target: string }>> {
+async function escapingLinks(
+  directory: string,
+  stageRoot: string,
+): Promise<Array<{ readonly path: string; readonly target: string }>> {
   const links: Array<{ readonly path: string; readonly target: string }> = []
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const entryPath = join(directory, entry.name)
     if (entry.isSymbolicLink()) {
       const target = await readlink(entryPath)
-      try {
-        assertRelocatableLink(entryPath, target)
-      } catch {
+      if (!strictDescendant(stageRoot, resolve(dirname(entryPath), target))) {
         links.push({ path: entryPath, target })
       }
     } else if (entry.isDirectory()) {
-      links.push(...await escapingLinks(entryPath))
+      links.push(...await escapingLinks(entryPath, stageRoot))
     }
   }
   return links
 }
 
-async function materializeWorkspaceLinks(): Promise<void> {
+/**
+ * Replace allowlisted workspace links with private staged copies.
+ * @param stageRoot - Real deployment root containing pnpm's link graph.
+ * @param repositoryRoot - Repository containing the allowlisted workspace sources.
+ * @param operationOverrides - Filesystem operations supplied by a constrained host.
+ */
+export async function materializeWorkspaceLinks(
+  stageRoot: string,
+  repositoryRoot: string,
+  operationOverrides: Partial<MaterializationFileSystem> = {},
+): Promise<void> {
+  const operations: MaterializationFileSystem = { ...nodeMaterializationFileSystem, ...operationOverrides }
   const allowedSources = new Set([
-    join(REPOSITORY_ROOT, 'apps/desktop'),
-    join(REPOSITORY_ROOT, 'native/landlock-run/packages/linux-arm64'),
-    join(REPOSITORY_ROOT, 'native/landlock-run/packages/linux-x64'),
-    join(REPOSITORY_ROOT, 'vendor/cosmokit'),
-    join(REPOSITORY_ROOT, 'vendor/schemastery'),
+    join(repositoryRoot, 'apps/desktop'),
+    join(repositoryRoot, 'native/landlock-run/packages/linux-arm64'),
+    join(repositoryRoot, 'native/landlock-run/packages/linux-x64'),
+    join(repositoryRoot, 'vendor/cosmokit'),
+    join(repositoryRoot, 'vendor/schemastery'),
   ].map(path => resolve(path)))
-  for (const link of await escapingLinks(DESKTOP_STAGE)) {
+  for (const link of await escapingLinks(stageRoot, stageRoot)) {
     const source = resolve(dirname(link.path), link.target)
     if (!allowedSources.has(source)) {
       throw new Error(`desktop staging: cannot materialize unexpected external link: ${link.path} -> ${link.target}`)
     }
-    await rm(link.path, { recursive: true, force: true })
-    await cp(source, link.path, {
-      recursive: true,
-      filter: path => !['.artifacts', 'node_modules'].includes(path.slice(path.lastIndexOf(sep) + 1)),
-    })
+    const privateParent = await operations.mkdtemp(join(dirname(link.path), '.dsh-materialize-'))
+    const materialized = join(privateParent, 'package')
+    try {
+      await operations.cp(source, materialized, {
+        recursive: true,
+        filter: path => !['.artifacts', 'node_modules'].includes(path.slice(path.lastIndexOf(sep) + 1)),
+      })
+      const currentStats = await operations.lstat(link.path)
+      const currentTarget = currentStats.isSymbolicLink() ? await operations.readlink(link.path) : undefined
+      if (currentTarget !== link.target) {
+        throw new Error(`desktop staging: link changed before replacement: ${link.path}`)
+      }
+      await operations.unlink(link.path)
+      await operations.rename(materialized, link.path)
+    } finally {
+      await operations.rm(privateParent, { recursive: true, force: true })
+    }
+  }
+}
+
+async function validateRealAncestors(repositoryRoot: string, parent: string): Promise<void> {
+  const root = resolve(repositoryRoot)
+  const destinationParent = resolve(parent)
+  if (!strictDescendant(root, destinationParent)) {
+    throw new Error(`desktop staging: artifact parent is outside repository: ${destinationParent}`)
+  }
+  const canonicalRoot = await realpath(root)
+  const components = relative(root, destinationParent).split(sep)
+  let current = root
+  for (const component of ['', ...components]) {
+    if (component !== '') current = join(current, component)
+    let stats
+    try {
+      stats = await lstat(current)
+    } catch (error) {
+      if (isMissing(error)) break
+      throw error
+    }
+    if (stats.isSymbolicLink()) {
+      throw new Error(`desktop staging: link-shaped ancestor blocks deletion: ${current}`)
+    }
+    const canonical = await realpath(current)
+    if (canonical !== canonicalRoot && !strictDescendant(canonicalRoot, canonical)) {
+      throw new Error(`desktop staging: resolved ancestor escapes repository: ${current} -> ${canonical}`)
+    }
+  }
+}
+
+/**
+ * Remove only the validated stage leaf and recreate its real parent directory.
+ * @param repositoryRoot - Repository that owns the artifact hierarchy.
+ * @param stagePath - Exact stage directory to replace.
+ */
+export async function resetStageDirectory(repositoryRoot: string, stagePath: string): Promise<void> {
+  const stage = resolve(stagePath)
+  await validateRealAncestors(repositoryRoot, dirname(stage))
+  await mkdir(dirname(stage), { recursive: true })
+  await validateRealAncestors(repositoryRoot, dirname(stage))
+  let stats
+  try {
+    stats = await lstat(stage)
+  } catch (error) {
+    if (isMissing(error)) return
+    throw error
+  }
+  const quarantineParent = await mkdtemp(join(dirname(stage), '.dsh-remove-'))
+  const quarantinedStage = join(quarantineParent, 'stage')
+  try {
+    await rename(stage, quarantinedStage)
+    stats = await lstat(quarantinedStage)
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      await unlink(quarantinedStage)
+    } else {
+      await rm(quarantinedStage, { recursive: true })
+    }
+  } finally {
+    await rm(quarantineParent, { recursive: true, force: true })
   }
 }
 
@@ -193,7 +318,7 @@ async function verifyRuntime(): Promise<void> {
   for (const packageName of bundlePackages) {
     let manifestPath: string
     try {
-      manifestPath = await resolveBundleManifest(packageName, dshManifestPath)
+      manifestPath = await resolveBundleManifest(packageName, dshManifestPath, DESKTOP_STAGE)
     } catch (error) {
       throw new Error(`desktop staging: cannot resolve ${packageName}/package.json from staged @deepseek-ai/dsh`, { cause: error })
     }
@@ -206,8 +331,7 @@ async function verifyRuntime(): Promise<void> {
 
 async function main(): Promise<void> {
   assertExactStage(DESKTOP_STAGE)
-  await mkdir(DESKTOP_ARTIFACT_ROOT, { recursive: true })
-  await rm(DESKTOP_STAGE, { recursive: true, force: true })
+  await resetStageDirectory(REPOSITORY_ROOT, DESKTOP_STAGE)
 
   const pnpm = pnpmInvocation()
   const result = spawnSync(
@@ -221,7 +345,7 @@ async function main(): Promise<void> {
   const sourcePath = join(REPOSITORY_ROOT, 'apps/desktop/package.json')
   const source = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>
   await writeFile(join(DESKTOP_STAGE, 'package.json'), `${JSON.stringify(deploymentManifest(source), null, 2)}\n`)
-  await materializeWorkspaceLinks()
+  await materializeWorkspaceLinks(DESKTOP_STAGE, REPOSITORY_ROOT)
   await verifyRuntime()
 }
 
