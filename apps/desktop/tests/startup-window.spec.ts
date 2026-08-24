@@ -110,7 +110,7 @@ describe('createStartupWindow', () => {
       restore: vi.fn(),
     }
 
-    const handoff = startup.handoffTo(desktop)
+    const handoff = startup.handoffTo(desktop, vi.fn())
     await handoff
 
     expect(fixture.steps.slice(-3)).toEqual(['desktop-focus', 'startup-destroy', 'startup-closed'])
@@ -126,13 +126,33 @@ describe('createStartupWindow', () => {
       restore: vi.fn(),
     }
 
-    const handoff = startup.handoffTo(desktop)
+    const handoff = startup.handoffTo(desktop, vi.fn())
     const destroyedBeforeRelease = fixture.destroyed()
     fixture.emitClosed()
     await handoff
 
     expect(destroyedBeforeRelease).toBe(true)
     expect(fixture.steps).toContain('startup-destroy')
+  })
+
+  it('commits handoff after destruction and reports later IPC cleanup errors', async () => {
+    const cleanupFailure = new Error('handler cleanup failed')
+    const fixture = startupFixture(undefined, { removeHandlerFailure: cleanupFailure })
+    const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
+    const desktop = {
+      focus: vi.fn(() => fixture.steps.push('desktop-focus')),
+      isMinimized: () => false,
+      onClosed: () => () => {},
+      restore: vi.fn(),
+    }
+    const reportFailure = vi.fn()
+
+    await expect(startup.handoffTo(desktop, reportFailure)).resolves.toBeUndefined()
+
+    expect(fixture.destroyed()).toBe(true)
+    expect(reportFailure).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Startup window IPC cleanup failed',
+    }))
   })
 
   it('destroys after a failed load, disposes every handler once, and settles closure', async () => {

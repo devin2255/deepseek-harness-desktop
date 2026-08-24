@@ -145,7 +145,9 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       }
       const recovery = startupWindow
       if (recovery === undefined) throw new Error('Desktop startup window is unavailable for handoff')
-      await recovery.handoffTo(desktopWindow)
+      await recovery.handoffTo(desktopWindow, (error) => {
+        report('callback', error)
+      })
       if (attemptIsInactive(attempt)) {
         await stopAttempt(attempt)
         return

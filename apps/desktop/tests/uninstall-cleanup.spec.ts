@@ -1,8 +1,8 @@
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
-import { rmdir, unlink, utimes } from 'node:fs/promises'
+import { lstat, open, rmdir, unlink, utimes, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, parse } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { dirname, join, parse } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import {
   isUninstallCleanupInvocation,
   UNINSTALL_CLEANUP_ENVIRONMENT_KEY,
@@ -171,6 +171,40 @@ describe('runUninstallCleanup', () => {
     expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep')
   })
 
+  it('revalidates an open removal parent before mutating a concurrently redirected child', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-parent-race-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const external = mkdtempSync(join(tmpdir(), 'dsh-cleanup-parent-race-external-'))
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(join(external, 'owned.txt'), 'external-sentinel')
+    let replacementAttempted = false
+
+    await expect(runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      lstat: async (path) => {
+        const text = path
+        if (!replacementAttempted && text.includes('uninstall-validation') && text.endsWith('owned.txt')) {
+          replacementAttempted = true
+          const parent = dirname(text)
+          try {
+            renameSync(parent, join(appData, 'displaced-validation'))
+            symlinkSync(external, parent, process.platform === 'win32' ? 'junction' : 'dir')
+          } catch (error: unknown) {
+            throw new Error('Open directory prevented the injected parent replacement', { cause: error })
+          }
+        }
+        return lstat(path)
+      },
+    })).rejects.toThrow(/identity|link|replacement|validation/iu)
+
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    expect(readFileSync(join(external, 'owned.txt'), 'utf8')).toBe('external-sentinel')
+  })
+
   it('leaves the canonical tree intact when the atomic commit rename fails', async () => {
     const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-commit-failure-'))
     const product = join(appData, 'DeepSeek Harness')
@@ -269,6 +303,81 @@ describe('runUninstallCleanup', () => {
     expect(transactionArtifacts(appData).some(name => name.includes('uninstall-archive'))).toBe(true)
   })
 
+  it('recovers a single deterministic restore residue on the next authorized cleanup', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-reentrant-restore-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const external = join(appData, 'external.txt')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(external, 'keep')
+
+    await expect(runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      rmdir: async (path) => {
+        if (String(path).includes('uninstall-tombstone')) throw new Error('injected tombstone failure')
+        await rmdir(path)
+      },
+      unlink: async (path) => {
+        if (String(path).includes('uninstall-restore')) throw new Error('injected restore cleanup failure')
+        await unlink(path)
+      },
+      utimes: async (path, atime, mtime) => {
+        if (String(path).includes('uninstall-restore')) throw new Error('injected restore metadata failure')
+        await utimes(path, atime, mtime)
+      },
+    })).rejects.toThrow(/fatal.*recovery/iu)
+    expect(transactionArtifacts(appData).filter(name => name.includes('uninstall-restore'))).toHaveLength(1)
+
+    await expect(invoke(appData)).resolves.toBe(true)
+    expect(transactionArtifacts(appData)).toEqual([])
+    expect(readFileSync(external, 'utf8')).toBe('keep')
+  })
+
+  it('closes an opened archive handle when stat fails', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-archive-stat-failure-'))
+    const product = join(appData, 'DeepSeek Harness')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    const archive = await stageArchive(appData)
+    const statFailure = new Error('injected archive stat failure')
+    const closeSpy = vi.fn()
+
+    await expect(runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      openArchive: () => archiveHandleWithFailures(archive, statFailure, undefined, closeSpy),
+    })).rejects.toBe(statFailure)
+    expect(closeSpy).toHaveBeenCalledOnce()
+  })
+
+  it('retains both archive stat and close failures', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-archive-double-failure-'))
+    const product = join(appData, 'DeepSeek Harness')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    const archive = await stageArchive(appData)
+    const statFailure = new Error('injected archive stat failure')
+    const closeFailure = new Error('injected archive close failure')
+    const closeSpy = vi.fn()
+
+    const failure = await runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      openArchive: () => archiveHandleWithFailures(archive, statFailure, closeFailure, closeSpy),
+    }).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toEqual([statFailure, closeFailure])
+    expect(closeSpy).toHaveBeenCalledOnce()
+  })
+
   it('restores canonical contents and directory structure when final archive unlink fails', async () => {
     const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-archive-failure-'))
     const product = join(appData, 'DeepSeek Harness')
@@ -289,6 +398,51 @@ describe('runUninstallCleanup', () => {
 
     expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
     expect(readFileSync(join(product, 'nested', 'second.txt'), 'utf8')).toBe('second')
+  })
+
+  it('restores canonical data when a reserved conflict appears before the final archive commit', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-final-conflict-'))
+    const product = join(appData, 'DeepSeek Harness')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+
+    await expect(runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      unlink: async (path) => {
+        if (String(path).includes('uninstall-archive')) {
+          mkdirSync(join(appData, '.DeepSeek Harness.uninstall-validation-fedcba9876543210fedcba9876543210'))
+          throw new Error('injected precommit namespace conflict')
+        }
+        await unlink(path)
+      },
+    })).rejects.toThrow(/restored|transaction/iu)
+
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+  })
+
+  it('does not report an unrecoverable failure after the final archive unlink commits', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-postcommit-namespace-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const concurrentArtifact = join(appData, '.DeepSeek Harness.uninstall-validation-fedcba9876543210fedcba9876543210')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+
+    await expect(runUninstallCleanup({
+      argv: [`--uninstall-delete-user-data=${TOKEN}`],
+      environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
+      maxSnapshotEntries: 100,
+    }, {
+      unlink: async (path) => {
+        await unlink(path)
+        if (String(path).includes('uninstall-archive')) mkdirSync(concurrentArtifact)
+      },
+    })).resolves.toBe(true)
+
+    expect(() => lstatSync(product)).toThrow()
+    expect(lstatSync(concurrentArtifact).isDirectory()).toBe(true)
   })
 
   it('rejects any descendant link before mutation and preserves the external target', async () => {
@@ -522,6 +676,31 @@ async function stageArchive(appData: string): Promise<string> {
   Buffer.from(transactionId, 'ascii').copy(savedArchive, 8)
   writeFileSync(archive, savedArchive)
   return archive
+}
+
+async function archiveHandleWithFailures(
+  archive: string,
+  statFailure: Error,
+  closeFailure: Error | undefined,
+  closeSpy: () => void,
+): Promise<FileHandle> {
+  const handle = await open(archive, 'r')
+  return new Proxy(handle, {
+    get(target, property, receiver) {
+      if (property === 'stat') return async () => { throw statFailure }
+      if (property === 'close') {
+        return async () => {
+          closeSpy()
+          await target.close()
+          if (closeFailure !== undefined) throw closeFailure
+        }
+      }
+      const value: unknown = Reflect.get(target, property, receiver)
+      return typeof value === 'function'
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args) as unknown
+        : value
+    },
+  })
 }
 
 function transactionArtifacts(appData: string): string[] {

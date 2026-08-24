@@ -1,12 +1,13 @@
 /** Authenticates uninstall cleanup and provides rollback for every reported failure. */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { isUtf8 } from 'node:buffer'
-import type { Stats } from 'node:fs'
+import type { Dir, Stats } from 'node:fs'
 import {
   chmod,
   lstat,
   mkdir,
   open,
+  opendir,
   readdir,
   rename,
   rmdir,
@@ -54,6 +55,12 @@ export interface UninstallCleanupRequest {
 export interface UninstallCleanupDependencies {
   /** Apply portable permission bits to a verified recovery entry before publication. */
   readonly chmod: typeof chmod
+  /** Inspect a path without following its final link. */
+  readonly lstat: (path: string) => Promise<Stats>
+  /** Hold one ordinary directory open while traversing its entries. */
+  readonly openDirectory: (path: string) => Promise<Dir>
+  /** Open one already validated ordinary archive for bounded parsing. */
+  readonly openArchive: (path: string) => Promise<FileHandle>
   /** Atomically move the fixed canonical product directory within APPDATA. */
   readonly rename: typeof rename
   /** Remove one empty ordinary directory from a validated tree. */
@@ -127,7 +134,17 @@ export async function runUninstallCleanup(
   if (!isValidToken(environmentToken) || !tokensMatch(argumentToken, environmentToken)) {
     throw new Error('Uninstall cleanup confirmation was rejected')
   }
-  const dependencies: UninstallCleanupDependencies = { chmod, rename, rmdir, unlink, utimes, ...overrides }
+  const dependencies: UninstallCleanupDependencies = {
+    chmod,
+    lstat: path => lstat(path),
+    openArchive: path => open(path, 'r'),
+    openDirectory: path => opendir(path),
+    rename,
+    rmdir,
+    unlink,
+    utimes,
+    ...overrides,
+  }
   const appData = resolveAppData(request.environment.APPDATA)
   const productRoot = resolve(appData, PRODUCT_DIRECTORY)
   assertContainedProductRoot(appData, productRoot)
@@ -188,18 +205,39 @@ export async function runUninstallCleanup(
   }
 
   try {
+    await assertCommitArchiveIsOnlyReservedArtifact(appData, transactionId, archivePath)
     await dependencies.unlink(archivePath)
   } catch (error: unknown) {
     await restoreCanonicalOrThrow(archivePath, productRoot, transactionId, request.maxSnapshotEntries, error, dependencies)
     await unlinkIfPresent(archivePath)
     throw new Error('Uninstall cleanup final commit failed and canonical data was restored', { cause: error })
   }
-  await assertNoReservedArtifacts(appData)
   return true
 }
 
+async function assertCommitArchiveIsOnlyReservedArtifact(
+  appData: string,
+  transactionId: string,
+  archivePath: string,
+): Promise<void> {
+  const transaction = await scanReservedTransaction(appData)
+  if (transaction?.id !== transactionId || transaction.archive?.path !== archivePath
+    || transaction.tombstone !== undefined || transaction.validation !== undefined || transaction.restore !== undefined) {
+    throw new Error('Uninstall cleanup reserved namespace changed before final commit')
+  }
+}
+
 function productionDependencies(): UninstallCleanupDependencies {
-  return { chmod, rename, rmdir, unlink, utimes }
+  return {
+    chmod,
+    lstat: path => lstat(path),
+    openArchive: path => open(path, 'r'),
+    openDirectory: path => opendir(path),
+    rename,
+    rmdir,
+    unlink,
+    utimes,
+  }
 }
 
 function assertEntryLimit(value: number): void {
@@ -410,78 +448,118 @@ async function restoreArchive(
   destination: string,
   transactionId: string,
   maxEntries: number,
-  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+  dependencies: UninstallCleanupDependencies,
 ): Promise<void> {
-  const archive = await open(archivePath, 'r')
-  const archiveStatus = await archive.stat()
-  if (!Number.isSafeInteger(archiveStatus.size) || archiveStatus.size < ARCHIVE_HEADER_BYTES + 1) {
-    await archive.close()
-    throw new Error('Uninstall cleanup archive header is truncated')
-  }
-  const state: ArchiveReadState = {
-    entries: 0,
-    pathMetadataBytes: 0,
-    paths: new Set(),
-    position: 0,
-    size: archiveStatus.size,
-  }
-  let destinationCreated = false
+  const destinationState = { created: false }
   try {
-    const header = await readExact(archive, ARCHIVE_HEADER_BYTES, state)
-    if (!header.subarray(0, ARCHIVE_MAGIC.length).equals(ARCHIVE_MAGIC)
+    await withArchiveHandle(() => dependencies.openArchive(archivePath), async (archive) => {
+      const archiveStatus = await archive.stat()
+      if (!Number.isSafeInteger(archiveStatus.size) || archiveStatus.size < ARCHIVE_HEADER_BYTES + 1) {
+        throw new Error('Uninstall cleanup archive header is truncated')
+      }
+      const state: ArchiveReadState = {
+        entries: 0,
+        pathMetadataBytes: 0,
+        paths: new Set(),
+        position: 0,
+        size: archiveStatus.size,
+      }
+      const header = await readExact(archive, ARCHIVE_HEADER_BYTES, state)
+      if (!header.subarray(0, ARCHIVE_MAGIC.length).equals(ARCHIVE_MAGIC)
       || header.subarray(ARCHIVE_MAGIC.length, 40).toString('ascii') !== transactionId) {
-      throw new Error('Uninstall cleanup archive identity is invalid')
-    }
-    const declaredEntries = header.readUInt32BE(40)
-    if (declaredEntries < 1 || declaredEntries > maxEntries) {
-      throw new Error('Uninstall cleanup archive entry count exceeds the configured limit')
-    }
-    const rootMetadata = decodeMetadata(header, 44)
-    consumeEntry(state, maxEntries)
-    await mkdir(destination)
-    destinationCreated = true
-    const directories: ArchivedDirectoryMetadata[] = [{ path: destination, ...rootMetadata }]
-    while (true) {
-      const type = (await readExact(archive, 1, state)).readUInt8(0)
-      if (type === ARCHIVE_END) break
-      if (type !== ARCHIVE_DIRECTORY && type !== ARCHIVE_FILE) throw new Error('Uninstall cleanup archive record type is invalid')
+        throw new Error('Uninstall cleanup archive identity is invalid')
+      }
+      const declaredEntries = header.readUInt32BE(40)
+      if (declaredEntries < 1 || declaredEntries > maxEntries) {
+        throw new Error('Uninstall cleanup archive entry count exceeds the configured limit')
+      }
+      const rootMetadata = decodeMetadata(header, 44)
       consumeEntry(state, maxEntries)
-      if (state.entries > declaredEntries) throw new Error('Uninstall cleanup archive entry count does not match its records')
-      const pathLength = (await readExact(archive, 4, state)).readUInt32BE(0)
-      if (pathLength === 0 || pathLength > MAX_ARCHIVE_PATH_UTF8_BYTES) {
-        throw new Error('Uninstall cleanup archive path exceeds the metadata limit')
+      await mkdir(destination)
+      destinationState.created = true
+      const directories: ArchivedDirectoryMetadata[] = [{ path: destination, ...rootMetadata }]
+      while (true) {
+        const type = (await readExact(archive, 1, state)).readUInt8(0)
+        if (type === ARCHIVE_END) break
+        if (type !== ARCHIVE_DIRECTORY && type !== ARCHIVE_FILE) throw new Error('Uninstall cleanup archive record type is invalid')
+        consumeEntry(state, maxEntries)
+        if (state.entries > declaredEntries) throw new Error('Uninstall cleanup archive entry count does not match its records')
+        const pathLength = (await readExact(archive, 4, state)).readUInt32BE(0)
+        if (pathLength === 0 || pathLength > MAX_ARCHIVE_PATH_UTF8_BYTES) {
+          throw new Error('Uninstall cleanup archive path exceeds the metadata limit')
+        }
+        consumePathMetadata(state, pathLength)
+        const pathBytes = await readExact(archive, pathLength, state)
+        if (!isUtf8(pathBytes)) throw new Error('Uninstall cleanup archive path is not valid UTF-8')
+        const relativePath = pathBytes.toString('utf8')
+        if (relativePath.length > MAX_ARCHIVE_PATH_CODE_UNITS) {
+          throw new Error('Uninstall cleanup archive path exceeds the metadata limit')
+        }
+        assertArchivePath(relativePath, state.paths)
+        const metadata = decodeMetadata(await readExact(archive, ARCHIVE_METADATA_BYTES, state), 0)
+        const target = archiveTarget(destination, relativePath)
+        if (type === ARCHIVE_DIRECTORY) {
+          await mkdir(target)
+          directories.push({ path: target, ...metadata })
+        } else {
+          await restoreFile(archive, target, metadata, state, dependencies)
+        }
       }
-      consumePathMetadata(state, pathLength)
-      const pathBytes = await readExact(archive, pathLength, state)
-      if (!isUtf8(pathBytes)) throw new Error('Uninstall cleanup archive path is not valid UTF-8')
-      const relativePath = pathBytes.toString('utf8')
-      if (relativePath.length > MAX_ARCHIVE_PATH_CODE_UNITS) {
-        throw new Error('Uninstall cleanup archive path exceeds the metadata limit')
-      }
-      assertArchivePath(relativePath, state.paths)
-      const metadata = decodeMetadata(await readExact(archive, ARCHIVE_METADATA_BYTES, state), 0)
-      const target = archiveTarget(destination, relativePath)
-      if (type === ARCHIVE_DIRECTORY) {
-        await mkdir(target)
-        directories.push({ path: target, ...metadata })
-      } else {
-        await restoreFile(archive, target, metadata, state, dependencies)
-      }
-    }
-    if (state.entries !== declaredEntries) throw new Error('Uninstall cleanup archive entry count does not match its records')
-    if (state.position !== state.size) throw new Error('Uninstall cleanup archive has trailing data')
-    for (const metadata of directories.reverse()) await applyMetadata(metadata.path, metadata, dependencies)
-    const completedStatus = await archive.stat()
-    if (completedStatus.dev !== archiveStatus.dev || completedStatus.ino !== archiveStatus.ino
+      if (state.entries !== declaredEntries) throw new Error('Uninstall cleanup archive entry count does not match its records')
+      if (state.position !== state.size) throw new Error('Uninstall cleanup archive has trailing data')
+      for (const metadata of directories.reverse()) await applyMetadata(metadata.path, metadata, dependencies)
+      const completedStatus = await archive.stat()
+      if (completedStatus.dev !== archiveStatus.dev || completedStatus.ino !== archiveStatus.ino
       || completedStatus.size !== archiveStatus.size || completedStatus.mtimeMs !== archiveStatus.mtimeMs) {
-      throw new Error('Uninstall cleanup archive changed during verification')
-    }
+        throw new Error('Uninstall cleanup archive changed during verification')
+      }
+    })
   } catch (error: unknown) {
-    await archive.close().catch(() => {})
-    if (destinationCreated) await removeOwnedTreeIfPresent(destination, productionDependencies())
+    if (destinationState.created) {
+      try {
+        await removeOwnedTree(destination, dependencies)
+      } catch (cleanupError: unknown) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Uninstall cleanup archive restore and private-directory cleanup both failed',
+          { cause: error },
+        )
+      }
+    }
     throw error
   }
-  await archive.close()
+}
+
+async function withArchiveHandle(
+  openHandle: () => Promise<FileHandle>,
+  operation: (handle: FileHandle) => Promise<void>,
+): Promise<void> {
+  const handle = await openHandle()
+  let operationError: Error | undefined
+  try {
+    try {
+      await operation(handle)
+    } catch (error: unknown) {
+      operationError = normalizeError(error)
+      throw operationError
+    }
+  } finally {
+    try {
+      await handle.close()
+    } catch (error: unknown) {
+      const closeError = normalizeError(error)
+      if (operationError !== undefined) {
+        throw new AggregateError([operationError, closeError], 'Uninstall cleanup archive operation and close both failed', {
+          cause: operationError,
+        })
+      }
+      throw closeError
+    }
+  }
+}
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error('Uninstall cleanup received a non-Error failure', { cause: error })
 }
 
 function decodeMetadata(buffer: Buffer, offset: number): ArchivedMetadata {
@@ -520,7 +598,7 @@ async function restoreFile(
   target: string,
   metadata: ArchivedMetadata,
   state: ArchiveReadState,
-  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+  dependencies: UninstallCleanupDependencies,
 ): Promise<void> {
   const encodedSize = (await readExact(archive, 8, state)).readBigUInt64BE(0)
   const remainingContentBytes = remainingArchiveBytes(state) - ARCHIVE_CHECKSUM_BYTES
@@ -553,7 +631,7 @@ async function restoreFile(
 async function applyMetadata(
   path: string,
   metadata: ArchivedMetadata,
-  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+  dependencies: UninstallCleanupDependencies,
 ): Promise<void> {
   await dependencies.chmod(path, metadata.mode)
   const mtime = new Date(metadata.mtimeMs)
@@ -603,21 +681,30 @@ async function restoreCanonicalOrThrow(
   transactionId: string,
   maxEntries: number,
   originalError: unknown,
-  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+  dependencies: UninstallCleanupDependencies,
 ): Promise<void> {
   let lastError: unknown = originalError
+  const restorePath = join(dirname(productRoot), `${RESTORE_PREFIX}${transactionId}-0000000000000000`)
   for (let attempt = 1; attempt <= RESTORE_ATTEMPTS; attempt += 1) {
-    const restorePath = join(dirname(productRoot), `${RESTORE_PREFIX}${transactionId}-${randomBytes(8).toString('hex')}`)
-    let archiveRestored = false
     try {
       await restoreArchive(archivePath, restorePath, transactionId, maxEntries, dependencies)
-      archiveRestored = true
       if (await lstatIfExists(productRoot) !== undefined) throw new Error('Canonical product root unexpectedly exists during restore')
       await rename(restorePath, productRoot)
       return
     } catch (error: unknown) {
       lastError = error
-      if (archiveRestored) await removeOwnedTreeIfPresent(restorePath, productionDependencies())
+      if (await lstatIfExists(restorePath) !== undefined) {
+        try {
+          await removeOwnedTree(restorePath, dependencies)
+        } catch (cleanupError: unknown) {
+          lastError = new AggregateError(
+            [error, cleanupError],
+            'Uninstall cleanup rollback and deterministic restore cleanup both failed',
+            { cause: error },
+          )
+          break
+        }
+      }
     }
   }
   throw new AggregateError(
@@ -631,7 +718,7 @@ async function recoverInterruptedTransactions(
   appData: string,
   productRoot: string,
   maxEntries: number,
-  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+  dependencies: UninstallCleanupDependencies,
 ): Promise<void> {
   const transaction = await scanReservedTransaction(appData)
   if (transaction === undefined) return
@@ -712,22 +799,56 @@ function parseReservedArtifact(name: string): Pick<ReservedArtifact, 'id' | 'kin
   return undefined
 }
 
-async function removeOwnedTree(directory: string, dependencies: UninstallCleanupDependencies): Promise<void> {
-  assertOrdinaryDirectory(directory, await lstat(directory))
-  for (const name of await readdir(directory)) {
-    const child = join(directory, name)
-    const status = await lstat(child)
-    if (status.isSymbolicLink()) throw new Error(`Uninstall cleanup refuses a descendant link or junction: ${child}`)
-    if (status.isDirectory()) await removeOwnedTree(child, dependencies)
-    else if (status.isFile()) await dependencies.unlink(child)
-    else throw new Error(`Uninstall cleanup refuses a special file: ${child}`)
+interface OwnedDirectoryIdentity {
+  readonly path: string
+  readonly status: Stats
+}
+
+async function removeOwnedTree(
+  directory: string,
+  dependencies: UninstallCleanupDependencies,
+  ancestors: readonly OwnedDirectoryIdentity[] = [],
+): Promise<void> {
+  const directoryStatus = await dependencies.lstat(directory)
+  assertOrdinaryDirectory(directory, directoryStatus)
+  const identities = [...ancestors, { path: directory, status: directoryStatus }]
+  await assertDirectoryIdentities(identities, dependencies)
+  const handle = await dependencies.openDirectory(directory)
+  try {
+    while (true) {
+      const entry = await handle.read()
+      if (entry === null) break
+      await assertDirectoryIdentities(identities, dependencies)
+      const child = join(directory, entry.name)
+      const status = await dependencies.lstat(child)
+      await assertDirectoryIdentities(identities, dependencies)
+      if (status.isSymbolicLink()) throw new Error(`Uninstall cleanup refuses a descendant link or junction: ${child}`)
+      if (status.isDirectory()) await removeOwnedTree(child, dependencies, identities)
+      else if (status.isFile()) {
+        await assertDirectoryIdentities(identities, dependencies)
+        await dependencies.unlink(child)
+      } else {
+        throw new Error(`Uninstall cleanup refuses a special file: ${child}`)
+      }
+    }
+  } finally {
+    await handle.close()
   }
-  assertOrdinaryDirectory(directory, await lstat(directory))
+  await assertDirectoryIdentities(identities, dependencies)
   await dependencies.rmdir(directory)
 }
 
-async function removeOwnedTreeIfPresent(path: string, dependencies: UninstallCleanupDependencies): Promise<void> {
-  try { await removeOwnedTree(path, dependencies) } catch { /* Recovery residue remains private and never follows links. */ }
+async function assertDirectoryIdentities(
+  identities: readonly OwnedDirectoryIdentity[],
+  dependencies: Pick<UninstallCleanupDependencies, 'lstat'>,
+): Promise<void> {
+  for (const identity of identities) {
+    const current = await dependencies.lstat(identity.path)
+    assertOrdinaryDirectory(identity.path, current)
+    if (current.dev !== identity.status.dev || current.ino !== identity.status.ino) {
+      throw new Error('Uninstall cleanup directory identity changed during removal')
+    }
+  }
 }
 
 async function unlinkIfPresent(path: string): Promise<void> {

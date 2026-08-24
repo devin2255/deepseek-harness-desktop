@@ -425,6 +425,20 @@ describe('startDesktopMain', () => {
     expect(setup.focus).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps Harness and the main window after a post-destroy handoff cleanup error', async () => {
+    const failure = new Error('post-destroy handler cleanup failed')
+    const setup = fixture()
+    setup.handoffTo.mockImplementation(async (_window, reportFailure) => { reportFailure(failure) })
+
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    setup.app.emit('second-instance')
+
+    expect(setup.stop).not.toHaveBeenCalled()
+    expect(setup.focus).toHaveBeenCalledTimes(1)
+    expect(setup.reportFailure).toHaveBeenCalledWith('callback', failure)
+  })
+
   it('bounds Exit when an attempt ignores cancellation and still exits once', async () => {
     vi.useFakeTimers()
     try {

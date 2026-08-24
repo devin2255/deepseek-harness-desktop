@@ -58,8 +58,8 @@ export interface StartupWindow {
   publish(state: DesktopStartupState): void
   /** Publish one renderer-safe failure state. */
   showFailure(failure: DesktopStartupFailure): void
-  /** Focus the ready desktop window, destroy this window, and await handler disposal. */
-  handoffTo(window: DesktopWindow): Promise<void>
+  /** Focus the ready desktop window and commit ownership when this native window is destroyed. */
+  handoffTo(window: DesktopWindow, reportFailure: (error: unknown) => void): Promise<void>
 }
 
 interface StartupNativeWindow {
@@ -215,11 +215,12 @@ export async function createStartupWindow(
     showFailure(failure) {
       if (!closed && !nativeWindow.isDestroyed()) nativeWindow.webContents.send(STARTUP_STATE_CHANNEL, failure)
     },
-    async handoffTo(window) {
+    async handoffTo(window, reportFailure) {
       window.focus()
-      const errors = terminate()
-      await closedPromise.catch((error: unknown) => { void error })
-      if (errors.length !== 0) throw new AggregateError([...errors], 'Startup window handoff failed')
+      if (!nativeWindow.isDestroyed()) nativeWindow.destroy()
+      await closedPromise.catch((error: unknown) => {
+        try { reportFailure(error) } catch { /* Post-commit reporting cannot revoke desktop-window ownership. */ }
+      })
     },
   }
 }
