@@ -1,7 +1,9 @@
 /** Authenticates uninstall cleanup and provides rollback for every reported failure. */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { isUtf8 } from 'node:buffer'
 import type { Stats } from 'node:fs'
 import {
+  chmod,
   lstat,
   mkdir,
   open,
@@ -9,6 +11,7 @@ import {
   rename,
   rmdir,
   unlink,
+  utimes,
   type FileHandle,
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
@@ -20,11 +23,18 @@ const ARCHIVE_PREFIX = '.DeepSeek Harness.uninstall-archive-'
 const TOMBSTONE_PREFIX = '.DeepSeek Harness.uninstall-tombstone-'
 const VALIDATION_PREFIX = '.DeepSeek Harness.uninstall-validation-'
 const RESTORE_PREFIX = '.DeepSeek Harness.uninstall-restore-'
-const ARCHIVE_MAGIC = Buffer.from('DSHUA001', 'ascii')
+const ARCHIVE_MAGIC = Buffer.from('DSHUA002', 'ascii')
 const ARCHIVE_END = 0
 const ARCHIVE_DIRECTORY = 1
 const ARCHIVE_FILE = 2
 const IO_CHUNK_BYTES = 64 * 1024
+const ARCHIVE_HEADER_BYTES = 56
+const ARCHIVE_METADATA_BYTES = 12
+const ARCHIVE_CHECKSUM_BYTES = 32
+const MAX_ARCHIVE_PATH_UTF8_BYTES = 64 * 1024
+const MAX_ARCHIVE_PATH_CODE_UNITS = 32_767
+const MAX_ARCHIVE_PATH_METADATA_BYTES = 16 * 1024 * 1024
+const MAX_TIMESTAMP_MS = 8_640_000_000_000_000
 const RESTORE_ATTEMPTS = 3
 
 /** Environment key used as the second authorization channel for uninstall cleanup. */
@@ -42,23 +52,39 @@ export interface UninstallCleanupRequest {
 
 /** Filesystem mutations replaceable only after authorization and fixed-root validation. */
 export interface UninstallCleanupDependencies {
+  /** Apply portable permission bits to a verified recovery entry before publication. */
+  readonly chmod: typeof chmod
   /** Atomically move the fixed canonical product directory within APPDATA. */
   readonly rename: typeof rename
   /** Remove one empty ordinary directory from a validated tree. */
   readonly rmdir: typeof rmdir
   /** Remove one ordinary file without following it. */
   readonly unlink: typeof unlink
+  /** Apply the archived modification time to a verified recovery entry before publication. */
+  readonly utimes: typeof utimes
 }
 
 interface ArchiveWriteState {
   entries: number
+  pathMetadataBytes: number
   position: number
 }
 
 interface ArchiveReadState {
   entries: number
+  pathMetadataBytes: number
   position: number
+  readonly size: number
   readonly paths: Set<string>
+}
+
+interface ArchivedMetadata {
+  readonly mode: number
+  readonly mtimeMs: number
+}
+
+interface ArchivedDirectoryMetadata extends ArchivedMetadata {
+  readonly path: string
 }
 
 type ReservedArtifactKind = 'archive' | 'tombstone' | 'validation' | 'restore'
@@ -101,12 +127,12 @@ export async function runUninstallCleanup(
   if (!isValidToken(environmentToken) || !tokensMatch(argumentToken, environmentToken)) {
     throw new Error('Uninstall cleanup confirmation was rejected')
   }
-  const dependencies: UninstallCleanupDependencies = { rename, rmdir, unlink, ...overrides }
+  const dependencies: UninstallCleanupDependencies = { chmod, rename, rmdir, unlink, utimes, ...overrides }
   const appData = resolveAppData(request.environment.APPDATA)
   const productRoot = resolve(appData, PRODUCT_DIRECTORY)
   assertContainedProductRoot(appData, productRoot)
   await assertOrdinaryDirectoryChain(appData)
-  await recoverInterruptedTransactions(appData, productRoot, request.maxSnapshotEntries)
+  await recoverInterruptedTransactions(appData, productRoot, request.maxSnapshotEntries, dependencies)
   await assertNoReservedArtifacts(appData)
   const productStatus = await lstatIfExists(productRoot)
   if (productStatus === undefined) return true
@@ -118,7 +144,7 @@ export async function runUninstallCleanup(
   const validationPath = join(appData, `${VALIDATION_PREFIX}${transactionId}`)
   await createArchive(productRoot, archivePath, transactionId, request.maxSnapshotEntries)
   try {
-    await restoreArchive(archivePath, validationPath, transactionId, request.maxSnapshotEntries)
+    await restoreArchive(archivePath, validationPath, transactionId, request.maxSnapshotEntries, dependencies)
     await removeOwnedTree(validationPath, dependencies)
   } catch (error: unknown) {
     try {
@@ -147,7 +173,7 @@ export async function runUninstallCleanup(
     assertSameDirectory(productStatus, await lstat(tombstonePath))
     await removeOwnedTree(tombstonePath, dependencies)
   } catch (error: unknown) {
-    await restoreCanonicalOrThrow(archivePath, productRoot, transactionId, request.maxSnapshotEntries, error)
+    await restoreCanonicalOrThrow(archivePath, productRoot, transactionId, request.maxSnapshotEntries, error, dependencies)
     try {
       if (await lstatIfExists(tombstonePath) !== undefined) await removeOwnedTree(tombstonePath, productionDependencies())
     } catch (cleanupError: unknown) {
@@ -164,7 +190,7 @@ export async function runUninstallCleanup(
   try {
     await dependencies.unlink(archivePath)
   } catch (error: unknown) {
-    await restoreCanonicalOrThrow(archivePath, productRoot, transactionId, request.maxSnapshotEntries, error)
+    await restoreCanonicalOrThrow(archivePath, productRoot, transactionId, request.maxSnapshotEntries, error, dependencies)
     await unlinkIfPresent(archivePath)
     throw new Error('Uninstall cleanup final commit failed and canonical data was restored', { cause: error })
   }
@@ -173,12 +199,12 @@ export async function runUninstallCleanup(
 }
 
 function productionDependencies(): UninstallCleanupDependencies {
-  return { rename, rmdir, unlink }
+  return { chmod, rename, rmdir, unlink, utimes }
 }
 
 function assertEntryLimit(value: number): void {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error('Uninstall cleanup maxSnapshotEntries must be a positive safe integer')
+  if (!Number.isSafeInteger(value) || value <= 0 || value > 0xffff_ffff) {
+    throw new Error('Uninstall cleanup maxSnapshotEntries must be a positive 32-bit integer')
   }
 }
 
@@ -238,14 +264,29 @@ function assertSameDirectory(before: Stats, after: Stats): void {
   }
 }
 
+function assertSameArchivedMetadata(before: Stats, after: Stats): void {
+  if (before.mode !== after.mode || before.mtimeMs !== after.mtimeMs) {
+    throw new Error('Uninstall cleanup source directory metadata changed during archive')
+  }
+}
+
 async function createArchive(source: string, archivePath: string, transactionId: string, maxEntries: number): Promise<void> {
   const archive = await open(archivePath, 'wx', 0o600)
-  const state: ArchiveWriteState = { entries: 0, position: 0 }
+  const state: ArchiveWriteState = { entries: 0, pathMetadataBytes: 0, position: 0 }
   try {
+    const rootStatus = await lstat(source)
+    assertOrdinaryDirectory(source, rootStatus)
     consumeEntry(state, maxEntries)
-    state.position = await writeBuffer(archive, Buffer.concat([ARCHIVE_MAGIC, Buffer.from(transactionId, 'ascii')]), state.position)
+    const header = Buffer.alloc(ARCHIVE_HEADER_BYTES)
+    ARCHIVE_MAGIC.copy(header, 0)
+    Buffer.from(transactionId, 'ascii').copy(header, ARCHIVE_MAGIC.length)
+    encodeMetadata(header, 44, rootStatus)
+    state.position = await writeBuffer(archive, header, state.position)
     await appendDirectory(archive, source, '', state, maxEntries)
     state.position = await writeBuffer(archive, Buffer.from([ARCHIVE_END]), state.position)
+    const encodedEntryCount = Buffer.alloc(4)
+    encodedEntryCount.writeUInt32BE(state.entries)
+    await writeBuffer(archive, encodedEntryCount, 40)
     await archive.sync()
   } catch (error: unknown) {
     await archive.close().catch(() => {})
@@ -271,15 +312,17 @@ async function appendDirectory(
     consumeEntry(state, maxEntries)
     if (status.isSymbolicLink()) throw new Error(`Uninstall cleanup refuses a descendant link or junction: ${childSource}`)
     if (status.isDirectory()) {
-      state.position = await writeRecordPath(archive, ARCHIVE_DIRECTORY, childRelative, state.position)
+      state.position = await writeRecordHeader(archive, ARCHIVE_DIRECTORY, childRelative, status, state)
       await appendDirectory(archive, childSource, childRelative, state, maxEntries)
     } else if (status.isFile()) {
-      state.position = await appendFile(archive, childSource, childRelative, status, state.position)
+      state.position = await appendFile(archive, childSource, childRelative, status, state)
     } else {
       throw new Error(`Uninstall cleanup archive refuses a special file: ${childSource}`)
     }
   }
-  assertSameDirectory(before, await lstat(source))
+  const completed = await lstat(source)
+  assertSameDirectory(before, completed)
+  assertSameArchivedMetadata(before, completed)
 }
 
 function consumeEntry(state: { entries: number }, maxEntries: number): void {
@@ -287,13 +330,37 @@ function consumeEntry(state: { entries: number }, maxEntries: number): void {
   if (state.entries > maxEntries) throw new Error('Uninstall cleanup recovery archive snapshot entry limit exceeded')
 }
 
-async function writeRecordPath(archive: FileHandle, type: number, path: string, position: number): Promise<number> {
+async function writeRecordHeader(
+  archive: FileHandle,
+  type: number,
+  path: string,
+  metadata: Pick<Stats, 'mode' | 'mtimeMs'>,
+  state: ArchiveWriteState,
+): Promise<number> {
   const pathBytes = Buffer.from(path, 'utf8')
-  if (pathBytes.length === 0 || pathBytes.length > 0xffff_ffff) throw new Error('Uninstall cleanup archive path is invalid')
+  if (pathBytes.length === 0 || pathBytes.length > MAX_ARCHIVE_PATH_UTF8_BYTES || path.length > MAX_ARCHIVE_PATH_CODE_UNITS) {
+    throw new Error('Uninstall cleanup archive path exceeds the metadata limit')
+  }
+  consumePathMetadata(state, pathBytes.length)
   const header = Buffer.alloc(5)
   header.writeUInt8(type, 0)
   header.writeUInt32BE(pathBytes.length, 1)
-  return writeBuffer(archive, pathBytes, await writeBuffer(archive, header, position))
+  const encodedMetadata = Buffer.alloc(ARCHIVE_METADATA_BYTES)
+  encodeMetadata(encodedMetadata, 0, metadata)
+  return writeBuffer(
+    archive,
+    encodedMetadata,
+    await writeBuffer(archive, pathBytes, await writeBuffer(archive, header, state.position)),
+  )
+}
+
+function encodeMetadata(buffer: Buffer, offset: number, metadata: Pick<Stats, 'mode' | 'mtimeMs'>): void {
+  const mode = metadata.mode & 0o7777
+  if (!Number.isFinite(metadata.mtimeMs) || Math.abs(metadata.mtimeMs) > MAX_TIMESTAMP_MS) {
+    throw new Error('Uninstall cleanup source mtime is outside the portable range')
+  }
+  buffer.writeUInt32BE(mode, offset)
+  buffer.writeDoubleBE(metadata.mtimeMs, offset + 4)
 }
 
 async function appendFile(
@@ -301,9 +368,12 @@ async function appendFile(
   source: string,
   relativePath: string,
   expected: Stats,
-  position: number,
+  state: ArchiveWriteState,
 ): Promise<number> {
-  let next = await writeRecordPath(archive, ARCHIVE_FILE, relativePath, position)
+  if (!Number.isSafeInteger(expected.size) || expected.size < 0) {
+    throw new Error('Uninstall cleanup source file is too large')
+  }
+  let next = await writeRecordHeader(archive, ARCHIVE_FILE, relativePath, expected, state)
   const size = Buffer.alloc(8)
   size.writeBigUInt64BE(BigInt(expected.size))
   next = await writeBuffer(archive, size, next)
@@ -324,6 +394,11 @@ async function appendFile(
       next = await writeBuffer(archive, bytes, next)
       sourcePosition += read.bytesRead
     }
+    const completed = await input.stat()
+    if (completed.dev !== expected.dev || completed.ino !== expected.ino || completed.size !== expected.size
+      || completed.mtimeMs !== expected.mtimeMs || completed.mode !== expected.mode) {
+      throw new Error(`Uninstall cleanup source file changed during archive: ${source}`)
+    }
   } finally {
     await input.close()
   }
@@ -335,33 +410,71 @@ async function restoreArchive(
   destination: string,
   transactionId: string,
   maxEntries: number,
+  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
 ): Promise<void> {
   const archive = await open(archivePath, 'r')
-  const state: ArchiveReadState = { entries: 0, paths: new Set(), position: 0 }
+  const archiveStatus = await archive.stat()
+  if (!Number.isSafeInteger(archiveStatus.size) || archiveStatus.size < ARCHIVE_HEADER_BYTES + 1) {
+    await archive.close()
+    throw new Error('Uninstall cleanup archive header is truncated')
+  }
+  const state: ArchiveReadState = {
+    entries: 0,
+    pathMetadataBytes: 0,
+    paths: new Set(),
+    position: 0,
+    size: archiveStatus.size,
+  }
   let destinationCreated = false
   try {
-    const prefix = await readExact(archive, ARCHIVE_MAGIC.length + transactionId.length, state)
-    if (!prefix.subarray(0, ARCHIVE_MAGIC.length).equals(ARCHIVE_MAGIC)
-      || prefix.subarray(ARCHIVE_MAGIC.length).toString('ascii') !== transactionId) {
+    const header = await readExact(archive, ARCHIVE_HEADER_BYTES, state)
+    if (!header.subarray(0, ARCHIVE_MAGIC.length).equals(ARCHIVE_MAGIC)
+      || header.subarray(ARCHIVE_MAGIC.length, 40).toString('ascii') !== transactionId) {
       throw new Error('Uninstall cleanup archive identity is invalid')
     }
+    const declaredEntries = header.readUInt32BE(40)
+    if (declaredEntries < 1 || declaredEntries > maxEntries) {
+      throw new Error('Uninstall cleanup archive entry count exceeds the configured limit')
+    }
+    const rootMetadata = decodeMetadata(header, 44)
+    consumeEntry(state, maxEntries)
     await mkdir(destination)
     destinationCreated = true
+    const directories: ArchivedDirectoryMetadata[] = [{ path: destination, ...rootMetadata }]
     while (true) {
       const type = (await readExact(archive, 1, state)).readUInt8(0)
       if (type === ARCHIVE_END) break
       if (type !== ARCHIVE_DIRECTORY && type !== ARCHIVE_FILE) throw new Error('Uninstall cleanup archive record type is invalid')
       consumeEntry(state, maxEntries)
+      if (state.entries > declaredEntries) throw new Error('Uninstall cleanup archive entry count does not match its records')
       const pathLength = (await readExact(archive, 4, state)).readUInt32BE(0)
-      const relativePath = (await readExact(archive, pathLength, state)).toString('utf8')
+      if (pathLength === 0 || pathLength > MAX_ARCHIVE_PATH_UTF8_BYTES) {
+        throw new Error('Uninstall cleanup archive path exceeds the metadata limit')
+      }
+      consumePathMetadata(state, pathLength)
+      const pathBytes = await readExact(archive, pathLength, state)
+      if (!isUtf8(pathBytes)) throw new Error('Uninstall cleanup archive path is not valid UTF-8')
+      const relativePath = pathBytes.toString('utf8')
+      if (relativePath.length > MAX_ARCHIVE_PATH_CODE_UNITS) {
+        throw new Error('Uninstall cleanup archive path exceeds the metadata limit')
+      }
       assertArchivePath(relativePath, state.paths)
+      const metadata = decodeMetadata(await readExact(archive, ARCHIVE_METADATA_BYTES, state), 0)
       const target = archiveTarget(destination, relativePath)
-      if (type === ARCHIVE_DIRECTORY) await mkdir(target)
-      else await restoreFile(archive, target, state)
+      if (type === ARCHIVE_DIRECTORY) {
+        await mkdir(target)
+        directories.push({ path: target, ...metadata })
+      } else {
+        await restoreFile(archive, target, metadata, state, dependencies)
+      }
     }
-    const trailing = Buffer.alloc(1)
-    if ((await archive.read(trailing, 0, 1, state.position)).bytesRead !== 0) {
-      throw new Error('Uninstall cleanup archive has trailing data')
+    if (state.entries !== declaredEntries) throw new Error('Uninstall cleanup archive entry count does not match its records')
+    if (state.position !== state.size) throw new Error('Uninstall cleanup archive has trailing data')
+    for (const metadata of directories.reverse()) await applyMetadata(metadata.path, metadata, dependencies)
+    const completedStatus = await archive.stat()
+    if (completedStatus.dev !== archiveStatus.dev || completedStatus.ino !== archiveStatus.ino
+      || completedStatus.size !== archiveStatus.size || completedStatus.mtimeMs !== archiveStatus.mtimeMs) {
+      throw new Error('Uninstall cleanup archive changed during verification')
     }
   } catch (error: unknown) {
     await archive.close().catch(() => {})
@@ -369,6 +482,22 @@ async function restoreArchive(
     throw error
   }
   await archive.close()
+}
+
+function decodeMetadata(buffer: Buffer, offset: number): ArchivedMetadata {
+  const mode = buffer.readUInt32BE(offset)
+  const mtimeMs = buffer.readDoubleBE(offset + 4)
+  if (mode > 0o7777 || !Number.isFinite(mtimeMs) || Math.abs(mtimeMs) > MAX_TIMESTAMP_MS) {
+    throw new Error('Uninstall cleanup archive metadata is invalid')
+  }
+  return { mode, mtimeMs }
+}
+
+function consumePathMetadata(state: { pathMetadataBytes: number }, bytes: number): void {
+  state.pathMetadataBytes += bytes
+  if (!Number.isSafeInteger(state.pathMetadataBytes) || state.pathMetadataBytes > MAX_ARCHIVE_PATH_METADATA_BYTES) {
+    throw new Error('Uninstall cleanup archive path metadata exceeds the total limit')
+  }
 }
 
 function assertArchivePath(path: string, paths: Set<string>): void {
@@ -386,9 +515,19 @@ function archiveTarget(root: string, path: string): string {
   return target
 }
 
-async function restoreFile(archive: FileHandle, target: string, state: ArchiveReadState): Promise<void> {
+async function restoreFile(
+  archive: FileHandle,
+  target: string,
+  metadata: ArchivedMetadata,
+  state: ArchiveReadState,
+  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+): Promise<void> {
   const encodedSize = (await readExact(archive, 8, state)).readBigUInt64BE(0)
-  if (encodedSize > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Uninstall cleanup archive file is too large')
+  const remainingContentBytes = remainingArchiveBytes(state) - ARCHIVE_CHECKSUM_BYTES
+  if (remainingContentBytes < 0 || encodedSize > BigInt(remainingContentBytes)
+    || encodedSize > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('Uninstall cleanup archive file content is truncated or too large')
+  }
   const size = Number(encodedSize)
   const output = await open(target, 'wx', 0o600)
   const hash = createHash('sha256')
@@ -406,8 +545,24 @@ async function restoreFile(archive: FileHandle, target: string, state: ArchiveRe
   } finally {
     await output.close()
   }
-  const expectedDigest = await readExact(archive, 32, state)
+  const expectedDigest = await readExact(archive, ARCHIVE_CHECKSUM_BYTES, state)
   if (!timingSafeEqual(hash.digest(), expectedDigest)) throw new Error('Uninstall cleanup archive file checksum failed')
+  await applyMetadata(target, metadata, dependencies)
+}
+
+async function applyMetadata(
+  path: string,
+  metadata: ArchivedMetadata,
+  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+): Promise<void> {
+  await dependencies.chmod(path, metadata.mode)
+  const mtime = new Date(metadata.mtimeMs)
+  await dependencies.utimes(path, mtime, mtime)
+  const restored = await lstat(path)
+  if (restored.isSymbolicLink() || Math.abs(restored.mtimeMs - metadata.mtimeMs) > 2_000
+    || (process.platform !== 'win32' && (restored.mode & 0o7777) !== metadata.mode)) {
+    throw new Error('Uninstall cleanup restored metadata verification failed')
+  }
 }
 
 async function writeBuffer(handle: FileHandle, buffer: Buffer, position: number): Promise<number> {
@@ -420,16 +575,26 @@ async function writeBuffer(handle: FileHandle, buffer: Buffer, position: number)
   return position + buffer.length
 }
 
-async function readExact(handle: FileHandle, length: number, state: { position: number }): Promise<Buffer> {
+async function readExact(handle: FileHandle, length: number, state: ArchiveReadState): Promise<Buffer> {
+  if (!Number.isSafeInteger(length) || length < 0 || length > IO_CHUNK_BYTES) {
+    throw new Error('Uninstall cleanup archive read exceeds the metadata limit')
+  }
+  if (length > remainingArchiveBytes(state)) {
+    throw new Error('Uninstall cleanup archive is truncated')
+  }
   const buffer = Buffer.allocUnsafe(length)
   let offset = 0
   while (offset < length) {
     const read = await handle.read(buffer, offset, length - offset, state.position + offset)
-    if (read.bytesRead === 0) throw new Error('Uninstall cleanup archive ended early')
+    if (read.bytesRead === 0) throw new Error('Uninstall cleanup archive is truncated')
     offset += read.bytesRead
   }
   state.position += length
   return buffer
+}
+
+function remainingArchiveBytes(state: ArchiveReadState): number {
+  return state.size - state.position
 }
 
 async function restoreCanonicalOrThrow(
@@ -438,13 +603,14 @@ async function restoreCanonicalOrThrow(
   transactionId: string,
   maxEntries: number,
   originalError: unknown,
+  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
 ): Promise<void> {
   let lastError: unknown = originalError
   for (let attempt = 1; attempt <= RESTORE_ATTEMPTS; attempt += 1) {
     const restorePath = join(dirname(productRoot), `${RESTORE_PREFIX}${transactionId}-${randomBytes(8).toString('hex')}`)
     let archiveRestored = false
     try {
-      await restoreArchive(archivePath, restorePath, transactionId, maxEntries)
+      await restoreArchive(archivePath, restorePath, transactionId, maxEntries, dependencies)
       archiveRestored = true
       if (await lstatIfExists(productRoot) !== undefined) throw new Error('Canonical product root unexpectedly exists during restore')
       await rename(restorePath, productRoot)
@@ -461,14 +627,19 @@ async function restoreCanonicalOrThrow(
   )
 }
 
-async function recoverInterruptedTransactions(appData: string, productRoot: string, maxEntries: number): Promise<void> {
+async function recoverInterruptedTransactions(
+  appData: string,
+  productRoot: string,
+  maxEntries: number,
+  dependencies: Pick<UninstallCleanupDependencies, 'chmod' | 'utimes'>,
+): Promise<void> {
   const transaction = await scanReservedTransaction(appData)
   if (transaction === undefined) return
   if (transaction.archive === undefined) {
     throw new Error('Uninstall cleanup refuses an orphan transaction artifact')
   }
   const verificationPath = join(appData, `${RESTORE_PREFIX}${transaction.id}-${randomBytes(8).toString('hex')}`)
-  await restoreArchive(transaction.archive.path, verificationPath, transaction.id, maxEntries)
+  await restoreArchive(transaction.archive.path, verificationPath, transaction.id, maxEntries, dependencies)
   if (await lstatIfExists(productRoot) === undefined) await rename(verificationPath, productRoot)
   else await removeOwnedTree(verificationPath, productionDependencies())
   for (const residue of [transaction.validation, transaction.restore]) {

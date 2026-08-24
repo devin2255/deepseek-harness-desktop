@@ -51,7 +51,7 @@ describe('DesktopLog', () => {
     log.append({ timestamp: '2026-08-24T08:00:00.000Z', type: 'loading-runtime', message: `using ${secret}` })
     log.append({ timestamp: '2026-08-24T08:00:01.000Z', type: 'runtime-loaded', message: 'runtime ready' })
 
-    const lines = readFileSync(log.currentPath(), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line))
+    const lines = readFileSync(log.currentPath(), 'utf8').trimEnd().split('\n').map((line): unknown => JSON.parse(line) as unknown)
     expect(log.currentPath()).toBe(resolve(directory, 'desktop.log'))
     expect(lines).toEqual([
       { timestamp: '2026-08-24T08:00:00.000Z', type: 'loading-runtime', message: 'using [redacted]' },
@@ -104,7 +104,7 @@ describe('DesktopLog', () => {
     writeFileSync(external, 'sentinel', 'utf8')
     symlinkSync(external, log.currentPath(), 'file')
 
-    expect(() => log.append(lifecycleEvent('must not escape'))).toThrow(/symbolic link|junction/iu)
+    expect(() => { log.append(lifecycleEvent('must not escape')) }).toThrow(/symbolic link|junction/iu)
     expect(readFileSync(external, 'utf8')).toBe('sentinel')
   })
 
@@ -119,7 +119,7 @@ describe('DesktopLog', () => {
     log.append(first)
     symlinkSync(external, join(directory, 'desktop.log.1'), 'file')
 
-    expect(() => log.append(second)).toThrow(/symbolic link|junction/iu)
+    expect(() => { log.append(second) }).toThrow(/symbolic link|junction/iu)
     expect(readFileSync(external, 'utf8')).toBe('sentinel')
     expect(readFileSync(join(directory, 'desktop.log.1'), 'utf8')).toBe('sentinel')
   })
@@ -164,7 +164,7 @@ describe('DesktopLog', () => {
     log.append(lifecycleEvent(`${secret}${'x'.repeat(10_000)}`))
 
     const persisted = readFileSync(log.currentPath(), 'utf8')
-    const record = JSON.parse(persisted)
+    const record: unknown = JSON.parse(persisted)
     expect(statSync(log.currentPath()).size).toBeLessThanOrEqual(256)
     expect(persisted.endsWith('\n')).toBe(true)
     expect(persisted.trimEnd().split('\n')).toHaveLength(1)
@@ -183,7 +183,8 @@ describe('DesktopLog', () => {
     log.append(lifecycleEvent('诊断🚀'.repeat(1_000)))
 
     const persisted = readFileSync(log.currentPath(), 'utf8')
-    const record = JSON.parse(persisted)
+    const record: unknown = JSON.parse(persisted)
+    if (!isTruncatedLogRecord(record)) throw new Error('persisted desktop log record is invalid')
     expect(statSync(log.currentPath()).size).toBeLessThanOrEqual(240)
     expect(record.truncated).toBe(true)
     expect(record.message).not.toContain('\uFFFD')
@@ -233,7 +234,13 @@ describe('DesktopLog', () => {
       },
     }
 
-    expect(() => log.append(event)).toThrow('metadata exceeds configured input limit')
+    expect(() => { log.append(event) }).toThrow('metadata exceeds configured input limit')
     expect(messageReads).toBe(0)
   })
 })
+
+function isTruncatedLogRecord(value: unknown): value is { readonly message: string; readonly truncated: boolean } {
+  return typeof value === 'object' && value !== null
+    && 'message' in value && typeof value.message === 'string'
+    && 'truncated' in value && typeof value.truncated === 'boolean'
+}

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -39,6 +39,23 @@ describe('desktop Main cleanup entry', () => {
     assertNormalCompositionUnused(setup)
     expect(String(consoleError.mock.calls)).not.toContain(TOKEN)
     expect(String(consoleError.mock.calls)).not.toContain(otherToken)
+  })
+
+  it('exits nonzero for a malformed persistent cleanup archive without composing the desktop', async () => {
+    const setup = prepareEntry([`--uninstall-delete-user-data=${TOKEN}`], TOKEN)
+    const product = join(setup.appData, 'DeepSeek Harness')
+    const archive = join(setup.appData, '.DeepSeek Harness.uninstall-archive-0123456789abcdef0123456789abcdef')
+    mkdirSync(product)
+    writeFileSync(join(product, 'owned.txt'), 'owned')
+    writeFileSync(archive, Buffer.from('DSHUA0020123456789abcdef0123456789abcdef'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await import('../src/main.ts')
+    await vi.waitFor(() => { expect(setup.exit).toHaveBeenCalledWith(1) })
+
+    assertNormalCompositionUnused(setup)
+    expect(readFileSync(join(product, 'owned.txt'), 'utf8')).toBe('owned')
+    expect(readFileSync(archive).length).toBeGreaterThan(0)
   })
 })
 
