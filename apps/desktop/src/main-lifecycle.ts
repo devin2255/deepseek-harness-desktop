@@ -108,7 +108,11 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   }
   const publish = (state: DesktopStartupState): void => {
     currentState = state
-    startupWindow?.publish(state)
+    try {
+      startupWindow?.publish(state)
+    } catch (error: unknown) {
+      report('callback', error)
+    }
     writeLog('startup-state', `attempt=${state.attempt} phase=${state.phase} status=${state.status}`)
   }
   const publishEvent = (attempt: StartupAttempt, event: Parameters<typeof reduceStartup>[1]): void => {
@@ -124,20 +128,21 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   }
   const runAttempt = (attempt: StartupAttempt): Promise<void> => (async () => {
     try {
-      publishEvent(attempt, { type: 'runtime-loaded', attempt: attempt.id })
-      publishEvent(attempt, { type: 'profile-validated', attempt: attempt.id })
-      attempt.handle = await dependencies.startHarness(dependencies.launchSpec, { signal: attempt.controller.signal })
+      attempt.handle = await dependencies.startHarness(dependencies.launchSpec, {
+        signal: attempt.controller.signal,
+        onMilestone: (milestone) => {
+          publishEvent(attempt, { type: milestone, attempt: attempt.id })
+        },
+      })
       if (attemptIsInactive(attempt)) {
         await stopAttempt(attempt)
         return
       }
-      publishEvent(attempt, { type: 'service-started', attempt: attempt.id })
       const desktopWindow = await dependencies.createWindow(attempt.handle.endpoint, attempt.handle.capability)
       if (attemptIsInactive(attempt)) {
         await stopAttempt(attempt)
         return
       }
-      publishEvent(attempt, { type: 'service-ready', attempt: attempt.id })
       const recovery = startupWindow
       if (recovery === undefined) throw new Error('Desktop startup window is unavailable for handoff')
       await recovery.handoffTo(desktopWindow)
@@ -149,19 +154,27 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       trackActiveWindow(desktopWindow)
       writeLog('startup-handoff', `attempt=${attempt.id}`)
     } catch (error: unknown) {
+      if (!attemptIsInactive(attempt)) {
+        report('startup', error)
+        if (currentState !== undefined) {
+          const failed = reduceStartup(currentState, { type: 'failed', attempt: attempt.id, error })
+          currentState = failed
+          if (failed.status === 'failed') {
+            try {
+              startupWindow?.showFailure(failed)
+            } catch (failureError: unknown) {
+              report('callback', failureError)
+            }
+          }
+          writeLog('startup-state', `attempt=${attempt.id} phase=failed status=failed`)
+        }
+      }
       try { await stopAttempt(attempt) } catch (stopError: unknown) {
         report(shutdownTask === undefined ? 'startup' : 'shutdown', stopError)
       }
       if (attemptIsInactive(attempt)) {
         if (!isAbortError(error) && shutdownTask !== undefined) report('shutdown', error)
         return
-      }
-      report('startup', error)
-      if (currentState !== undefined) {
-        const failed = reduceStartup(currentState, { type: 'failed', attempt: attempt.id, error })
-        currentState = failed
-        if (failed.status === 'failed') startupWindow?.showFailure(failed)
-        writeLog('startup-state', `attempt=${attempt.id} phase=failed status=failed`)
       }
     }
   })()
@@ -179,7 +192,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   const retry = (): Promise<void> => {
     retryTask ??= (async () => {
       const previous = currentAttempt
-      if (previous === undefined || currentState === undefined || currentState.status === 'ready') return
+      if (previous === undefined || currentState?.status !== 'failed') return
       previous.superseded = true
       previous.controller.abort()
       await previous.settled

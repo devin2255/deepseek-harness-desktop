@@ -78,6 +78,38 @@ async function rejectedError(promise: Promise<unknown>): Promise<Error> {
 }
 
 describe('startHarness', () => {
+  it('reports validation, endpoint discovery, and authenticated readiness at their real commit points', async () => {
+    let finishProbe: (() => void) | undefined
+    const milestones: string[] = []
+    const { child, dependencies } = harness({
+      probeReadiness: () => new Promise((resolve) => {
+        finishProbe = () => { resolve({ version: '0.1.0-rc.7' }) }
+      }),
+    })
+    const start = startHarness(dependencies, {
+      onMilestone: (milestone) => { milestones.push(milestone) },
+    })
+
+    expect(milestones).toEqual(['runtime-loaded'])
+    child.stdout.write('dsh web: http://127.0.0.1:4312\n')
+    expect(milestones).toEqual(['runtime-loaded', 'profile-validated', 'service-started'])
+
+    finishProbe?.()
+    await start
+    expect(milestones).toEqual(['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'])
+  })
+
+  it('contains milestone callback failures without changing Harness startup', async () => {
+    const { child, dependencies } = harness()
+    const start = startHarness(dependencies, {
+      onMilestone: () => { throw new Error('consumer callback failed') },
+    })
+
+    child.stdout.write('dsh web: http://127.0.0.1:4312\n')
+
+    await expect(start).resolves.toMatchObject({ endpoint: new URL('http://127.0.0.1:4312') })
+  })
+
   it('forks the desktop profile with a fresh base64url capability and copied environment', async () => {
     const { child, dependencies, fork } = harness()
     const start = startHarness(dependencies)

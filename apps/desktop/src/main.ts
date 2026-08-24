@@ -13,13 +13,18 @@ import {
 import { createDesktopWindow } from './window.ts'
 
 const DESKTOP_CLEANUP_TIMEOUT_MS = 10_000
+const UNINSTALL_CLEANUP_MAX_SNAPSHOT_ENTRIES = 100_000
 const DESKTOP_LOG_MAX_BYTES = 1_048_576
 const DESKTOP_LOG_MAX_MESSAGE_CODE_UNITS = 16_384
 const DESKTOP_LOG_MAX_METADATA_CODE_UNITS = 128
 const desktopArguments = process.argv.slice(app.isPackaged ? 1 : 2)
 
 if (isUninstallCleanupInvocation(desktopArguments)) {
-  void runUninstallCleanup({ argv: desktopArguments, environment: process.env }).then(
+  void runUninstallCleanup({
+    argv: desktopArguments,
+    environment: process.env,
+    maxSnapshotEntries: UNINSTALL_CLEANUP_MAX_SNAPSHOT_ENTRIES,
+  }).then(
     () => { app.exit(0) },
     () => {
       console.error('DeepSeek Harness uninstall cleanup was rejected or failed.')

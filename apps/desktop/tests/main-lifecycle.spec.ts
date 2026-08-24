@@ -6,7 +6,12 @@ import {
   type DesktopMainDependencies,
   type DesktopQuitEvent,
 } from '../src/main-lifecycle.ts'
-import { HarnessShutdownTimeoutError, type HarnessHandle, type HarnessLaunchSpec } from '../src/harness-supervisor.ts'
+import {
+  HarnessShutdownTimeoutError,
+  type HarnessHandle,
+  type HarnessLaunchSpec,
+  type HarnessStartOptions,
+} from '../src/harness-supervisor.ts'
 import type { StartupWindow, StartupWindowActions } from '../src/startup-window.ts'
 import type { DesktopWindow } from '../src/window.ts'
 
@@ -96,7 +101,12 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     },
     restore,
   }
-  const startHarness = vi.fn(async () => harness)
+  const startHarness = vi.fn<DesktopMainDependencies['startHarness']>(async (_launchSpec, options) => {
+    for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+      options.onMilestone?.(milestone)
+    }
+    return harness
+  })
   const createWindow = vi.fn(async () => window)
   const startupFocus = vi.fn()
   const publish = vi.fn()
@@ -220,31 +230,120 @@ describe('startDesktopMain', () => {
     expect(createWindow).toHaveBeenCalledWith(harness.endpoint, harness.capability)
   })
 
-  it('keeps the startup window open on failure and retries only after the old attempt settles', async () => {
-    const first = deferred<HarnessHandle>()
+  it('retries a failed attempt only after its child stop settles and coalesces duplicate requests', async () => {
+    const stopping = deferred<undefined>()
+    const stale = fixture()
+    vi.mocked(stale.stop).mockReturnValue(stopping.promise)
     const second = fixture().harness
     const startHarness = vi.fn<DesktopMainDependencies['startHarness']>()
-      .mockReturnValueOnce(first.promise)
-      .mockResolvedValueOnce(second)
-    const { dependencies, startupActions, showFailure, handoffTo } = fixture({ startHarness })
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return stale.harness
+      })
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return second
+      })
+    const { dependencies, startupActions, showFailure } = fixture({
+      startHarness,
+      createWindow: vi.fn(async () => { throw new Error('window failed') }),
+    })
     const desktop = startDesktopMain(dependencies)
     await flushLifecycle()
 
-    const firstSignal = startHarness.mock.calls[0]?.[1].signal
-    if (firstSignal === undefined) throw new Error('First startup signal was not captured')
+    expect(showFailure).toHaveBeenCalledWith(expect.objectContaining({ attempt: 1, status: 'failed' }))
     const retryOne = startupActions().retry()
     const retryTwo = startupActions().retry()
-    expect(firstSignal.aborted).toBe(true)
     expect(startHarness).toHaveBeenCalledTimes(1)
 
-    first.reject(new Error('first attempt failed'))
+    stopping.resolve(undefined)
     await Promise.all([retryOne, retryTwo])
     await desktop.startup
 
-    expect(showFailure).not.toHaveBeenCalled()
     expect(startHarness).toHaveBeenCalledTimes(2)
-    expect(startHarness.mock.calls[1]?.[1].signal).not.toBe(firstSignal)
-    expect(handoffTo).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores Retry while the current attempt is working', async () => {
+    const pendingWindow = deferred<DesktopWindow>()
+    const setup = fixture({ createWindow: vi.fn(() => pendingWindow.promise) })
+    startDesktopMain(setup.dependencies)
+    await flushLifecycle()
+
+    await setup.startupActions().retry()
+
+    expect(setup.startHarness).toHaveBeenCalledTimes(1)
+    expect(setup.handoffTo).not.toHaveBeenCalled()
+  })
+
+  it('projects probe timeout from the probing phase and window failure from ready', async () => {
+    const timeout = new Error('probe timeout')
+    const probeSetup = fixture({
+      startHarness: vi.fn<DesktopMainDependencies['startHarness']>(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        throw timeout
+      }),
+    })
+    await startDesktopMain(probeSetup.dependencies).startup
+    expect(probeSetup.showFailure.mock.calls[0]?.[0].error.code).toBe('service-unreachable')
+
+    const windowSetup = fixture({ createWindow: vi.fn(async () => { throw new Error('window failed') }) })
+    await startDesktopMain(windowSetup.dependencies).startup
+    expect(windowSetup.showFailure.mock.calls[0]?.[0].error.code).toBe('unexpected-startup-failure')
+  })
+
+  it('publishes and logs milestones only when the supervisor commits them', async () => {
+    const ready = deferred<HarnessHandle>()
+    let options: HarnessStartOptions | undefined
+    const setup = fixture({
+      startHarness: vi.fn<DesktopMainDependencies['startHarness']>((_launchSpec, startOptions) => {
+        options = startOptions
+        return ready.promise
+      }),
+    })
+    startDesktopMain(setup.dependencies)
+    await flushLifecycle()
+    expect(setup.publish.mock.calls.map(call => call[0].phase)).toEqual(['waiting-electron', 'loading-runtime'])
+
+    options?.onMilestone?.('runtime-loaded')
+    options?.onMilestone?.('profile-validated')
+    options?.onMilestone?.('service-started')
+    expect(setup.publish.mock.calls.map(call => call[0].phase)).toEqual([
+      'waiting-electron', 'loading-runtime', 'validating-profile', 'starting-service', 'probing-service',
+    ])
+
+    options?.onMilestone?.('service-ready')
+    ready.resolve(setup.harness)
+    await flushLifecycle()
+    expect(setup.publish.mock.calls.at(-1)?.[0].phase).toBe('ready')
+    expect(vi.mocked(setup.desktopLog.append).mock.calls
+      .filter(call => call[0].type === 'startup-state')
+      .map(call => call[0].message)).toEqual(
+      setup.publish.mock.calls.map((call) => {
+        const state = call[0]
+        return `attempt=${state.attempt} phase=${state.phase} status=${state.status}`
+      }),
+    )
+  })
+
+  it('contains startup-window state sink exceptions without changing attempt ownership', async () => {
+    const setup = fixture()
+    setup.publish.mockImplementation(() => { throw new Error('renderer send failed') })
+
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    expect(setup.startHarness).toHaveBeenCalledTimes(1)
+    expect(setup.handoffTo).toHaveBeenCalledTimes(1)
+    expect(setup.app.quit).not.toHaveBeenCalled()
+    expect(setup.reportFailure).toHaveBeenCalledWith('callback', expect.objectContaining({
+      message: 'renderer send failed',
+    }))
   })
 
   it('publishes a current failure without quitting and opens only the current desktop log', async () => {
@@ -261,22 +360,41 @@ describe('startDesktopMain', () => {
     expect(openPath).toHaveBeenCalledWith(desktopLog.currentPath())
   })
 
-  it('prevents stale attempts from publishing after a retry owns the startup window', async () => {
-    const first = deferred<HarnessHandle>()
-    const second = fixture().harness
-    const startHarness = vi.fn()
-      .mockReturnValueOnce(first.promise)
-      .mockResolvedValueOnce(second)
-    const { dependencies, publish, showFailure, startupActions } = fixture({ startHarness })
-    const desktop = startDesktopMain(dependencies)
+  it('ignores late milestone callbacks from the failed attempt while Retry awaits cleanup', async () => {
+    const stopping = deferred<undefined>()
+    const old = fixture()
+    vi.mocked(old.stop).mockReturnValue(stopping.promise)
+    let oldOptions: HarnessStartOptions | undefined
+    const current = fixture()
+    const startHarness = vi.fn<DesktopMainDependencies['startHarness']>()
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        oldOptions = options
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return old.harness
+      })
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return current.harness
+      })
+    const createWindow = vi.fn()
+      .mockRejectedValueOnce(new Error('first window failed'))
+      .mockResolvedValueOnce(current.window)
+    const setup = fixture({ createWindow, startHarness })
+    startDesktopMain(setup.dependencies)
     await flushLifecycle()
-    const retry = startupActions().retry()
-    first.reject(new Error('stale failure'))
-    await retry
-    await desktop.startup
 
-    expect(showFailure).not.toHaveBeenCalled()
-    expect(publish.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ attempt: 2, status: 'ready' }))
+    const retry = setup.startupActions().retry()
+    const publishedBeforeLateCallback = setup.publish.mock.calls.length
+    oldOptions?.onMilestone?.('service-ready')
+    expect(setup.publish).toHaveBeenCalledTimes(publishedBeforeLateCallback)
+
+    stopping.resolve(undefined)
+    await retry
+    expect(setup.publish.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ attempt: 2, status: 'ready' }))
   })
 
   it('focuses the live startup window for a second instance before successful handoff', async () => {
@@ -305,25 +423,6 @@ describe('startDesktopMain', () => {
     await desktop.startup
     setup.app.emit('second-instance')
     expect(setup.focus).toHaveBeenCalledTimes(1)
-  })
-
-  it('stops a late stale attempt child before launching the one replacement', async () => {
-    const first = deferred<HarnessHandle>()
-    const stale = fixture()
-    const current = fixture()
-    const startHarness = vi.fn()
-      .mockReturnValueOnce(first.promise)
-      .mockResolvedValueOnce(current.harness)
-    const setup = fixture({ startHarness })
-    startDesktopMain(setup.dependencies)
-    await flushLifecycle()
-
-    const retry = setup.startupActions().retry()
-    first.resolve(stale.harness)
-    await retry
-
-    expect(stale.stop).toHaveBeenCalledTimes(1)
-    expect(startHarness).toHaveBeenCalledTimes(2)
   })
 
   it('bounds Exit when an attempt ignores cancellation and still exits once', async () => {

@@ -69,10 +69,15 @@ export interface HarnessSupervisorDependencies {
   startupTimeoutMs: number
 }
 
-/** Optional caller-owned startup cancellation. */
+/** Committed Harness startup facts exposed without raw diagnostics. */
+export type HarnessStartupMilestone = 'runtime-loaded' | 'profile-validated' | 'service-started' | 'service-ready'
+
+/** Optional caller-owned startup cancellation and progress observation. */
 export interface HarnessStartOptions {
   /** Cancels startup until authenticated readiness succeeds. */
   readonly signal?: AbortSignal
+  /** Observe committed startup milestones; callback failures are contained by the supervisor. */
+  readonly onMilestone?: (milestone: HarnessStartupMilestone) => void
 }
 
 /** A ready desktop Harness endpoint and its private capability. */
@@ -144,6 +149,7 @@ export function startHarness(
   } catch (error: unknown) {
     return Promise.reject(asError(error, launchSpec.cliEntry))
   }
+  notifyMilestone(options, 'runtime-loaded')
   const capability = dependencies.randomBytes(CAPABILITY_BYTES).toString('base64url')
   const child = dependencies.fork(launchSpec.cliEntry, ['--profile', 'desktop', '--port', '0'], {
     cwd: launchSpec.cwd,
@@ -261,6 +267,8 @@ export function startHarness(
   // The canonical stdout line discovers only the endpoint; authenticated validation owns readiness.
   const parser = createReadinessParser((url) => {
     const endpoint = new URL(url)
+    notifyMilestone(options, 'profile-validated')
+    notifyMilestone(options, 'service-started')
     void dependencies.probeReadiness({
       endpoint,
       capability,
@@ -268,6 +276,8 @@ export function startHarness(
       requiredCapabilities: REQUIRED_DESKTOP_CAPABILITIES,
       signal: readinessController.signal,
     }).then(() => {
+      if (startupSettled || startupFailure !== undefined) return
+      notifyMilestone(options, 'service-ready')
       finishStartup({ endpoint, capability, stop })
     }, (error: unknown) => {
       beginStartupFailure(error instanceof Error ? error : new Error('Desktop readiness validation failed'))
@@ -296,6 +306,15 @@ export function startHarness(
   if (isSignalAborted(options.signal)) onAbort()
 
   return startupPromise
+}
+
+/** Contain lifecycle consumers so progress observation cannot alter child ownership. */
+function notifyMilestone(options: HarnessStartOptions, milestone: HarnessStartupMilestone): void {
+  try {
+    options.onMilestone?.(milestone)
+  } catch {
+    // Milestone observation is best-effort and cannot reject supervised startup.
+  }
 }
 
 /** Resolve default production inputs at the supervisor's explicit API boundary. */
