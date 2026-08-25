@@ -20,6 +20,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowElevation: false
+  packElevateHelper: false
   allowToChangeInstallationDirectory: true
   runAfterFinish: true
   guid: 5e7c4c1c-7429-5bb9-9c22-4e1bf4e2e478

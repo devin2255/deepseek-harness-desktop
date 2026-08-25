@@ -15,6 +15,12 @@ export const DESKTOP_STAGE = join(DESKTOP_ARTIFACT_ROOT, 'stage')
 /** Output directory reserved for generated desktop installers. */
 export const DESKTOP_INSTALLER = join(DESKTOP_ARTIFACT_ROOT, 'installer')
 
+/** Desktop release version embedded in the installer filename and metadata. */
+export const DESKTOP_VERSION = '0.1.0-rc.7'
+
+/** Exact x64 Windows installer filename owned by the release workflow. */
+export const DESKTOP_INSTALLER_NAME = `DeepSeek-Harness-Setup-${DESKTOP_VERSION}-x64.exe`
+
 /**
  * Reject a path unless it is a descendant of the desktop artifact root.
  * @param path - Output path to validate.

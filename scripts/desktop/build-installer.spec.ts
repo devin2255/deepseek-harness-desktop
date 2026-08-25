@@ -9,8 +9,12 @@ import yaml from 'js-yaml'
 
 import {
   assertInstallerOutput,
-  electronBuilderInvocation,
+  authenticodeEnvironment,
+  authenticodePowerShellCommand,
+  electronBuilderDirectoryInvocation,
+  electronBuilderPrepackagedInvocation,
   parseIcoDimensions,
+  signingRequested,
   verifyGeneratedInstallerScript,
 } from './build-installer.ts'
 import {
@@ -129,7 +133,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       artifactName: 'DeepSeek-Harness-Setup-${version}-x64.${ext}',
       win: { target: [{ target: 'nsis', arch: ['x64'] }], requestedExecutionLevel: 'asInvoker' },
       nsis: {
-        oneClick: false, perMachine: false, allowElevation: false,
+        oneClick: false, perMachine: false, allowElevation: false, packElevateHelper: false,
         allowToChangeInstallationDirectory: true, runAfterFinish: true,
         guid: '5e7c4c1c-7429-5bb9-9c22-4e1bf4e2e478',
         createDesktopShortcut: false, createStartMenuShortcut: false,
@@ -398,19 +402,52 @@ describe('installer build boundary', () => {
     const source = await readFile(join(REPOSITORY_ROOT, 'scripts/desktop/build-installer.ts'), 'utf8')
     expect(source).toContain("{ ...process.env, DEBUG: 'electron-builder' }")
     expect(source).toContain("verifyGeneratedInstallerScript(await readFile(join(DESKTOP_INSTALLER, 'builder-debug.yml'), 'utf8'))")
-    expect(source).toContain("await resetStageDirectory(REPOSITORY_ROOT, join(DESKTOP_INSTALLER, 'win-unpacked'))")
+    expect(source).toContain('await validatePackage({ packageRoot: WIN_UNPACKED })')
+    expect(source).toContain("'--prepackaged', WIN_UNPACKED")
+    expect(source).not.toContain("await resetStageDirectory(REPOSITORY_ROOT, join(DESKTOP_INSTALLER, 'win-unpacked'))")
     expect(source).toContain("await removeOrdinaryBuilderFile('builder-debug.yml')")
     expect(source).toContain("await removeOrdinaryBuilderFile('latest.yml')")
     expect(await readFile(configPath, 'utf8')).not.toContain(REPOSITORY_ROOT)
   })
 
-  it('uses the pinned config and x64 NSIS target without putting secrets in argv', () => {
-    const invocation = electronBuilderInvocation()
-    expect(invocation.args).toEqual([
+  it('validates the exact absolute unpacked directory later passed to NSIS', () => {
+    const directory = electronBuilderDirectoryInvocation()
+    const prepackaged = electronBuilderPrepackagedInvocation()
+    expect(directory.args).toEqual([
+      'electron-builder', '--projectDir', join(REPOSITORY_ROOT, 'apps/desktop'),
+      '--config', 'electron-builder.yml', '--win', '--x64', '--dir', '--publish', 'never',
+    ])
+    expect(prepackaged.args).toEqual([
       'electron-builder', '--projectDir', join(REPOSITORY_ROOT, 'apps/desktop'),
       '--config', 'electron-builder.yml', '--win', 'nsis', '--x64', '--publish', 'never',
+      '--prepackaged', join(DESKTOP_INSTALLER, 'win-unpacked'),
     ])
-    expect(invocation.args.join(' ')).not.toMatch(/WIN_CSC|PASSWORD/iu)
+    expect([...directory.args, ...prepackaged.args].join(' ')).not.toMatch(/WIN_CSC|PASSWORD/iu)
+  })
+
+  it('requires a complete signing environment without exposing its values', () => {
+    expect(signingRequested({})).toBe(false)
+    expect(signingRequested({ WIN_CSC_LINK: 'secret', WIN_CSC_KEY_PASSWORD: 'secret' })).toBe(true)
+    expect(signingRequested({ CSC_LINK: 'secret', CSC_KEY_PASSWORD: 'secret' })).toBe(true)
+    expect(() => signingRequested({ WIN_CSC_LINK: 'secret' })).toThrow(/incomplete signing/u)
+    expect(() => signingRequested({ WIN_CSC_KEY_PASSWORD: 'secret' })).toThrow(/incomplete signing/u)
+    expect(() => signingRequested({
+      WIN_CSC_LINK: 'secret', WIN_CSC_KEY_PASSWORD: 'secret', CSC_LINK: 'secret', CSC_KEY_PASSWORD: 'secret',
+    })).toThrow(/incomplete signing/u)
+  })
+
+  it('passes the Authenticode artifact through a dedicated environment value', () => {
+    const command = authenticodePowerShellCommand()
+    expect(command).toContain('$env:DSH_SIGNATURE_ARTIFACT')
+    expect(command).not.toContain('$args')
+    expect(authenticodeEnvironment('C:\\release\\setup.exe', {
+      SystemRoot: 'C:\\Windows',
+      ProgramFiles: 'C:\\Program Files',
+      PSModulePath: 'C:\\bundled-powershell\\Modules',
+    })).toMatchObject({
+      DSH_SIGNATURE_ARTIFACT: 'C:\\release\\setup.exe',
+      PSModulePath: 'C:\\Windows\\system32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules',
+    })
   })
 
   it('accepts only the exact owned installer leaf', () => {

@@ -6,27 +6,60 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import yaml from 'js-yaml'
 
-import { DESKTOP_INSTALLER, REPOSITORY_ROOT, assertOwnedOutput } from './packaging-layout.ts'
+import { createReleaseFiles, type SignatureMetadata } from './checksum.ts'
+import {
+  DESKTOP_INSTALLER,
+  DESKTOP_INSTALLER_NAME,
+  DESKTOP_STAGE,
+  DESKTOP_VERSION,
+  REPOSITORY_ROOT,
+  assertOwnedOutput,
+} from './packaging-layout.ts'
 import { pnpmInvocation, resetStageDirectory } from './stage.ts'
+import { pruneForeignNativePayloads, validatePackage } from './validate-package.ts'
 import { verifyInstallerPowerShellCommands } from './generate-installer-powershell.ts'
 
-const VERSION = '0.1.0-rc.7'
-const INSTALLER_NAME = `DeepSeek-Harness-Setup-${VERSION}-x64.exe`
+const WIN_UNPACKED = join(DESKTOP_INSTALLER, 'win-unpacked')
 
-/** Return the pinned electron-builder CLI arguments. */
-export function electronBuilderInvocation(): { readonly args: readonly string[] } {
+/** Return the pinned electron-builder directory-build arguments. */
+export function electronBuilderDirectoryInvocation(): { readonly args: readonly string[] } {
+  return {
+    args: [
+      'electron-builder', '--projectDir', join(REPOSITORY_ROOT, 'apps/desktop'),
+      '--config', 'electron-builder.yml', '--win', '--x64', '--dir', '--publish', 'never',
+    ],
+  }
+}
+
+/** Return the pinned NSIS arguments consuming the already-validated unpacked directory. */
+export function electronBuilderPrepackagedInvocation(): { readonly args: readonly string[] } {
   return {
     args: [
       'electron-builder', '--projectDir', join(REPOSITORY_ROOT, 'apps/desktop'),
       '--config', 'electron-builder.yml', '--win', 'nsis', '--x64', '--publish', 'never',
+      '--prepackaged', WIN_UNPACKED,
     ],
   }
+}
+
+/** Require an all-or-nothing Windows certificate environment. */
+export function signingRequested(environment: NodeJS.ProcessEnv): boolean {
+  const windowsPair = [environment.WIN_CSC_LINK, environment.WIN_CSC_KEY_PASSWORD] as const
+  const genericPair = [environment.CSC_LINK, environment.CSC_KEY_PASSWORD] as const
+  const present = [...windowsPair, ...genericPair].some(value => value !== undefined)
+  if (!present) return false
+  const windowsComplete = windowsPair.every(value => value !== undefined && value !== '')
+  const genericComplete = genericPair.every(value => value !== undefined && value !== '')
+  if (windowsComplete === genericComplete) {
+    throw new Error('desktop packaging: incomplete signing environment')
+  }
+  return true
 }
 
 /** Reject every path except the exact versioned installer output. */
 export function assertInstallerOutput(path: string): void {
   assertOwnedOutput(path)
-  if (resolve(path) !== resolve(join(DESKTOP_INSTALLER, INSTALLER_NAME))) {
+  if (resolve(path) !== resolve(join(DESKTOP_INSTALLER, DESKTOP_INSTALLER_NAME))) {
     throw new Error(`desktop packaging: unexpected installer output: ${path}`)
   }
 }
@@ -91,27 +124,99 @@ function runPnpm(args: readonly string[], environment: NodeJS.ProcessEnv = proce
   if (result.status !== 0) throw new Error(`desktop packaging: pnpm exited with ${String(result.status)}`)
 }
 
+/** Return the fixed PowerShell program used for Authenticode status inspection. */
+export function authenticodePowerShellCommand(): string {
+  return [
+    '$value = Get-AuthenticodeSignature -LiteralPath $env:DSH_SIGNATURE_ARTIFACT',
+    '[Console]::Out.Write(($value.Status.ToString()))',
+  ].join('; ')
+}
+
+/** Build the Authenticode child environment with only Windows PowerShell module roots. */
+export function authenticodeEnvironment(path: string, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const systemRoot = environment.SystemRoot
+  const programFiles = environment.ProgramFiles
+  if (systemRoot === undefined || programFiles === undefined) {
+    throw new Error('desktop packaging: Windows module roots are unavailable')
+  }
+  return {
+    ...environment,
+    DSH_SIGNATURE_ARTIFACT: path,
+    PSModulePath: [
+      join(systemRoot, 'system32/WindowsPowerShell/v1.0/Modules'),
+      join(programFiles, 'WindowsPowerShell/Modules'),
+    ].join(';'),
+  }
+}
+
+function inspectAuthenticode(path: string, requireValid: boolean): SignatureMetadata {
+  const result = spawnSync('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', authenticodePowerShellCommand(),
+  ], {
+    cwd: DESKTOP_INSTALLER,
+    encoding: 'utf8',
+    env: authenticodeEnvironment(path, process.env),
+    windowsHide: true,
+  })
+  if (result.error !== undefined) throw result.error
+  if (result.status !== 0) throw new Error('desktop packaging: Authenticode inspection failed')
+  const status = result.stdout.trim()
+  if (requireValid && status !== 'Valid') throw new Error('desktop packaging: requested signature is not valid')
+  if (!requireValid && status !== 'NotSigned') throw new Error('desktop packaging: unexpected signature state without signing configuration')
+  return { signed: status === 'Valid', signatureStatus: status }
+}
+
 async function main(): Promise<void> {
   await verifyInstallerPowerShellCommands()
   runPnpm(['--filter', '@deepseek-ai/dsh-desktop', 'build'])
   runPnpm(['run', 'desktop:stage'])
+  const prunedNativeFiles = await pruneForeignNativePayloads(DESKTOP_STAGE)
+  console.log(`desktop packaging: pruned ${prunedNativeFiles} foreign native files`)
   runPnpm(['--filter', '@deepseek-ai/dsh-desktop', 'exec', 'electron', '--version'])
   await resetInstallerDirectory()
-  const invocation = electronBuilderInvocation()
+  const directoryInvocation = electronBuilderDirectoryInvocation()
   runPnpm(
-    ['--filter', '@deepseek-ai/dsh-desktop', 'exec', ...invocation.args],
+    ['--filter', '@deepseek-ai/dsh-desktop', 'exec', ...directoryInvocation.args],
     { ...process.env, DEBUG: 'electron-builder' },
   )
+  const prunedUnpackedFiles = await pruneForeignNativePayloads(WIN_UNPACKED)
+  if (prunedUnpackedFiles !== prunedNativeFiles) {
+    throw new Error('desktop packaging: staged and unpacked foreign native inventories differ')
+  }
+  const validatedInput = await validatePackage({ packageRoot: WIN_UNPACKED })
+  const prepackagedInvocation = electronBuilderPrepackagedInvocation()
+  runPnpm(
+    ['--filter', '@deepseek-ai/dsh-desktop', 'exec', ...prepackagedInvocation.args],
+    { ...process.env, DEBUG: 'electron-builder' },
+  )
+  const validatedAfterNsis = await validatePackage({ packageRoot: WIN_UNPACKED })
+  if (JSON.stringify(validatedAfterNsis) !== JSON.stringify(validatedInput)) {
+    throw new Error('desktop packaging: NSIS build changed the validated application input')
+  }
   verifyGeneratedInstallerScript(await readFile(join(DESKTOP_INSTALLER, 'builder-debug.yml'), 'utf8'))
-  await resetStageDirectory(REPOSITORY_ROOT, join(DESKTOP_INSTALLER, 'win-unpacked'))
   await removeOrdinaryBuilderFile('builder-debug.yml')
   await removeOrdinaryBuilderFile('latest.yml')
-  const entries = await readdir(DESKTOP_INSTALLER)
-  if (entries.length !== 1) throw new Error(`desktop packaging: expected only one installer, found ${entries.length} outputs`)
-  const output = join(DESKTOP_INSTALLER, entries[0] as string)
+  const entries = (await readdir(DESKTOP_INSTALLER)).filter(name => name !== 'win-unpacked')
+  if (entries.length !== 1 || entries[0] !== DESKTOP_INSTALLER_NAME) {
+    throw new Error(`desktop packaging: expected one exact installer, found ${entries.length} outputs`)
+  }
+  const output = join(DESKTOP_INSTALLER, DESKTOP_INSTALLER_NAME)
   assertInstallerOutput(output)
   const status = await lstat(output)
   if (!status.isFile() || status.isSymbolicLink()) throw new Error(`desktop packaging: installer is not an ordinary file: ${output}`)
+  const signature = inspectAuthenticode(output, signingRequested(process.env))
+  await createReleaseFiles({
+    outputRoot: DESKTOP_INSTALLER,
+    artifact: output,
+    version: DESKTOP_VERSION,
+    arch: 'x64',
+    signature,
+  })
+  const finalEntries = new Set(await readdir(DESKTOP_INSTALLER))
+  const expected = new Set(['win-unpacked', DESKTOP_INSTALLER_NAME, `${DESKTOP_INSTALLER_NAME}.sha256`, 'release-metadata.json'])
+  if (finalEntries.size !== expected.size || [...expected].some(name => !finalEntries.has(name))) {
+    throw new Error('desktop packaging: release directory contains unexpected outputs')
+  }
 }
 
 const invokedPath = process.argv[1]
