@@ -1,6 +1,7 @@
 /** Atomic checksum and release-metadata files for the Windows installer. */
 
 import { createHash, randomUUID } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { lstat, open, readFile, realpath, rename, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
@@ -20,6 +21,9 @@ interface CreateReleaseFilesOptions {
 interface VerifyReleaseFilesOptions {
   readonly outputRoot: string
   readonly artifact: string
+  readonly expectedVersion?: string
+  /** Test seam for hosts without Windows Authenticode. Production callers omit it. */
+  readonly actualSignature?: SignatureMetadata
 }
 
 export interface ReleaseMetadata extends SignatureMetadata {
@@ -74,6 +78,48 @@ async function atomicWrite(path: string, contents: string): Promise<void> {
   }
 }
 
+/** Return the fixed PowerShell program used for Authenticode status inspection. */
+export function authenticodePowerShellCommand(): string {
+  return [
+    '$value = Get-AuthenticodeSignature -LiteralPath $env:DSH_SIGNATURE_ARTIFACT',
+    '[Console]::Out.Write(($value.Status.ToString()))',
+  ].join('; ')
+}
+
+/** Build the Authenticode child environment with only Windows PowerShell module roots. */
+export function authenticodeEnvironment(path: string, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const systemRoot = environment.SystemRoot
+  const programFiles = environment.ProgramFiles
+  if (systemRoot === undefined || programFiles === undefined) {
+    throw new Error('desktop release: Windows module roots are unavailable')
+  }
+  return {
+    ...environment,
+    DSH_SIGNATURE_ARTIFACT: path,
+    PSModulePath: [
+      join(systemRoot, 'system32/WindowsPowerShell/v1.0/Modules'),
+      join(programFiles, 'WindowsPowerShell/Modules'),
+    ].join(';'),
+  }
+}
+
+/** Read the real Windows Authenticode state of an artifact. */
+export function inspectAuthenticode(path: string): SignatureMetadata {
+  const result = spawnSync('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', authenticodePowerShellCommand(),
+  ], {
+    cwd: dirname(path), encoding: 'utf8', env: authenticodeEnvironment(path, process.env), windowsHide: true,
+  })
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error('desktop release: Authenticode inspection failed', { cause: result.error })
+  }
+  const signatureStatus = result.stdout.trim()
+  if (signatureStatus !== 'Valid' && signatureStatus !== 'NotSigned') {
+    throw new Error('desktop release: Authenticode status is not releasable')
+  }
+  return { signed: signatureStatus === 'Valid', signatureStatus }
+}
+
 /**
  * Write checksum and JSON release metadata beside an installer.
  * @param options - Exact output ownership, release identity, and verified signature state.
@@ -105,23 +151,47 @@ export async function createReleaseFiles(options: CreateReleaseFilesOptions): Pr
 export async function verifyReleaseFiles(options: VerifyReleaseFilesOptions): Promise<ReleaseMetadata> {
   const paths = await assertReleasePaths(options.outputRoot, options.artifact)
   const metadataPath = join(paths.root, 'release-metadata.json')
-  const parsed = JSON.parse(await readFile(metadataPath, 'utf8')) as Partial<ReleaseMetadata>
+  for (const sidecar of [metadataPath, `${paths.artifact}.sha256`]) {
+    const sidecarStatus = await lstat(sidecar)
+    if (!sidecarStatus.isFile() || sidecarStatus.isSymbolicLink()) {
+      throw new Error('desktop release: sidecar must be an ordinary file')
+    }
+  }
+  const parsedValue = JSON.parse(await readFile(metadataPath, 'utf8')) as unknown
+  if (typeof parsedValue !== 'object' || parsedValue === null || Array.isArray(parsedValue)) {
+    throw new Error('desktop release: metadata must be an object')
+  }
+  const parsed = parsedValue as Partial<ReleaseMetadata>
+  const fields = ['arch', 'artifact', 'bytes', 'sha256', 'signatureStatus', 'signed', 'version']
+  if (Object.keys(parsed).sort().join('\0') !== fields.join('\0')) {
+    throw new Error('desktop release: metadata fields are not exact')
+  }
   const digest = await sha256(paths.artifact)
   const bytes = (await stat(paths.artifact)).size
   const expectedLine = `${digest}  ${basename(paths.artifact)}\n`
   if (await readFile(`${paths.artifact}.sha256`, 'utf8') !== expectedLine) {
     throw new Error('desktop release: checksum sidecar does not match artifact')
   }
+  const expectedFilename = typeof parsed.version === 'string'
+    ? `DeepSeek-Harness-Setup-${parsed.version}-x64.exe`
+    : ''
+  const actualSignature = options.actualSignature ?? inspectAuthenticode(paths.artifact)
   if (
     parsed.artifact !== basename(paths.artifact)
+    || parsed.artifact !== expectedFilename
     || parsed.sha256 !== digest
     || parsed.bytes !== bytes
     || parsed.arch !== 'x64'
     || typeof parsed.version !== 'string'
+    || (options.expectedVersion !== undefined && parsed.version !== options.expectedVersion)
     || typeof parsed.signed !== 'boolean'
     || typeof parsed.signatureStatus !== 'string'
+    || (parsed.signatureStatus !== 'Valid' && parsed.signatureStatus !== 'NotSigned')
+    || parsed.signed !== (parsed.signatureStatus === 'Valid')
+    || parsed.signed !== actualSignature.signed
+    || parsed.signatureStatus !== actualSignature.signatureStatus
   ) {
-    throw new Error('desktop release: metadata does not match artifact')
+    throw new Error('desktop release: metadata version, artifact, or signature does not match')
   }
   return parsed as ReleaseMetadata
 }

@@ -14,6 +14,7 @@ import {
   electronBuilderDirectoryInvocation,
   electronBuilderPrepackagedInvocation,
   parseIcoDimensions,
+  signingEnvironmentKind,
   signingRequested,
   verifyGeneratedInstallerScript,
 } from './build-installer.ts'
@@ -403,6 +404,7 @@ describe('installer build boundary', () => {
     expect(source).toContain("{ ...process.env, DEBUG: 'electron-builder' }")
     expect(source).toContain("verifyGeneratedInstallerScript(await readFile(join(DESKTOP_INSTALLER, 'builder-debug.yml'), 'utf8'))")
     expect(source).toContain('await validatePackage({ packageRoot: WIN_UNPACKED })')
+    expect(source).toContain('await sanitizeBundlerRegionMarkers(WIN_UNPACKED)')
     expect(source).toContain("'--prepackaged', WIN_UNPACKED")
     expect(source).not.toContain("await resetStageDirectory(REPOSITORY_ROOT, join(DESKTOP_INSTALLER, 'win-unpacked'))")
     expect(source).toContain("await removeOrdinaryBuilderFile('builder-debug.yml')")
@@ -429,11 +431,16 @@ describe('installer build boundary', () => {
     expect(signingRequested({})).toBe(false)
     expect(signingRequested({ WIN_CSC_LINK: 'secret', WIN_CSC_KEY_PASSWORD: 'secret' })).toBe(true)
     expect(signingRequested({ CSC_LINK: 'secret', CSC_KEY_PASSWORD: 'secret' })).toBe(true)
+    expect(signingRequested({
+      WIN_CSC_LINK: 'windows', WIN_CSC_KEY_PASSWORD: 'windows', CSC_LINK: 'generic', CSC_KEY_PASSWORD: 'generic',
+    })).toBe(true)
+    expect(signingEnvironmentKind({
+      WIN_CSC_LINK: 'windows', WIN_CSC_KEY_PASSWORD: 'windows', CSC_LINK: 'generic', CSC_KEY_PASSWORD: 'generic',
+    })).toBe('windows')
     expect(() => signingRequested({ WIN_CSC_LINK: 'secret' })).toThrow(/incomplete signing/u)
     expect(() => signingRequested({ WIN_CSC_KEY_PASSWORD: 'secret' })).toThrow(/incomplete signing/u)
-    expect(() => signingRequested({
-      WIN_CSC_LINK: 'secret', WIN_CSC_KEY_PASSWORD: 'secret', CSC_LINK: 'secret', CSC_KEY_PASSWORD: 'secret',
-    })).toThrow(/incomplete signing/u)
+    expect(() => signingRequested({ WIN_CSC_LINK: 'secret', CSC_LINK: 'generic', CSC_KEY_PASSWORD: 'generic' }))
+      .toThrow(/incomplete signing/u)
   })
 
   it('passes the Authenticode artifact through a dedicated environment value', () => {

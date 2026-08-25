@@ -6,7 +6,11 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import yaml from 'js-yaml'
 
-import { createReleaseFiles, type SignatureMetadata } from './checksum.ts'
+import {
+  createReleaseFiles,
+  inspectAuthenticode,
+} from './checksum.ts'
+export { authenticodeEnvironment, authenticodePowerShellCommand } from './checksum.ts'
 import {
   DESKTOP_INSTALLER,
   DESKTOP_INSTALLER_NAME,
@@ -16,7 +20,7 @@ import {
   assertOwnedOutput,
 } from './packaging-layout.ts'
 import { pnpmInvocation, resetStageDirectory } from './stage.ts'
-import { pruneForeignNativePayloads, validatePackage } from './validate-package.ts'
+import { pruneForeignNativePayloads, sanitizeBundlerRegionMarkers, validatePackage } from './validate-package.ts'
 import { verifyInstallerPowerShellCommands } from './generate-installer-powershell.ts'
 
 const WIN_UNPACKED = join(DESKTOP_INSTALLER, 'win-unpacked')
@@ -42,18 +46,27 @@ export function electronBuilderPrepackagedInvocation(): { readonly args: readonl
   }
 }
 
-/** Require an all-or-nothing Windows certificate environment. */
-export function signingRequested(environment: NodeJS.ProcessEnv): boolean {
+/** Resolve complete signing variables, preferring the Windows-specific pair when both pairs are present. */
+export function signingEnvironmentKind(environment: NodeJS.ProcessEnv): 'windows' | 'generic' | undefined {
   const windowsPair = [environment.WIN_CSC_LINK, environment.WIN_CSC_KEY_PASSWORD] as const
   const genericPair = [environment.CSC_LINK, environment.CSC_KEY_PASSWORD] as const
   const present = [...windowsPair, ...genericPair].some(value => value !== undefined)
-  if (!present) return false
+  if (!present) return undefined
   const windowsComplete = windowsPair.every(value => value !== undefined && value !== '')
   const genericComplete = genericPair.every(value => value !== undefined && value !== '')
-  if (windowsComplete === genericComplete) {
+  const windowsPartial = windowsPair.some(value => value !== undefined) && !windowsComplete
+  const genericPartial = genericPair.some(value => value !== undefined) && !genericComplete
+  if (windowsPartial || genericPartial) {
     throw new Error('desktop packaging: incomplete signing environment')
   }
-  return true
+  if (windowsComplete) return 'windows'
+  if (genericComplete) return 'generic'
+  return undefined
+}
+
+/** Require an all-or-nothing Windows certificate environment. */
+export function signingRequested(environment: NodeJS.ProcessEnv): boolean {
+  return signingEnvironmentKind(environment) !== undefined
 }
 
 /** Reject every path except the exact versioned installer output. */
@@ -124,48 +137,6 @@ function runPnpm(args: readonly string[], environment: NodeJS.ProcessEnv = proce
   if (result.status !== 0) throw new Error(`desktop packaging: pnpm exited with ${String(result.status)}`)
 }
 
-/** Return the fixed PowerShell program used for Authenticode status inspection. */
-export function authenticodePowerShellCommand(): string {
-  return [
-    '$value = Get-AuthenticodeSignature -LiteralPath $env:DSH_SIGNATURE_ARTIFACT',
-    '[Console]::Out.Write(($value.Status.ToString()))',
-  ].join('; ')
-}
-
-/** Build the Authenticode child environment with only Windows PowerShell module roots. */
-export function authenticodeEnvironment(path: string, environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const systemRoot = environment.SystemRoot
-  const programFiles = environment.ProgramFiles
-  if (systemRoot === undefined || programFiles === undefined) {
-    throw new Error('desktop packaging: Windows module roots are unavailable')
-  }
-  return {
-    ...environment,
-    DSH_SIGNATURE_ARTIFACT: path,
-    PSModulePath: [
-      join(systemRoot, 'system32/WindowsPowerShell/v1.0/Modules'),
-      join(programFiles, 'WindowsPowerShell/Modules'),
-    ].join(';'),
-  }
-}
-
-function inspectAuthenticode(path: string, requireValid: boolean): SignatureMetadata {
-  const result = spawnSync('powershell.exe', [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', authenticodePowerShellCommand(),
-  ], {
-    cwd: DESKTOP_INSTALLER,
-    encoding: 'utf8',
-    env: authenticodeEnvironment(path, process.env),
-    windowsHide: true,
-  })
-  if (result.error !== undefined) throw result.error
-  if (result.status !== 0) throw new Error('desktop packaging: Authenticode inspection failed')
-  const status = result.stdout.trim()
-  if (requireValid && status !== 'Valid') throw new Error('desktop packaging: requested signature is not valid')
-  if (!requireValid && status !== 'NotSigned') throw new Error('desktop packaging: unexpected signature state without signing configuration')
-  return { signed: status === 'Valid', signatureStatus: status }
-}
-
 async function main(): Promise<void> {
   await verifyInstallerPowerShellCommands()
   runPnpm(['--filter', '@deepseek-ai/dsh-desktop', 'build'])
@@ -179,6 +150,8 @@ async function main(): Promise<void> {
     ['--filter', '@deepseek-ai/dsh-desktop', 'exec', ...directoryInvocation.args],
     { ...process.env, DEBUG: 'electron-builder' },
   )
+  const sanitizedMarkers = await sanitizeBundlerRegionMarkers(WIN_UNPACKED)
+  console.log(`desktop packaging: removed ${sanitizedMarkers} generated source-location comments`)
   const prunedUnpackedFiles = await pruneForeignNativePayloads(WIN_UNPACKED)
   if (prunedUnpackedFiles !== prunedNativeFiles) {
     throw new Error('desktop packaging: staged and unpacked foreign native inventories differ')
@@ -204,7 +177,10 @@ async function main(): Promise<void> {
   assertInstallerOutput(output)
   const status = await lstat(output)
   if (!status.isFile() || status.isSymbolicLink()) throw new Error(`desktop packaging: installer is not an ordinary file: ${output}`)
-  const signature = inspectAuthenticode(output, signingRequested(process.env))
+  const signature = inspectAuthenticode(output)
+  const requestedSignature = signingRequested(process.env)
+  if (requestedSignature && !signature.signed) throw new Error('desktop packaging: requested signature is not valid')
+  if (!requestedSignature && signature.signed) throw new Error('desktop packaging: unexpected signature without signing configuration')
   await createReleaseFiles({
     outputRoot: DESKTOP_INSTALLER,
     artifact: output,

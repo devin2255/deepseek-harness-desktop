@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { pruneForeignNativePayloads, validatePackage } from './validate-package.ts'
+import { pruneForeignNativePayloads, sanitizeBundlerRegionMarkers, validatePackage } from './validate-package.ts'
 
 const temporaryRoots: string[] = []
 
@@ -58,6 +58,13 @@ async function completeFixture(): Promise<{ app: string; packageRoot: string }> 
     peerDependenciesMeta: { 'optional-peer': { optional: true } },
   })
   await ordinary(join(native, 'binding.node'), x64Pe())
+  for (const relativePath of [
+    'node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node',
+    'node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node',
+    'node_modules/node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node',
+    'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
+    'node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node',
+  ]) await ordinary(join(app, ...relativePath.split('/')), x64Pe())
   return { app, packageRoot }
 }
 
@@ -92,15 +99,22 @@ describe('desktop package closure', () => {
   it('accepts a complete relocatable x64 package', async () => {
     const fixture = await completeFixture()
     await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [] })).resolves.toMatchObject({
-      packages: 7, nativeBinaries: 2, externalLinks: 0,
+      packages: 7, nativeBinaries: 7, externalLinks: 0,
     })
+  })
+
+  it('requires an explicit product native addon instead of accepting an Electron helper executable', async () => {
+    const fixture = await completeFixture()
+    await ordinary(join(fixture.packageRoot, 'resources', 'helper.exe'), x64Pe())
+    await unlink(join(fixture.app, 'node_modules', 'node-pty', 'prebuilds', 'win32-x64', 'conpty.node'))
+    await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [] })).rejects.toThrow(/required native/u)
   })
 
   it.each([
     ['CLI', 'node_modules/@deepseek-ai/dsh/lib/bin.js'],
     ['profile', 'node_modules/@deepseek-ai/dsh-desktop-app/cordis.patch.yml'],
     ['web', 'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html'],
-    ['native', 'node_modules/fixture-native/binding.node'],
+    ['native', 'node_modules/node-pty/prebuilds/win32-x64/conpty.node'],
   ])('rejects a missing %s runtime resource', async (_kind, relativePath) => {
     const fixture = await completeFixture()
     await unlink(join(fixture.app, ...relativePath.split('/')))
@@ -133,10 +147,46 @@ describe('desktop package closure', () => {
     await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [forbidden] })).rejects.toThrow(/absolute build path/u)
   })
 
+  it.each(['main.js', 'preload.cjs', 'worker.mjs', 'index.html', 'main.js.map'])(
+    'rejects an absolute build root embedded in published text %s',
+    async (name) => {
+      const fixture = await completeFixture()
+      const forbidden = 'D:\\repo\\deepseek-harness-desktop'
+      await ordinary(join(fixture.app, 'published', name), 'sourceRoot: D:/repo/deepseek-harness-desktop/packages\n')
+      await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [forbidden] }))
+        .rejects.toThrow(/absolute build path/u)
+    },
+  )
+
+  it('removes generated bundler region source paths without rewriting runtime text', async () => {
+    const fixture = await completeFixture()
+    const generated = join(fixture.app, 'published', 'generated.js')
+    await ordinary(generated, [
+      '\\t//#region \\0dsh-css:D:\\repo\\deepseek-harness-desktop\\source.css',
+      'export const value = 1',
+      '//#endregion',
+      '',
+    ].join('\n'))
+    await expect(sanitizeBundlerRegionMarkers(fixture.packageRoot)).resolves.toBe(1)
+    expect(await readFile(generated, 'utf8')).toBe('export const value = 1\n//#endregion\n')
+    await ordinary(generated, 'export const runtimePath = "D:/repo/deepseek-harness-desktop/runtime"\n')
+    await expect(sanitizeBundlerRegionMarkers(fixture.packageRoot)).resolves.toBe(0)
+    await expect(validatePackage({
+      packageRoot: fixture.packageRoot, forbiddenRoots: ['D:\\repo\\deepseek-harness-desktop'],
+    })).rejects.toThrow(/absolute build path/u)
+  })
+
   it('fails closed when a scanned manifest exceeds its configured size cap', async () => {
     const fixture = await completeFixture()
     await ordinary(join(fixture.app, 'large.yaml'), 'x'.repeat(33))
     await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [], maxTextBytes: 32 })).rejects.toThrow(/size cap/u)
+  })
+
+  it('skips only Electron\'s fixed root license inventory when it exceeds the text cap', async () => {
+    const fixture = await completeFixture()
+    await ordinary(join(fixture.packageRoot, 'LICENSES.chromium.html'), 'x'.repeat(1025))
+    await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [], maxTextBytes: 1024 }))
+      .resolves.toMatchObject({ externalLinks: 0 })
   })
 
   it.each(['binding.node', 'DeepSeek Harness.exe'])('rejects malformed or non-x64 PE binary %s', async (name) => {

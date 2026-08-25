@@ -82,7 +82,7 @@ describe('desktop production staging', () => {
       'desktop:stage': 'tsx scripts/desktop/stage.ts',
       'desktop:package': 'tsx scripts/desktop/build-installer.ts',
       'desktop:validate-package': 'tsx scripts/desktop/validate-package.ts',
-      'test:desktop:installer': 'vitest run --config vitest.desktop-installer.config.ts',
+      'test:desktop:installer': 'vitest run scripts/desktop',
     })
   })
 

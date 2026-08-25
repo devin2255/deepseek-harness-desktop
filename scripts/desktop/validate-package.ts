@@ -1,6 +1,6 @@
 /** Fail-closed validation for a Windows desktop application's unpacked runtime. */
 
-import { lstat, readFile, readdir, readlink, realpath, unlink } from 'node:fs/promises'
+import { lstat, readFile, readdir, readlink, realpath, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,12 +10,22 @@ import {
   DESKTOP_INSTALLER,
   DESKTOP_INSTALLER_NAME,
   DESKTOP_STAGE,
+  DESKTOP_VERSION,
   REPOSITORY_ROOT,
 } from './packaging-layout.ts'
 
-const DEFAULT_MAX_TEXT_BYTES = 2 * 1024 * 1024
+const DEFAULT_MAX_TEXT_BYTES = 4 * 1024 * 1024
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/iu
-const TEXT_EXTENSIONS = new Set(['.json', '.yaml', '.yml', '.toml', '.config'])
+const TEXT_EXTENSIONS = new Set(['.json', '.yaml', '.yml', '.toml', '.config', '.js', '.cjs', '.mjs', '.html', '.map'])
+const REQUIRED_NATIVE_ADDONS = [
+  'resources/app/node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node',
+  'resources/app/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node',
+  'resources/app/node_modules/node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node',
+  'resources/app/node_modules/node-pty/prebuilds/win32-x64/conpty.node',
+  'resources/app/node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node',
+] as const
+// Electron owns this root license inventory; it contains no executable configuration and commonly exceeds 20 MiB.
+const OVERSIZE_TEXT_EXCEPTIONS = new Set(['LICENSES.chromium.html'])
 
 export interface PackageValidationOptions {
   /** The electron-builder win-unpacked directory. */
@@ -291,6 +301,39 @@ export async function pruneForeignNativePayloads(root: string): Promise<number> 
 }
 
 /**
+ * Remove Rolldown region comments that persist absolute CSS module source paths.
+ * @param root - Unpacked application root inspected without following links.
+ * @returns Number of generated source-location comments removed.
+ */
+export async function sanitizeBundlerRegionMarkers(root: string): Promise<number> {
+  const deploymentRoot = resolve(root)
+  let removed = 0
+  async function visit(directory: string): Promise<void> {
+    for (const name of await readdir(directory)) {
+      const path = join(directory, name)
+      const status = await lstat(path)
+      if (status.isSymbolicLink()) continue
+      if (status.isDirectory()) {
+        await visit(path)
+        continue
+      }
+      if (!status.isFile() || !['.js', '.cjs', '.mjs'].includes(extname(name).toLowerCase())) continue
+      if (status.size > DEFAULT_MAX_TEXT_BYTES) {
+        throw new Error('desktop package validation: generated JavaScript exceeds sanitization size cap')
+      }
+      const source = await readFile(path, 'utf8')
+      const sanitized = source.replace(/^(?:[ \t]|\\[tr])*\/\/#region \\0[^\r\n]*(?:\r?\n|$)/gmu, () => {
+        removed += 1
+        return ''
+      })
+      if (sanitized !== source) await writeFile(path, sanitized, 'utf8')
+    }
+  }
+  await visit(deploymentRoot)
+  return removed
+}
+
+/**
  * Validate one electron-builder unpacked application without loading shipped code.
  * @param options - Package root, forbidden host roots, and bounded text read limit.
  * @returns Counts describing the validated runtime closure.
@@ -314,6 +357,9 @@ export async function validatePackage(options: PackageValidationOptions): Promis
     [join(appRoot, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'index.html'), 'web frontend'],
   ] as const
   for (const [path, purpose] of requiredFiles) await assertOrdinaryFile(packageRoot, path, purpose)
+  for (const relativePath of REQUIRED_NATIVE_ADDONS) {
+    await assertOrdinaryFile(packageRoot, join(packageRoot, ...relativePath.split('/')), 'native addon')
+  }
 
   const discovery = await walkWithoutFollowingLinks(packageRoot)
   const graph = await productionGraph(appRoot)
@@ -327,8 +373,6 @@ export async function validatePackage(options: PackageValidationOptions): Promis
       nativeBinaries += 1
     }
   }
-  if (nativeBinaries === 1) throw new Error('desktop package validation: required native runtime resource is missing')
-
   const forbidden = (options.forbiddenRoots ?? [
     REPOSITORY_ROOT,
     homedir(),
@@ -345,7 +389,10 @@ export async function validatePackage(options: PackageValidationOptions): Promis
   for (const path of discovery.files) {
     if (!TEXT_EXTENSIONS.has(extname(path).toLowerCase())) continue
     const status = await lstat(path)
-    if (status.size > maxTextBytes) throw new Error(`desktop package validation: text size cap exceeded at ${display(packageRoot, path)}`)
+    if (status.size > maxTextBytes) {
+      if (OVERSIZE_TEXT_EXCEPTIONS.has(display(packageRoot, path))) continue
+      throw new Error(`desktop package validation: text size cap exceeded at ${display(packageRoot, path)}`)
+    }
     const content = (await readFile(path, 'utf8')).replaceAll('\\', '/').toLowerCase()
     if (forbidden.some(root => content.includes(root.replaceAll('\\', '/')))) {
       throw new Error(`desktop package validation: absolute build path found at ${display(packageRoot, path)}`)
@@ -368,6 +415,7 @@ async function main(): Promise<void> {
   const release = await verifyReleaseFiles({
     outputRoot: DESKTOP_INSTALLER,
     artifact: join(DESKTOP_INSTALLER, DESKTOP_INSTALLER_NAME),
+    expectedVersion: DESKTOP_VERSION,
   })
   console.log(JSON.stringify({ ...result, release }))
 }
