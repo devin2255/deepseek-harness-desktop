@@ -11,6 +11,8 @@ import {
   assertInstallerOutput,
   authenticodeEnvironment,
   authenticodePowerShellCommand,
+  authenticodePowerShellPath,
+  authenticodeSpawnOptions,
   electronBuilderDirectoryInvocation,
   electronBuilderPrepackagedInvocation,
   parseIcoDimensions,
@@ -404,6 +406,7 @@ describe('installer build boundary', () => {
     expect(source).toContain("{ ...process.env, DEBUG: 'electron-builder' }")
     expect(source).toContain("verifyGeneratedInstallerScript(await readFile(join(DESKTOP_INSTALLER, 'builder-debug.yml'), 'utf8'))")
     expect(source).toContain('await validatePackage({ packageRoot: WIN_UNPACKED })')
+    expect(source).toContain('await packageTreeManifest(WIN_UNPACKED)')
     expect(source).toContain('await sanitizeBundlerRegionMarkers(WIN_UNPACKED)')
     expect(source).toContain("'--prepackaged', WIN_UNPACKED")
     expect(source).not.toContain("await resetStageDirectory(REPOSITORY_ROOT, join(DESKTOP_INSTALLER, 'win-unpacked'))")
@@ -447,13 +450,25 @@ describe('installer build boundary', () => {
     const command = authenticodePowerShellCommand()
     expect(command).toContain('$env:DSH_SIGNATURE_ARTIFACT')
     expect(command).not.toContain('$args')
-    expect(authenticodeEnvironment('C:\\release\\setup.exe', {
+    const environment = authenticodeEnvironment('C:\\release\\setup.exe', {
       SystemRoot: 'C:\\Windows',
+      WINDIR: 'C:\\Windows',
       ProgramFiles: 'C:\\Program Files',
       PSModulePath: 'C:\\bundled-powershell\\Modules',
-    })).toMatchObject({
+      DSH_SECRET_SENTINEL: 'must-not-cross',
+      PATH: 'C:\\secret-bin',
+    })
+    expect(environment).toMatchObject({
       DSH_SIGNATURE_ARTIFACT: 'C:\\release\\setup.exe',
       PSModulePath: 'C:\\Windows\\system32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules',
+    })
+    expect(environment).not.toHaveProperty('DSH_SECRET_SENTINEL')
+    expect(environment).not.toHaveProperty('PATH')
+    expect(authenticodePowerShellPath({ SystemRoot: 'C:\\Windows' })).toBe(
+      'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    )
+    expect(authenticodeSpawnOptions('C:\\release\\setup.exe', process.env)).toMatchObject({
+      timeout: 15_000, maxBuffer: 64 * 1024,
     })
   })
 

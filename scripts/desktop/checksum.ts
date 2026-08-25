@@ -94,7 +94,9 @@ export function authenticodeEnvironment(path: string, environment: NodeJS.Proces
     throw new Error('desktop release: Windows module roots are unavailable')
   }
   return {
-    ...environment,
+    SystemRoot: systemRoot,
+    WINDIR: environment.WINDIR ?? systemRoot,
+    ProgramFiles: programFiles,
     DSH_SIGNATURE_ARTIFACT: path,
     PSModulePath: [
       join(systemRoot, 'system32/WindowsPowerShell/v1.0/Modules'),
@@ -103,13 +105,30 @@ export function authenticodeEnvironment(path: string, environment: NodeJS.Proces
   }
 }
 
+/** Resolve the absolute inbox Windows PowerShell executable. */
+export function authenticodePowerShellPath(environment: NodeJS.ProcessEnv): string {
+  const systemRoot = environment.SystemRoot
+  if (systemRoot === undefined) throw new Error('desktop release: Windows system root is unavailable')
+  return join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe')
+}
+
+/** Return bounded spawn options with a credential-free child environment. */
+export function authenticodeSpawnOptions(path: string, environment: NodeJS.ProcessEnv) {
+  return {
+    cwd: dirname(path),
+    encoding: 'utf8' as const,
+    env: authenticodeEnvironment(path, environment),
+    windowsHide: true,
+    timeout: 15_000,
+    maxBuffer: 64 * 1024,
+  }
+}
+
 /** Read the real Windows Authenticode state of an artifact. */
 export function inspectAuthenticode(path: string): SignatureMetadata {
-  const result = spawnSync('powershell.exe', [
+  const result = spawnSync(authenticodePowerShellPath(process.env), [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', authenticodePowerShellCommand(),
-  ], {
-    cwd: dirname(path), encoding: 'utf8', env: authenticodeEnvironment(path, process.env), windowsHide: true,
-  })
+  ], authenticodeSpawnOptions(path, process.env))
   if (result.error !== undefined || result.status !== 0) {
     throw new Error('desktop release: Authenticode inspection failed', { cause: result.error })
   }

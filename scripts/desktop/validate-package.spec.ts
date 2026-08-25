@@ -3,16 +3,29 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { pruneForeignNativePayloads, sanitizeBundlerRegionMarkers, validatePackage } from './validate-package.ts'
+import {
+  packageTreeManifest,
+  pruneForeignNativePayloads,
+  sanitizeBundlerRegionMarkers,
+  validatePackage,
+} from './validate-package.ts'
 
 const temporaryRoots: string[] = []
 
 function x64Pe(): Buffer {
-  const value = Buffer.alloc(256)
+  const value = Buffer.alloc(512)
   value.write('MZ', 0, 'ascii')
   value.writeUInt32LE(128, 0x3c)
   value.write('PE\0\0', 128, 'binary')
   value.writeUInt16LE(0x8664, 132)
+  value.writeUInt16LE(1, 134)
+  value.writeUInt16LE(0xf0, 148)
+  value.writeUInt16LE(0x22, 150)
+  value.writeUInt16LE(0x20b, 152)
+  value.writeUInt32LE(0x1000, 208)
+  value.writeUInt32LE(0x200, 212)
+  value.writeUInt32LE(16, 260)
+  value.write('.text', 392, 'ascii')
   return value
 }
 
@@ -158,6 +171,20 @@ describe('desktop package closure', () => {
     },
   )
 
+  it.each([
+    'D:\\repo\\deepseek-harness-desktop\\packages',
+    'D:/repo/deepseek-harness-desktop/packages',
+    'D:\\\\repo\\\\deepseek-harness-desktop\\\\packages',
+    'D:\\/repo\\/deepseek-harness-desktop\\/packages',
+    'file:///D:/repo/deepseek-harness-desktop/packages',
+  ])('rejects escaped and URL build paths from published CSS: %s', async (embeddedPath) => {
+    const fixture = await completeFixture()
+    await ordinary(join(fixture.app, 'published', 'style.css'), `source: ${embeddedPath}\n`)
+    await expect(validatePackage({
+      packageRoot: fixture.packageRoot, forbiddenRoots: ['D:\\repo\\deepseek-harness-desktop'],
+    })).rejects.toThrow(/absolute build path/u)
+  })
+
   it('removes generated bundler region source paths without rewriting runtime text', async () => {
     const fixture = await completeFixture()
     const generated = join(fixture.app, 'published', 'generated.js')
@@ -196,6 +223,28 @@ describe('desktop package closure', () => {
       : join(fixture.packageRoot, name)
     await ordinary(path, Buffer.from('MZ malformed'))
     await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [] })).rejects.toThrow(/PE|x64/u)
+  })
+
+  it.each([
+    ['zero COFF sections', (value: Buffer) => value.writeUInt16LE(0, 134)],
+    ['truncated optional header', (value: Buffer) => value.writeUInt16LE(0x1000, 148)],
+    ['non-PE32+ optional magic', (value: Buffer) => value.writeUInt16LE(0x10b, 152)],
+    ['out-of-bounds data directory table', (value: Buffer) => value.writeUInt32LE(17, 260)],
+  ])('rejects a forged PE with %s', async (_label, corrupt) => {
+    const fixture = await completeFixture()
+    const value = x64Pe()
+    corrupt(value)
+    await ordinary(join(fixture.app, 'node_modules', 'fixture-native', 'binding.node'), value)
+    await expect(validatePackage({ packageRoot: fixture.packageRoot, forbiddenRoots: [] })).rejects.toThrow(/PE|COFF|section/iu)
+  })
+
+  it('hashes a complete sorted package tree manifest so equal counts cannot hide mutation', async () => {
+    const fixture = await completeFixture()
+    const first = await packageTreeManifest(fixture.packageRoot)
+    await ordinary(join(fixture.app, 'lib', 'main.js'), 'changed without changing the tree count')
+    const second = await packageTreeManifest(fixture.packageRoot)
+    expect(second).not.toEqual(first)
+    expect(second.map(entry => entry.path)).toEqual([...second.map(entry => entry.path)].sort())
   })
 
   it('rejects missing production dependencies and required peers while allowing optional peers', async () => {

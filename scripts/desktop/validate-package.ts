@@ -1,5 +1,7 @@
 /** Fail-closed validation for a Windows desktop application's unpacked runtime. */
 
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { lstat, readFile, readdir, readlink, realpath, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
@@ -16,7 +18,7 @@ import {
 
 const DEFAULT_MAX_TEXT_BYTES = 4 * 1024 * 1024
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/iu
-const TEXT_EXTENSIONS = new Set(['.json', '.yaml', '.yml', '.toml', '.config', '.js', '.cjs', '.mjs', '.html', '.map'])
+const TEXT_EXTENSIONS = new Set(['.json', '.yaml', '.yml', '.toml', '.config', '.js', '.cjs', '.mjs', '.html', '.css', '.map'])
 const REQUIRED_NATIVE_ADDONS = [
   'resources/app/node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node',
   'resources/app/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node',
@@ -43,6 +45,13 @@ export interface PackageValidationResult {
   readonly packages: number
   readonly nativeBinaries: number
   readonly scannedTextFiles: number
+}
+
+export interface PackageTreeEntry {
+  readonly path: string
+  readonly type: 'directory' | 'file' | 'link'
+  readonly sha256?: string
+  readonly target?: string
 }
 
 interface Manifest {
@@ -223,6 +232,7 @@ async function productionGraph(appRoot: string): Promise<Map<string, { readonly 
 }
 
 async function assertX64Pe(path: string): Promise<void> {
+  const fileSize = (await lstat(path)).size
   const handle = await import('node:fs/promises').then(module => module.open(path, 'r'))
   try {
     const header = Buffer.alloc(64)
@@ -232,20 +242,90 @@ async function assertX64Pe(path: string): Promise<void> {
     }
     const offset = header.readUInt32LE(0x3c)
     if (offset < 64 || offset > 16 * 1024 * 1024) throw new Error('desktop package validation: malformed PE header offset')
-    const pe = Buffer.alloc(6)
-    const second = await handle.read(pe, 0, pe.length, offset)
-    if (second.bytesRead !== pe.length || pe.toString('binary', 0, 4) !== 'PE\0\0') {
+    if (offset + 24 > fileSize) throw new Error('desktop package validation: truncated PE COFF header')
+    const coff = Buffer.alloc(24)
+    const second = await handle.read(coff, 0, coff.length, offset)
+    if (second.bytesRead !== coff.length || coff.toString('binary', 0, 4) !== 'PE\0\0') {
       throw new Error('desktop package validation: malformed PE signature')
     }
-    if (pe.readUInt16LE(4) !== 0x8664) throw new Error('desktop package validation: PE binary is not x64')
+    if (coff.readUInt16LE(4) !== 0x8664) throw new Error('desktop package validation: PE binary is not x64')
+    const sectionCount = coff.readUInt16LE(6)
+    if (sectionCount === 0 || sectionCount > 96) throw new Error('desktop package validation: invalid PE COFF section count')
+    const optionalLength = coff.readUInt16LE(20)
+    if (optionalLength < 112 || optionalLength > 4096) {
+      throw new Error('desktop package validation: invalid PE optional header length')
+    }
+    const optionalOffset = offset + 24
+    const sectionTableOffset = optionalOffset + optionalLength
+    const sectionTableEnd = sectionTableOffset + sectionCount * 40
+    if (sectionTableEnd > fileSize) throw new Error('desktop package validation: truncated PE section table')
+    const optional = Buffer.alloc(optionalLength)
+    if ((await handle.read(optional, 0, optional.length, optionalOffset)).bytesRead !== optional.length) {
+      throw new Error('desktop package validation: truncated PE optional header')
+    }
+    if (optional.readUInt16LE(0) !== 0x20b) throw new Error('desktop package validation: PE optional header is not PE32+')
+    const directoryCount = optional.readUInt32LE(108)
+    if (directoryCount > 16 || 112 + directoryCount * 8 > optionalLength) {
+      throw new Error('desktop package validation: PE data directory table is out of bounds')
+    }
+    const sizeOfHeaders = optional.readUInt32LE(60)
+    if (sizeOfHeaders < sectionTableEnd || sizeOfHeaders > fileSize) {
+      throw new Error('desktop package validation: PE header size is out of bounds')
+    }
+    const sections = Buffer.alloc(sectionCount * 40)
+    if ((await handle.read(sections, 0, sections.length, sectionTableOffset)).bytesRead !== sections.length) {
+      throw new Error('desktop package validation: truncated PE section table')
+    }
+    for (let index = 0; index < sectionCount; index += 1) {
+      const base = index * 40
+      const rawSize = sections.readUInt32LE(base + 16)
+      const rawOffset = sections.readUInt32LE(base + 20)
+      if (rawSize > 0 && (rawOffset < sizeOfHeaders || rawOffset + rawSize > fileSize)) {
+        throw new Error('desktop package validation: PE section data is out of bounds')
+      }
+    }
   } finally {
     await handle.close()
   }
 }
 
-function normalizedPathVariants(path: string): readonly string[] {
-  const normalized = resolve(path).replaceAll('\\', '/').replace(/\/+$/u, '').toLowerCase()
-  return [normalized, normalized.replaceAll('/', '\\')]
+function normalizedPublishedText(value: string): string {
+  return value.toLowerCase().replaceAll('\\', '/').replace(/\/{2,}/gu, '/').replace(/\/+$/u, '')
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer)
+  return hash.digest('hex')
+}
+
+/**
+ * Hash every ordinary file and record every directory and link in deterministic path order.
+ * @param root - Canonical package root to inventory without following links.
+ * @returns Complete package tree records sorted by relative path.
+ */
+export async function packageTreeManifest(root: string): Promise<readonly PackageTreeEntry[]> {
+  const packageRoot = resolve(root)
+  const records: PackageTreeEntry[] = []
+  async function visit(directory: string): Promise<void> {
+    for (const name of (await readdir(directory)).sort()) {
+      const path = join(directory, name)
+      const relativePath = display(packageRoot, path)
+      const status = await lstat(path)
+      if (status.isSymbolicLink()) {
+        records.push({ path: relativePath, type: 'link', target: await readlink(path) })
+      } else if (status.isDirectory()) {
+        records.push({ path: relativePath, type: 'directory' })
+        await visit(path)
+      } else if (status.isFile()) {
+        records.push({ path: relativePath, type: 'file', sha256: await sha256File(path) })
+      } else {
+        throw new Error(`desktop package validation: unsupported filesystem entry at ${relativePath}`)
+      }
+    }
+  }
+  await visit(packageRoot)
+  return records.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
 }
 
 const FOREIGN_PREBUILD_PLATFORMS = new Set(['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-arm64'])
@@ -379,7 +459,7 @@ export async function validatePackage(options: PackageValidationOptions): Promis
     DESKTOP_STAGE,
     join(parse(REPOSITORY_ROOT).root, '.pnpm-store'),
   ])
-    .flatMap(normalizedPathVariants)
+    .map(normalizedPublishedText)
     .filter(value => value.length >= 4)
   const maxTextBytes = options.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES
   if (!Number.isSafeInteger(maxTextBytes) || maxTextBytes <= 0) {
@@ -393,8 +473,8 @@ export async function validatePackage(options: PackageValidationOptions): Promis
       if (OVERSIZE_TEXT_EXCEPTIONS.has(display(packageRoot, path))) continue
       throw new Error(`desktop package validation: text size cap exceeded at ${display(packageRoot, path)}`)
     }
-    const content = (await readFile(path, 'utf8')).replaceAll('\\', '/').toLowerCase()
-    if (forbidden.some(root => content.includes(root.replaceAll('\\', '/')))) {
+    const content = normalizedPublishedText(await readFile(path, 'utf8'))
+    if (forbidden.some(root => content.includes(root))) {
       throw new Error(`desktop package validation: absolute build path found at ${display(packageRoot, path)}`)
     }
     scannedTextFiles += 1

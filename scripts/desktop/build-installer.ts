@@ -10,7 +10,12 @@ import {
   createReleaseFiles,
   inspectAuthenticode,
 } from './checksum.ts'
-export { authenticodeEnvironment, authenticodePowerShellCommand } from './checksum.ts'
+export {
+  authenticodeEnvironment,
+  authenticodePowerShellCommand,
+  authenticodePowerShellPath,
+  authenticodeSpawnOptions,
+} from './checksum.ts'
 import {
   DESKTOP_INSTALLER,
   DESKTOP_INSTALLER_NAME,
@@ -20,7 +25,12 @@ import {
   assertOwnedOutput,
 } from './packaging-layout.ts'
 import { pnpmInvocation, resetStageDirectory } from './stage.ts'
-import { pruneForeignNativePayloads, sanitizeBundlerRegionMarkers, validatePackage } from './validate-package.ts'
+import {
+  packageTreeManifest,
+  pruneForeignNativePayloads,
+  sanitizeBundlerRegionMarkers,
+  validatePackage,
+} from './validate-package.ts'
 import { verifyInstallerPowerShellCommands } from './generate-installer-powershell.ts'
 
 const WIN_UNPACKED = join(DESKTOP_INSTALLER, 'win-unpacked')
@@ -157,14 +167,19 @@ async function main(): Promise<void> {
     throw new Error('desktop packaging: staged and unpacked foreign native inventories differ')
   }
   const validatedInput = await validatePackage({ packageRoot: WIN_UNPACKED })
+  const inputTree = await packageTreeManifest(WIN_UNPACKED)
   const prepackagedInvocation = electronBuilderPrepackagedInvocation()
   runPnpm(
     ['--filter', '@deepseek-ai/dsh-desktop', 'exec', ...prepackagedInvocation.args],
     { ...process.env, DEBUG: 'electron-builder' },
   )
   const validatedAfterNsis = await validatePackage({ packageRoot: WIN_UNPACKED })
+  const afterNsisTree = await packageTreeManifest(WIN_UNPACKED)
   if (JSON.stringify(validatedAfterNsis) !== JSON.stringify(validatedInput)) {
     throw new Error('desktop packaging: NSIS build changed the validated application input')
+  }
+  if (JSON.stringify(afterNsisTree) !== JSON.stringify(inputTree)) {
+    throw new Error('desktop packaging: NSIS build changed the validated package tree')
   }
   verifyGeneratedInstallerScript(await readFile(join(DESKTOP_INSTALLER, 'builder-debug.yml'), 'utf8'))
   await removeOrdinaryBuilderFile('builder-debug.yml')
