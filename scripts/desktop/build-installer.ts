@@ -8,6 +8,7 @@ import yaml from 'js-yaml'
 
 import { DESKTOP_INSTALLER, REPOSITORY_ROOT, assertOwnedOutput } from './packaging-layout.ts'
 import { pnpmInvocation, resetStageDirectory } from './stage.ts'
+import { verifyInstallerPowerShellCommands } from './generate-installer-powershell.ts'
 
 const VERSION = '0.1.0-rc.7'
 const INSTALLER_NAME = `DeepSeek-Harness-Setup-${VERSION}-x64.exe`
@@ -91,6 +92,7 @@ function runPnpm(args: readonly string[], environment: NodeJS.ProcessEnv = proce
 }
 
 async function main(): Promise<void> {
+  await verifyInstallerPowerShellCommands()
   runPnpm(['--filter', '@deepseek-ai/dsh-desktop', 'build'])
   runPnpm(['run', 'desktop:stage'])
   runPnpm(['--filter', '@deepseek-ai/dsh-desktop', 'exec', 'electron', '--version'])

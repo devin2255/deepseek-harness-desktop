@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md
-2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md: 4d6c1cd77f2b05622698febe15e19d9ec350b48f
-2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.zh.md: 52489be364b57b3e778e49a8c72fba675e19a85e
+2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md: bae4258a3af37053a08dac134d64702f3e078a82
+2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.zh.md: a4303f2566585fb33ff3dcff49b3bdbbfb7b19f9

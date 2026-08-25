@@ -1,5 +1,6 @@
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+!include "${BUILD_RESOURCES_DIR}\powershell-commands.nsh"
 
 Var DshCloseTarget
 
@@ -61,11 +62,9 @@ Var DshCloseTarget
   ${endif}
   ReadRegStr $0 HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   ${if} $0 != ""
-    InitPluginsDir
-    File /oname=$PLUGINSDIR\dsh-compare-semver.ps1 "${BUILD_RESOURCES_DIR}\compare-semver.ps1"
     System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_INSTALLED_VERSION", w "$0") i.r1'
     System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_CANDIDATE_VERSION", w "${VERSION}") i.r1'
-    nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File $\"$PLUGINSDIR\dsh-compare-semver.ps1$\"`
+    nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Restricted -EncodedCommand ${DSH_POWERSHELL_COMPARE_SEMVER}`
     Pop $1
     Pop $2
     System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_INSTALLED_VERSION", p 0) i.r1'
@@ -118,7 +117,7 @@ FunctionEnd
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_SHORTCUT", w "${Shortcut}") i.r1'
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_OLD_TARGET_EXE", w "${OldTarget}") i.r1'
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_NEW_TARGET_EXE", w "${NewTarget}") i.r1'
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File $\"$PLUGINSDIR\dsh-inspect-shortcut.ps1$\"`
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Restricted -EncodedCommand ${DSH_POWERSHELL_INSPECT_SHORTCUT}`
   Pop $0
   Pop $1
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_SHORTCUT", p 0) i.r1'
@@ -143,8 +142,6 @@ FunctionEnd
 !macroend
 
 !macro customInstall
-  InitPluginsDir
-  File /oname=$PLUGINSDIR\dsh-inspect-shortcut.ps1 "${BUILD_RESOURCES_DIR}\inspect-shortcut.ps1"
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "DshDesktopShortcut" "$DshDesktopShortcut"
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "DshStartMenuShortcut" "$DshStartMenuShortcut"
   WriteRegStr HKCU "${INSTALL_REGISTRY_KEY}" "DshLaunchAtLogin" "$DshLaunchAtLogin"
@@ -179,8 +176,6 @@ FunctionEnd
 
 !macro customUnInstall
   ${ifNot} ${isUpdated}
-    InitPluginsDir
-    File /oname=$PLUGINSDIR\dsh-inspect-shortcut.ps1 "${BUILD_RESOURCES_DIR}\inspect-shortcut.ps1"
     ; electron-builder's template owns section 0; customUnInstallSection appends this sole option as section 1.
     SectionGetFlags 1 $DshDeleteUserData
     IntOp $DshDeleteUserData $DshDeleteUserData & ${SF_SELECTED}
@@ -217,7 +212,7 @@ FunctionEnd
 
 !macro DshQueryInstalledProcess Target ExitCode Status
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_TARGET_EXE", w "${Target}") i.r1'
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File $\"$PLUGINSDIR\dsh-query-process.ps1$\"`
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Restricted -EncodedCommand ${DSH_POWERSHELL_QUERY_INSTALLED_PROCESS}`
   Pop ${ExitCode}
   Pop ${Status}
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_TARGET_EXE", p 0) i.r1'
@@ -225,8 +220,6 @@ FunctionEnd
 
 !macro customCheckAppRunning
   DshCloseRetry:
-  InitPluginsDir
-  File /oname=$PLUGINSDIR\dsh-query-process.ps1 "${BUILD_RESOURCES_DIR}\query-installed-process.ps1"
   !ifdef BUILD_UNINSTALLER
   StrCpy $DshCloseTarget "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
   !else

@@ -13,6 +13,12 @@ import {
   parseIcoDimensions,
   verifyGeneratedInstallerScript,
 } from './build-installer.ts'
+import {
+  assertInstallerPowerShellCommandsFresh,
+  canonicalPowerShellSource,
+  parseInstallerPowerShellCommands,
+  renderInstallerPowerShellCommands,
+} from './generate-installer-powershell.ts'
 import { DESKTOP_INSTALLER, REPOSITORY_ROOT } from './packaging-layout.ts'
 
 interface InstallerConfig {
@@ -51,42 +57,41 @@ function installerChoiceMatrix(source: string, persisted: Partial<InstallerChoic
 
 const execFileAsync = promisify(execFile)
 
-async function compareSemver(installed: string, candidate: string): Promise<string> {
-  const result = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', compareSemverPath], {
-    env: { ...process.env, DSH_INSTALLER_INSTALLED_VERSION: installed, DSH_INSTALLER_CANDIDATE_VERSION: candidate },
-  })
+async function runRestrictedCommand(command: string, environment: NodeJS.ProcessEnv, timeout = 10_000): Promise<string> {
+  const result = await execFileAsync('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command,
+  ], { env: environment, timeout })
   return result.stdout.trim()
+}
+
+async function compareSemver(installed: string, candidate: string): Promise<string> {
+  return runRestrictedCommand(powerShellCommands.COMPARE_SEMVER, {
+    ...process.env, DSH_INSTALLER_INSTALLED_VERSION: installed, DSH_INSTALLER_CANDIDATE_VERSION: candidate,
+  })
 }
 
 async function queryInstalledProcess(target: string): Promise<string> {
-  const result = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', queryProcessPath], {
-    env: { ...process.env, DSH_INSTALLER_TARGET_EXE: target },
+  return runRestrictedCommand(powerShellCommands.QUERY_INSTALLED_PROCESS, {
+    ...process.env, DSH_INSTALLER_TARGET_EXE: target,
   })
-  return result.stdout.trim()
 }
 
 async function inspectShortcut(shortcut: string, target: string): Promise<string> {
-  const result = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', inspectShortcutPath], {
-    env: {
-      ...process.env,
-      DSH_INSTALLER_SHORTCUT: shortcut,
-      DSH_INSTALLER_OLD_TARGET_EXE: target,
-      DSH_INSTALLER_NEW_TARGET_EXE: target,
-    },
-  })
-  return result.stdout.trim()
+  return runRestrictedCommand(powerShellCommands.INSPECT_SHORTCUT, {
+    ...process.env,
+    DSH_INSTALLER_SHORTCUT: shortcut,
+    DSH_INSTALLER_OLD_TARGET_EXE: target,
+    DSH_INSTALLER_NEW_TARGET_EXE: target,
+  }, 20_000)
 }
 
 async function inspectShortcutTargets(shortcut: string, oldTarget: string, newTarget: string): Promise<string> {
-  const result = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', inspectShortcutPath], {
-    env: {
-      ...process.env,
-      DSH_INSTALLER_SHORTCUT: shortcut,
-      DSH_INSTALLER_OLD_TARGET_EXE: oldTarget,
-      DSH_INSTALLER_NEW_TARGET_EXE: newTarget,
-    },
-  })
-  return result.stdout.trim()
+  return runRestrictedCommand(powerShellCommands.INSPECT_SHORTCUT, {
+    ...process.env,
+    DSH_INSTALLER_SHORTCUT: shortcut,
+    DSH_INSTALLER_OLD_TARGET_EXE: oldTarget,
+    DSH_INSTALLER_NEW_TARGET_EXE: newTarget,
+  }, 20_000)
 }
 
 const configPath = join(REPOSITORY_ROOT, 'apps/desktop/electron-builder.yml')
@@ -94,12 +99,29 @@ const includePath = join(REPOSITORY_ROOT, 'apps/desktop/build/installer.nsh')
 const compareSemverPath = join(REPOSITORY_ROOT, 'apps/desktop/build/compare-semver.ps1')
 const queryProcessPath = join(REPOSITORY_ROOT, 'apps/desktop/build/query-installed-process.ps1')
 const inspectShortcutPath = join(REPOSITORY_ROOT, 'apps/desktop/build/inspect-shortcut.ps1')
+const powerShellCommandsPath = join(REPOSITORY_ROOT, 'apps/desktop/build/powershell-commands.nsh')
+const powerShellCommands = parseInstallerPowerShellCommands(await readFile(powerShellCommandsPath, 'utf8'))
 const desktopRequire = createRequire(join(REPOSITORY_ROOT, 'apps/desktop/package.json'))
 const electronBuilderPackage = desktopRequire.resolve('electron-builder/package.json')
 const appBuilderPackage = createRequire(electronBuilderPackage).resolve('app-builder-lib/package.json')
 const builderTemplateRoot = join(dirname(appBuilderPackage), 'templates/nsis')
 
-describe('Windows installer configuration', () => {
+describe('Windows installer configuration', { concurrent: false }, () => {
+  it('keeps every generated UTF-16LE command fresh with its canonical PowerShell owner', async () => {
+    const sources = {
+      COMPARE_SEMVER: await readFile(compareSemverPath, 'utf8'),
+      INSPECT_SHORTCUT: await readFile(inspectShortcutPath, 'utf8'),
+      QUERY_INSTALLED_PROCESS: await readFile(queryProcessPath, 'utf8'),
+    }
+    const generated = await readFile(powerShellCommandsPath, 'utf8')
+    expect(() => { assertInstallerPowerShellCommandsFresh(generated, sources) }).not.toThrow()
+    for (const [name, command] of Object.entries(parseInstallerPowerShellCommands(generated))) {
+      expect(Buffer.from(command, 'base64').toString('utf16le')).toBe(canonicalPowerShellSource(sources[name as keyof typeof sources]))
+    }
+    expect(() => { assertInstallerPowerShellCommandsFresh(generated, { ...sources, COMPARE_SEMVER: `${sources.COMPARE_SEMVER}# stale\n` }) })
+      .toThrow(/stale/u)
+    expect(renderInstallerPowerShellCommands(sources)).toBe(generated)
+  })
   it('pins one assisted per-user offline x64 NSIS installer without elevation', async () => {
     const config = yaml.load(await readFile(configPath, 'utf8')) as InstallerConfig
     expect(config).toMatchObject({
@@ -123,7 +145,7 @@ describe('Windows installer configuration', () => {
       'customInstallMode', 'customWelcomePage', 'customPageAfterChangeDir', 'customInit', 'customInstall',
       'customUnInstallSection', 'customUnInstall', 'customCheckAppRunning',
     ]))
-    expect(source).toMatch(/ReadRegStr[^\n]*DisplayVersion[\s\S]*dsh-compare-semver[\s\S]*Downgrade is not allowed/u)
+    expect(source).toMatch(/ReadRegStr[^\n]*DisplayVersion[\s\S]*DSH_POWERSHELL_COMPARE_SEMVER[\s\S]*Downgrade is not allowed/u)
     expect(source).toMatch(/DesktopShortcut[\s\S]*StartMenuShortcut[\s\S]*LaunchAtLogin/u)
     expect(source).toMatch(/RandomNumberGenerator.*Create[\s\S]*GetBytes\(\$\$b\)[\s\S]*Dispose/u)
     expect(source).toMatch(/TrimEnd\('='\).*Replace\('\+'\s*,\s*'-'\).*Replace\('\/'\s*,\s*'_'/u)
@@ -134,6 +156,24 @@ describe('Windows installer configuration', () => {
     expect(source).toMatch(/--installer-request-close[\s\S]*MB_RETRYCANCEL/u)
     expect(source).toMatch(/OpenMutexW[\s\S]*DeepSeekHarnessDesktop-5e7c4c1c-7429-5bb9-9c22-4e1bf4e2e478/u)
     expect(source).not.toMatch(/taskkill|Stop-Process|KILL_PROCESS/iu)
+  })
+
+  it('creates fresh cleanup tokens under Restricted policy without script files', async () => {
+    const source = await readFile(includePath, 'utf8')
+    const encoded = source.match(/-Command "(?<command>\$\$b=New-Object byte\[\] 32;[^"\r\n]+)"`/u)?.groups?.command
+    expect(encoded).toBeTypeOf('string')
+    const command = (encoded ?? '').replaceAll('$$', '$')
+    const run = async () => {
+      const result = await execFileAsync('powershell.exe', [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-Command', command,
+      ], { timeout: 10_000 })
+      return result.stdout
+    }
+    const first = await run()
+    const second = await run()
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u)
+    expect(second).toMatch(/^[A-Za-z0-9_-]{43}$/u)
+    expect(second).not.toBe(first)
   })
 
   it('forces the real assisted install-mode callback to skip the all-users page', async () => {
@@ -171,19 +211,29 @@ describe('Windows installer configuration', () => {
     await expect(compareSemver('0.1.0', '0.1.0')).resolves.toBe('0')
     await expect(compareSemver('0.2.0', '0.1.0')).resolves.toBe('1')
     await expect(compareSemver('invalid', '0.1.0')).rejects.toMatchObject({ code: 2 })
+    for (const contaminated of ['0.1.0\r', '0.1.0\n', '0.1.0\r\n', '0.1.0 ', '0.1.0\t']) {
+      await expect(compareSemver(contaminated, '0.1.0')).rejects.toMatchObject({ code: 2 })
+    }
+    const source = canonicalPowerShellSource(await readFile(compareSemverPath, 'utf8'))
+    const definitions = source.slice(0, source.indexOf('\ntry {'))
+    const nulProbe = `${definitions}\nif ($null -eq (ConvertFrom-DshSemVer (\"0.1.0\" + [char]0))) { exit 2 }; exit 0\n`
+    const nulCommand = Buffer.from(nulProbe, 'utf16le').toString('base64')
+    await expect(runRestrictedCommand(nulCommand, process.env)).rejects.toMatchObject({ code: 2 })
+    expect(source).toContain('\\z')
   })
 
   it('passes registry and candidate versions through temporary environment values only', async () => {
     const source = await readFile(includePath, 'utf8')
     expect(source).not.toContain('VersionCompare')
-    expect(source).toMatch(/File \/oname=\$PLUGINSDIR\\dsh-compare-semver\.ps1 "\$\{BUILD_RESOURCES_DIR\}\\compare-semver\.ps1"/u)
+    expect(source).toContain('!include "${BUILD_RESOURCES_DIR}\\powershell-commands.nsh"')
     const versionChannels = new RegExp(
       String.raw`SetEnvironmentVariableW[^\n]*DSH_INSTALLER_INSTALLED_VERSION[\s\S]*`
       + String.raw`SetEnvironmentVariableW[^\n]*DSH_INSTALLER_CANDIDATE_VERSION`,
       'u',
     )
     expect(source).toMatch(versionChannels)
-    expect(source).toContain(String.raw`-File $\"$PLUGINSDIR\dsh-compare-semver.ps1$\"`)
+    expect(source).toContain('-EncodedCommand ${DSH_POWERSHELL_COMPARE_SEMVER}')
+    expect(source).not.toMatch(/powershell[^\n]*-File/iu)
     expect(source.match(/SetEnvironmentVariableW[^\n]*DSH_INSTALLER_(?:INSTALLED|CANDIDATE)_VERSION[^\n]*p 0/gu)).toHaveLength(2)
     expect(source).toMatch(/SemVer is invalid[\s\S]*Quit/u)
   })
@@ -205,7 +255,7 @@ describe('Windows installer configuration', () => {
     expect(hook.indexOf('!insertmacro DshQueryInstalledProcess')).toBeLessThan(hook.indexOf('OpenMutexW'))
     expect(hook).toMatch(/DshQueryFailed:[\s\S]*MB_RETRYCANCEL/u)
     expect(hook).not.toMatch(/IntCmp \$2 0 DshNotRunning/u)
-    expect(source).toContain(String.raw`-File $\"$PLUGINSDIR\dsh-query-process.ps1$\"`)
+    expect(source).toContain('-EncodedCommand ${DSH_POWERSHELL_QUERY_INSTALLED_PROCESS}')
     expect(source).toMatch(/DSH_INSTALLER_TARGET_EXE[\s\S]*DSH_INSTALLER_TARGET_EXE[^\n]*p 0/u)
   })
 
@@ -222,7 +272,7 @@ describe('Windows installer configuration', () => {
     expect(launchFailure).toBeLessThan(exitCheck)
   })
 
-  it('recognizes only shortcuts whose target is the exact installed executable', async () => {
+  it('recognizes only old or new exact shortcut targets through one serialized COM session', { timeout: 20_000 }, async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
     const shortcut = join(directory, "用户's DeepSeek Harness.lnk")
     const windows = process.env.SystemRoot ?? 'C:\\Windows'
@@ -236,20 +286,8 @@ describe('Windows installer configuration', () => {
       await expect(inspectShortcut(shortcut, target)).resolves.toBe('owned')
       await expect(inspectShortcut(shortcut, foreignTarget)).resolves.toBe('foreign')
       await expect(inspectShortcut(join(directory, 'missing.lnk'), target)).resolves.toBe('missing')
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-
-  it('recognizes old and new owned shortcut targets across a moved installation', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-moved-shortcut-'))
-    const shortcut = join(directory, 'DeepSeek Harness.lnk')
-    const windows = process.env.SystemRoot ?? 'C:\\Windows'
-    const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
-    const newTarget = join(windows, 'System32/WindowsPowerShell/v1.0/powershell.exe')
-    const foreignTarget = join(windows, 'System32/cmd.exe')
-    try {
-      const createShortcut = '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DSH_TEST_SHORTCUT);$s.TargetPath=$env:DSH_TEST_TARGET;$s.Save()'
+      const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
+      const newTarget = target
       for (const [target, expected] of [[oldTarget, 'owned'], [newTarget, 'owned'], [foreignTarget, 'foreign']] as const) {
         await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
           env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: target },
