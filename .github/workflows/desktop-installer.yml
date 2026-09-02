@@ -1,0 +1,85 @@
+name: Desktop Windows installer
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['dsh-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+  # This validation workflow has no signing credentials on any event.
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  # Independent of CI's required verdict; installer mutations use a fresh hosted VM.
+  installer:
+    name: Windows x64 installer / ${{ github.event_name == 'pull_request' && 'smoke' || 'full matrix' }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace artifacts
+        id: build
+        run: pnpm run build
+
+      - name: Build unsigned installer
+        id: package
+        run: pnpm run desktop:package
+
+      - name: Validate package and release files
+        id: validate
+        run: pnpm run desktop:validate-package
+
+      - name: Clean-install and credential-free launch smoke
+        id: smoke
+        if: github.event_name == 'pull_request'
+        env:
+          DSH_INSTALLER_E2E: '1'
+        run: pnpm run test:desktop:installer apps/desktop/tests/installer.e2e.ts -t 'installs to the isolated default destination with every option off and starts offline'
+
+      - name: Complete installer E2E matrix
+        id: matrix
+        if: github.event_name == 'push'
+        env:
+          DSH_INSTALLER_E2E: '1'
+        run: pnpm run test:desktop:installer
+
+      - name: Retain validated release files
+        id: upload
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-x64-${{ github.sha }}
+          path: |
+            .artifacts/desktop/installer/*.exe
+            .artifacts/desktop/installer/*.exe.sha256
+            .artifacts/desktop/installer/release-metadata.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30

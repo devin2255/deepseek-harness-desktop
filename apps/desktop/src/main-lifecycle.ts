@@ -4,7 +4,7 @@ import type { ApplicationMutexHandle } from './application-mutex.ts'
 import type { HarnessHandle, HarnessLaunchSpec, HarnessStartOptions } from './harness-supervisor.ts'
 import { createStartupState, reduceStartup, type DesktopStartupState } from './startup-state.ts'
 import type { StartupWindow, StartupWindowActions } from './startup-window.ts'
-import { classifyInstallerCloseIntent } from './installer-close-intent.ts'
+import { classifyInstallerCloseIntent, isInstallerCloseNotification } from './installer-close-intent.ts'
 import type { DesktopWindow } from './window.ts'
 
 const DESKTOP_APP_USER_MODEL_ID = 'ai.deepseek.harness.desktop'
@@ -29,8 +29,8 @@ export interface DesktopApp {
   quit(): void
   /** Subscribe to asynchronous quit interception. */
   on(event: 'before-quit', listener: (event: DesktopQuitEvent) => void): this
-  /** Subscribe to a second-instance launch, including its explicit command line. */
-  on(event: 'second-instance', listener: (event: unknown, commandLine: string[]) => void): this
+  /** Subscribe to a second-instance launch and its deserialized notification. */
+  on(event: 'second-instance', listener: (event: unknown, commandLine: string[], workingDirectory: string, additionalData: unknown) => void): this
   /** Subscribe to application lifecycle events without consumed payloads. */
   on(event: 'window-all-closed' | 'activate', listener: () => void): this
 }
@@ -253,10 +253,10 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       report('callback', error); void quitAfterCleanup()
     }
   })
-  app.on('second-instance', (_event, commandLine?: string[]) => {
+  app.on('second-instance', (_event, commandLine?: string[], _workingDirectory?: string, additionalData?: unknown) => {
     try {
       const installerCloseIntent = classifyInstallerCloseIntent(commandLine?.slice(1) ?? [])
-      if (installerCloseIntent === 'exact') void quitAfterCleanup()
+      if (isInstallerCloseNotification(additionalData)) void quitAfterCleanup()
       else if (installerCloseIntent === 'none') focusLiveWindow()
     } catch (error: unknown) { report('callback', error) }
   })

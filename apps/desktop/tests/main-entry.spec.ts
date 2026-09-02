@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -8,12 +8,16 @@ const TOKEN = 'abcdefghijklmnopqrstuvwxyzABCDEFGH012345678'
 const originalArgv = process.argv
 const originalAppData = process.env.APPDATA
 const originalToken = process.env[UNINSTALL_CLEANUP_ENVIRONMENT_KEY]
+const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
 
 afterEach(() => {
   process.argv = originalArgv
   setEnvironment('APPDATA', originalAppData)
   setEnvironment(UNINSTALL_CLEANUP_ENVIRONMENT_KEY, originalToken)
+  if (originalResourcesPath === undefined) Reflect.deleteProperty(process, 'resourcesPath')
+  else Object.defineProperty(process, 'resourcesPath', originalResourcesPath)
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   vi.resetModules()
 })
 
@@ -60,12 +64,43 @@ describe('desktop Main cleanup entry', () => {
 })
 
 describe('desktop Main installer close entry', () => {
+  it.skipIf(process.platform !== 'win32')('authenticates the E2E appData directory before forwarding the close notification', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-installer-e2e-'))
+    try {
+      const appData = join(root, 'appdata', 'roaming')
+      mkdirSync(appData, { recursive: true })
+      mkdirSync(join(root, 'home'))
+      writeFileSync(join(root, '.dsh-installer-e2e-owner'), `${TOKEN}\n`)
+      const setup = prepareEntry([
+        '--installer-request-close', `--dsh-installer-e2e-root=${root}`, `--dsh-installer-e2e-ownership=${TOKEN}`,
+      ], '')
+      vi.stubEnv('DSH_INSTALLER_E2E', '1')
+      vi.stubEnv('DSH_INSTALLER_E2E_ROOT', root)
+      vi.stubEnv('DSH_INSTALLER_E2E_OWNERSHIP', TOKEN)
+
+      await import('../src/main.ts')
+
+      expect(setup.setPath).toHaveBeenCalledWith('appData', appData)
+      expect(setup.setPath).toHaveBeenCalledWith('home', join(root, 'home'))
+      expect(setup.setPath).toHaveBeenCalledTimes(2)
+      for (const order of setup.setPath.mock.invocationCallOrder) {
+        expect(order).toBeLessThan(setup.requestSingleInstanceLock.mock.invocationCallOrder[0] as number)
+      }
+      expect(setup.requestSingleInstanceLock).toHaveBeenCalledWith({ type: 'deepseek-harness:installer-close' })
+      expect(setup.exit).toHaveBeenCalledWith(0)
+      assertNormalCompositionUnused(setup)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('exits zero and releases a newly acquired lock without composing normal runtime state', async () => {
     const setup = prepareEntry(['--installer-request-close'], '')
 
     await import('../src/main.ts')
 
     expect(setup.requestSingleInstanceLock).toHaveBeenCalledTimes(1)
+    expect(setup.requestSingleInstanceLock).toHaveBeenCalledWith({ type: 'deepseek-harness:installer-close' })
     expect(setup.releaseSingleInstanceLock).toHaveBeenCalledTimes(1)
     expect(setup.exit).toHaveBeenCalledWith(0)
     assertNormalCompositionUnused(setup)
@@ -109,9 +144,14 @@ function prepareEntry(argv: readonly string[], environmentToken: string): {
   readonly resolveRuntimeContext: ReturnType<typeof vi.fn>
   readonly startDesktopMain: ReturnType<typeof vi.fn>
   readonly startHarness: ReturnType<typeof vi.fn>
+  readonly setPath: ReturnType<typeof vi.fn>
 } {
   const appData = mkdtempSync(join(tmpdir(), 'dsh-main-cleanup-'))
+  const resourcesPath = mkdtempSync(join(tmpdir(), 'dsh-main-resources-'))
+  mkdirSync(join(resourcesPath, 'app', 'node_modules'), { recursive: true })
+  Object.defineProperty(process, 'resourcesPath', { configurable: true, value: resourcesPath })
   const exit = vi.fn()
+  const setPath = vi.fn()
   const releaseSingleInstanceLock = vi.fn()
   const requestSingleInstanceLock = vi.fn(() => true)
   const createRequire = vi.fn(() => { throw new Error('normal createRequire must remain lazy') })
@@ -124,7 +164,7 @@ function prepareEntry(argv: readonly string[], environmentToken: string): {
   process.env.APPDATA = appData
   process.env[UNINSTALL_CLEANUP_ENVIRONMENT_KEY] = environmentToken
   vi.doMock('electron', () => ({
-    app: { exit, isPackaged: true, releaseSingleInstanceLock, requestSingleInstanceLock },
+    app: { exit, isPackaged: true, releaseSingleInstanceLock, requestSingleInstanceLock, setPath, getPath: () => appData },
     shell: { openPath: vi.fn() },
   }))
   vi.doMock('node:module', () => ({ createRequire }))
@@ -135,7 +175,7 @@ function prepareEntry(argv: readonly string[], environmentToken: string): {
   vi.doMock('../src/window.ts', () => ({ createDesktopWindow: createWindow }))
   return {
     appData, createRequire, createStartupWindow, createWindow, exit, releaseSingleInstanceLock,
-    requestSingleInstanceLock, resolveRuntimeContext, startDesktopMain, startHarness,
+    requestSingleInstanceLock, resolveRuntimeContext, startDesktopMain, startHarness, setPath,
   }
 }
 

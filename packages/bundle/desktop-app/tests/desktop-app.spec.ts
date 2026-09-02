@@ -25,6 +25,7 @@ const contexts = new Set<Context>()
 const desktopManifestPath = fileURLToPath(new URL('../package.json', import.meta.url))
 const basePatchPath = fileURLToPath(new URL('../../base/cordis.patch.yml', import.meta.url))
 const webPatchPath = fileURLToPath(new URL('../../web-app/cordis.patch.yml', import.meta.url))
+const LAUNCH_CAPABILITY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 
 interface DesktopBundleManifest {
   dsh?: { bundle?: { patch?: unknown } }
@@ -113,7 +114,7 @@ async function mountedReadinessRuntime(): Promise<{
   readonly isApiMounted: () => boolean
   readonly routes: Map<string, Parameters<WebServer['register']>[0]>
 }> {
-  process.env[CAPABILITY_ENV] = 'launch-secret'
+  process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
   const routes = new Map<string, Parameters<WebServer['register']>[0]>()
   const ctx = new Context()
   contexts.add(ctx)
@@ -271,7 +272,7 @@ describe('desktop launch capability', () => {
   })
 
   it('loads the bare desktop plugin and authorizes one exact raw HTTP or upgrade request', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
     const loaded = await bootDesktopComposition()
     loaded.webServer.register({ kind: 'exact', path: '/ready', handler: (_req, res) => { res.end('ready') } })
     loaded.webServer.registerUpgrade({
@@ -281,10 +282,10 @@ describe('desktop launch capability', () => {
       },
     })
 
-    expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(200)
+    expect(await rawRequest(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`])).toBe(200)
     expect(await rawRequest(
       loaded.webServer.port,
-      ['Bearer launch-secret'],
+      [`Bearer ${LAUNCH_CAPABILITY}`],
       '/.well-known/deepseek-harness-desktop/readiness',
     )).toBe(200)
     expect(await rawRequest(
@@ -293,17 +294,17 @@ describe('desktop launch capability', () => {
       '/.well-known/deepseek-harness-desktop/readiness',
     )).toBe(401)
     expect(await rawRequest(loaded.webServer.port, [])).toBe(401)
-    expect(await rawRequest(loaded.webServer.port, ['Basic launch-secret'])).toBe(401)
+    expect(await rawRequest(loaded.webServer.port, [`Basic ${LAUNCH_CAPABILITY}`])).toBe(401)
     expect(await rawRequest(loaded.webServer.port, ['Bearer other'])).toBe(401)
-    expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret', 'Bearer other'])).toBe(401)
-    expect(await rawRequest(loaded.webServer.port, ['Bearer other', 'Bearer launch-secret'])).toBe(401)
-    expect(await rawUpgrade(loaded.webServer.port, ['Bearer launch-secret'])).toBe(101)
-    expect(await rawUpgrade(loaded.webServer.port, ['Bearer launch-secret', 'Bearer other'])).toBeUndefined()
+    expect(await rawRequest(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`, 'Bearer other'])).toBe(401)
+    expect(await rawRequest(loaded.webServer.port, ['Bearer other', `Bearer ${LAUNCH_CAPABILITY}`])).toBe(401)
+    expect(await rawUpgrade(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`])).toBe(101)
+    expect(await rawUpgrade(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`, 'Bearer other'])).toBeUndefined()
 
     const desktopEntry = [...loaded.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-desktop-app')
     if (desktopEntry?.fiber === undefined) throw new Error('desktop plugin was not mounted by the Loader')
     await desktopEntry.fiber.dispose()
-    expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(401)
+    expect(await rawRequest(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`])).toBe(401)
   })
 
   it('removes the exact readiness route when the desktop plugin is disposed while the API service remains mounted', async () => {
@@ -343,7 +344,7 @@ describe('desktop launch capability', () => {
     await disposeContext(ctx)
   })
 
-  it.each([undefined, '', ' ', 'launch+secret', 'launch/secret', 'launch=secret', '秘密'])('fails loud and removes an absent, empty, or non-base64url launch capability', async (capability) => {
+  it.each([undefined, '', ' ', 'short', 'launch+secret', 'launch/secret', 'launch=secret', '秘密'])('fails loud and removes an absent or malformed launch capability', async (capability) => {
     if (capability === undefined) delete process.env.DSH_DESKTOP_CAPABILITY
     else process.env[CAPABILITY_ENV] = capability
 
@@ -357,7 +358,7 @@ describe('desktop launch capability', () => {
   })
 
   it.each([undefined, '', 'x'.repeat(129)])('fails loud and removes an absent, empty, or oversized desktop version', async (version) => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
     if (version === undefined) delete process.env.DSH_DESKTOP_APP_VERSION
     else process.env.DSH_DESKTOP_APP_VERSION = version
     const ctx = new Context()
@@ -372,11 +373,11 @@ describe('desktop launch capability', () => {
   })
 
   it('captures one launch capability and authorizes only its exact bearer value', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard, removed } = await mountedDesktopRuntime()
     expect(process.env[CAPABILITY_ENV]).toBeUndefined()
-    expect(guard(request('Bearer launch-secret'))).toBe(true)
+    expect(guard(request(`Bearer ${LAUNCH_CAPABILITY}`))).toBe(true)
     expect(guard(request('Bearer other'))).toBe(false)
     expect(guard(request(undefined))).toBe(false)
     await disposeContext(ctx)
@@ -384,16 +385,16 @@ describe('desktop launch capability', () => {
   })
 
   it('rejects malformed Authorization values', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard } = await mountedDesktopRuntime()
     for (const authorization of [
-      'Basic launch-secret',
-      'bearer launch-secret',
+      `Basic ${LAUNCH_CAPABILITY}`,
+      `bearer ${LAUNCH_CAPABILITY}`,
       'Bearer',
       'Bearer ',
-      'Bearer  launch-secret',
-      'Bearer launch-secret ',
+      `Bearer  ${LAUNCH_CAPABILITY}`,
+      `Bearer ${LAUNCH_CAPABILITY} `,
     ]) {
       expect(guard(request(authorization))).toBe(false)
     }
@@ -401,20 +402,20 @@ describe('desktop launch capability', () => {
   })
 
   it('rejects a bearer token whose byte length differs from the captured capability', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard } = await mountedDesktopRuntime()
     expect(guard(request('Bearer x'))).toBe(false)
-    expect(guard(request('Bearer launch-secret-extra'))).toBe(false)
+    expect(guard(request(`Bearer ${LAUNCH_CAPABILITY}extra`))).toBe(false)
     await disposeContext(ctx)
   })
 
   it('continues to authorize after the launch environment entry has been removed', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard } = await mountedDesktopRuntime()
     expect(process.env[CAPABILITY_ENV]).toBeUndefined()
-    expect(guard(request('Bearer launch-secret'))).toBe(true)
+    expect(guard(request(`Bearer ${LAUNCH_CAPABILITY}`))).toBe(true)
     await disposeContext(ctx)
   })
 })

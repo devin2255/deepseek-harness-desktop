@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 
 try {
   $target = $env:DSH_INSTALLER_TARGET_EXE

@@ -4,6 +4,8 @@
 
 状态：2026-08-24 产品设计、技术设计与书面规格均已确认。
 
+构建说明与当前验收限制由[桌面 README](../../../apps/desktop/README.md#windows-installer-development) 维护；本规格定义验收目标，并不证明全部目标均已通过。
+
 ## 决策摘要
 
 DeepSeek Harness Desktop 以单个 Windows 引导式安装程序发布，用户可在干净的 Windows 电脑上双击安装。安装后的应用必须自包含，不得依赖源码仓库、Node.js、pnpm、包管理器存储或构建电脑上的路径。首个版本支持 Windows 10 和 Windows 11 x64。

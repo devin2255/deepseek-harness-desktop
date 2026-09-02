@@ -4,6 +4,8 @@ English | [中文](2026-08-24-windows-installer-design.zh.md)
 
 Status: product, technical design, and written specification approved on 2026-08-24.
 
+Build instructions and current qualification limits are maintained in the [desktop README](../../../apps/desktop/README.md#windows-installer-development); this specification defines the acceptance target, not evidence that every target has passed.
+
 ## Decision summary
 
 DeepSeek Harness Desktop ships as a single assisted Windows installer that a user can double-click on a clean Windows computer. The installed application is self-contained: it must not require a source checkout, Node.js, pnpm, a package-manager store, or paths from the build computer. The first release supports Windows 10 and Windows 11 on x64.

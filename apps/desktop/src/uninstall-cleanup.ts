@@ -8,7 +8,9 @@ import {
   mkdir,
   open,
   opendir,
+  readlink,
   readdir,
+  realpath,
   rename,
   rmdir,
   unlink,
@@ -49,6 +51,8 @@ export interface UninstallCleanupRequest {
   readonly environment: NodeJS.ProcessEnv
   /** Maximum files and directories recorded in one streaming recovery archive. */
   readonly maxSnapshotEntries: number
+  /** Canonical packaged node_modules roots that generated profile fallback junctions may target. */
+  readonly fallbackPackageRoots: readonly string[]
 }
 
 /** Filesystem mutations replaceable only after authorization and fixed-root validation. */
@@ -154,6 +158,7 @@ export async function runUninstallCleanup(
   const productStatus = await lstatIfExists(productRoot)
   if (productStatus === undefined) return true
   assertOrdinaryDirectory(productRoot, productStatus)
+  await removeGeneratedFallbackLinks(productRoot, request.fallbackPackageRoots)
 
   const transactionId = randomBytes(16).toString('hex')
   const archivePath = join(appData, `${ARCHIVE_PREFIX}${transactionId}`)
@@ -213,6 +218,54 @@ export async function runUninstallCleanup(
     throw new Error('Uninstall cleanup final commit failed and canonical data was restored', { cause: error })
   }
   return true
+}
+
+async function removeGeneratedFallbackLinks(productRoot: string, packageRoots: readonly string[]): Promise<void> {
+  const links = await collectReparsePoints(productRoot)
+  if (links.length === 0) return
+  const fallbackRoot = resolve(productRoot, 'Harness', 'profiles', 'node_modules')
+  const canonicalRoots = await Promise.all(packageRoots.map(async (root) => {
+    const resolvedRoot = resolve(root)
+    const status = await lstat(resolvedRoot)
+    if (!status.isDirectory() || status.isSymbolicLink()) {
+      throw new Error('Uninstall cleanup refuses an unsafe fallback package root')
+    }
+    await assertOrdinaryDirectoryChain(resolvedRoot)
+    const canonicalRoot = await realpath(resolvedRoot)
+    if (canonicalRoot !== resolvedRoot) throw new Error('Uninstall cleanup refuses a redirected fallback package root')
+    return canonicalRoot
+  }))
+  for (const link of links) {
+    const relativeLink = relative(fallbackRoot, link)
+    if (relativeLink === '' || relativeLink === '..' || relativeLink.startsWith(`..${sep}`) || isAbsolute(relativeLink)) {
+      throw new Error(`Uninstall cleanup refuses a link, junction, or reparse point: ${link}`)
+    }
+    const rawTarget = await readlink(link)
+    const resolvedTarget = resolve(dirname(link), rawTarget)
+    const canonicalTarget = await realpath(link)
+    if (!canonicalRoots.some(root => isContainedPath(resolvedTarget, root) && isContainedPath(canonicalTarget, root))) {
+      throw new Error(`Uninstall cleanup refuses an unknown fallback junction target: ${link}`)
+    }
+  }
+  for (const link of links) await unlink(link)
+  const remaining = await collectReparsePoints(productRoot)
+  if (remaining.length !== 0) throw new Error(`Uninstall cleanup refuses a remaining reparse point: ${remaining[0]}`)
+}
+
+async function collectReparsePoints(root: string): Promise<string[]> {
+  const links: string[] = []
+  for (const name of await readdir(root)) {
+    const path = join(root, name)
+    const status = await lstat(path)
+    if (status.isSymbolicLink()) links.push(path)
+    else if (status.isDirectory()) links.push(...await collectReparsePoints(path))
+  }
+  return links
+}
+
+function isContainedPath(candidate: string, root: string): boolean {
+  const child = relative(root, candidate)
+  return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child))
 }
 
 async function assertCommitArchiveIsOnlyReservedArtifact(

@@ -1,9 +1,11 @@
 /** Electron entry binding cleanup mode or the normal retryable desktop lifecycle. */
 import { app, shell } from 'electron'
 import { createRequire } from 'node:module'
+import { join } from 'node:path'
 import { acquireApplicationMutex } from './application-mutex.ts'
 import { DesktopLog } from './desktop-log.ts'
 import { startHarness } from './harness-supervisor.ts'
+import { configureInstallerE2eAppData } from './installer-e2e-app-data.ts'
 import { classifyInstallerCloseIntent } from './installer-close-intent.ts'
 import { startDesktopMain } from './main-lifecycle.ts'
 import { resolveRuntimeContext } from './runtime-context.ts'
@@ -20,13 +22,13 @@ const DESKTOP_LOG_MAX_BYTES = 1_048_576
 const DESKTOP_LOG_MAX_MESSAGE_CODE_UNITS = 16_384
 const DESKTOP_LOG_MAX_METADATA_CODE_UNITS = 128
 const desktopArguments = process.argv.slice(app.isPackaged ? 1 : 2)
-const installerCloseIntent = classifyInstallerCloseIntent(desktopArguments)
 
 if (isUninstallCleanupInvocation(desktopArguments)) {
   void runUninstallCleanup({
     argv: desktopArguments,
     environment: process.env,
     maxSnapshotEntries: UNINSTALL_CLEANUP_MAX_SNAPSHOT_ENTRIES,
+    fallbackPackageRoots: [join(process.resourcesPath, 'app', 'node_modules')],
   }).then(
     () => { app.exit(0) },
     () => {
@@ -34,17 +36,26 @@ if (isUninstallCleanupInvocation(desktopArguments)) {
       app.exit(1)
     },
   )
-} else if (installerCloseIntent !== 'none') {
+} else {
+  startDesktopInvocation()
+}
+
+/** Resolve validated test metadata before choosing the single-instance operation. */
+function startDesktopInvocation(): void {
+  const arguments_ = configureInstallerE2eAppData({ app, argv: desktopArguments, environment: process.env, platform: process.platform })
+  const installerCloseIntent = classifyInstallerCloseIntent(arguments_)
+  if (installerCloseIntent === 'none') {
+    startNormalDesktop()
+    return
+  }
   if (installerCloseIntent === 'malformed') {
     console.error('DeepSeek Harness installer close request was rejected.')
     app.exit(1)
   } else {
-    const ownsInstance = app.requestSingleInstanceLock()
+    const ownsInstance = app.requestSingleInstanceLock({ type: 'deepseek-harness:installer-close' })
     if (ownsInstance) app.releaseSingleInstanceLock()
     app.exit(0)
   }
-} else {
-  startNormalDesktop()
 }
 
 /** Compose normal desktop operations only after cleanup mode has been excluded. */

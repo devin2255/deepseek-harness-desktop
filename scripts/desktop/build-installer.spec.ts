@@ -71,6 +71,22 @@ async function runRestrictedCommand(command: string, environment: NodeJS.Process
   return result.stdout.trim()
 }
 
+async function runRestrictedStatus(command: string, environment: NodeJS.ProcessEnv, timeout = 10_000): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    execFile('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command,
+    ], { env: environment, timeout }, (error) => {
+      if (error === null) {
+        resolve(0)
+      } else if (typeof error.code === 'number') {
+        resolve(error.code)
+      } else {
+        reject(new Error('PowerShell shortcut status command failed without a numeric exit code', { cause: error }))
+      }
+    })
+  })
+}
+
 async function compareSemver(installed: string, candidate: string): Promise<string> {
   return runRestrictedCommand(powerShellCommands.COMPARE_SEMVER, {
     ...process.env, DSH_INSTALLER_INSTALLED_VERSION: installed, DSH_INSTALLER_CANDIDATE_VERSION: candidate,
@@ -83,8 +99,8 @@ async function queryInstalledProcess(target: string): Promise<string> {
   })
 }
 
-async function inspectShortcut(shortcut: string, target: string): Promise<string> {
-  return runRestrictedCommand(powerShellCommands.INSPECT_SHORTCUT, {
+async function inspectShortcut(shortcut: string, target: string): Promise<number> {
+  return runRestrictedStatus(powerShellCommands.INSPECT_SHORTCUT, {
     ...process.env,
     DSH_INSTALLER_SHORTCUT: shortcut,
     DSH_INSTALLER_OLD_TARGET_EXE: target,
@@ -92,8 +108,8 @@ async function inspectShortcut(shortcut: string, target: string): Promise<string
   }, 20_000)
 }
 
-async function inspectShortcutTargets(shortcut: string, oldTarget: string, newTarget: string): Promise<string> {
-  return runRestrictedCommand(powerShellCommands.INSPECT_SHORTCUT, {
+async function inspectShortcutTargets(shortcut: string, oldTarget: string, newTarget: string): Promise<number> {
+  return runRestrictedStatus(powerShellCommands.INSPECT_SHORTCUT, {
     ...process.env,
     DSH_INSTALLER_SHORTCUT: shortcut,
     DSH_INSTALLER_OLD_TARGET_EXE: oldTarget,
@@ -114,6 +130,20 @@ const appBuilderPackage = createRequire(electronBuilderPackage).resolve('app-bui
 const builderTemplateRoot = join(dirname(appBuilderPackage), 'templates/nsis')
 
 describe('Windows installer configuration', { concurrent: false }, () => {
+  it('clears optional parser errors after accepting deterministic options', async () => {
+    const source = await readFile(includePath, 'utf8')
+    expect(source).toMatch(/DshAutomationAccepted:\r?\n\s+ClearErrors/u)
+  })
+
+  it('passes the fixture ownership proof through both inherited environment and an exact launch argument', async () => {
+    const source = await readFile(includePath, 'utf8')
+    expect(source).toMatch(
+      /ReadEnvStr \$R2 "DSH_INSTALLER_E2E_ROOT"[\s\S]*ReadEnvStr \$R3 "DSH_INSTALLER_E2E_OWNERSHIP"/u,
+    )
+    expect(source).toContain('--dsh-installer-e2e-root="$R2" --dsh-installer-e2e-ownership="$R3"')
+    expect(source).not.toMatch(/DshE2eTrace[^\r\n]*(?:OWNERSHIP|\$R3)/u)
+  })
+
   it('keeps every generated UTF-16LE command fresh with its canonical PowerShell owner', async () => {
     const sources = {
       COMPARE_SEMVER: await readFile(compareSemverPath, 'utf8'),
@@ -227,7 +257,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const nulCommand = Buffer.from(nulProbe, 'utf16le').toString('base64')
     await expect(runRestrictedCommand(nulCommand, process.env)).rejects.toMatchObject({ code: 2 })
     expect(source).toContain('\\z')
-  })
+  }, 30_000)
 
   it('passes registry and candidate versions through temporary environment values only', async () => {
     const source = await readFile(includePath, 'utf8')
@@ -251,6 +281,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     await expect(queryInstalledProcess("C:\\用户\\合法' ; exit 9; #\\DeepSeek Harness.exe")).resolves.toBe('stopped')
     await expect(queryInstalledProcess('')).rejects.toMatchObject({ code: 2 })
     const script = await readFile(queryProcessPath, 'utf8')
+    expect(script).toContain("$ProgressPreference = 'SilentlyContinue'")
     expect(script).toContain('$env:DSH_INSTALLER_TARGET_EXE')
     expect(script).not.toContain('$INSTDIR')
   })
@@ -270,13 +301,25 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const source = await readFile(includePath, 'utf8')
     const cleanup = source.slice(source.indexOf('DshCleanupAttempt:'), source.indexOf('DshCleanupSkip:'))
     expect(cleanup).toMatch(/StrCpy \$1 "0"[\s\S]*ClearErrors[\s\S]*ExecWait[^\n]*\$0\s*\n\s*IfErrors 0 \+2\s*\n\s*StrCpy \$1 "1"/u)
+    expect(cleanup).toContain('DshE2eTrace "cleanup child launch-error=$1 exit=$0"')
     const errorCheck = cleanup.indexOf('IfErrors 0 +2')
     const clearEnvironment = cleanup.indexOf('DSH_UNINSTALL_CLEANUP_TOKEN", p 0')
     const launchFailure = cleanup.indexOf('StrCmp $1 "1" DshCleanupFailed')
     const exitCheck = cleanup.indexOf('StrCmp $0 "0" DshCleanupSkip')
     expect(errorCheck).toBeLessThan(clearEnvironment)
+    expect(cleanup).toMatch(/Push \$9\s+System::Call[^\n]*DSH_UNINSTALL_CLEANUP_TOKEN", p 0\) i\.r9'\s+Pop \$9/u)
+    expect(cleanup).not.toContain('DSH_UNINSTALL_CLEANUP_TOKEN", p 0) i.r1')
     expect(clearEnvironment).toBeLessThan(launchFailure)
     expect(launchFailure).toBeLessThan(exitCheck)
+  })
+
+  it('preserves NSIS registers while tracing and records a rejected cleanup with a nonzero status', async () => {
+    const source = await readFile(includePath, 'utf8')
+    const trace = source.match(/!macro DshE2eTrace Message(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(trace).toMatch(/Push \$9[\s\S]*FileOpen \$9[\s\S]*FileClose \$9[\s\S]*Pop \$9/u)
+    const rejected = source.slice(source.indexOf('DshCleanupFailed:'), source.indexOf('DshCleanupSkip:'))
+    expect(rejected).toMatch(/DshWriteE2eUninstallResult "cleanup-rejected"[\s\S]*SetErrorLevel 2[\s\S]*Abort/u)
+    expect(source).toMatch(/DshRemoveOwnedRunValue[\s\S]*DshWriteE2eUninstallResult "uninstall-accepted"/u)
   })
 
   it('recognizes only old or new exact shortcut targets through one serialized COM session', { timeout: 20_000 }, async () => {
@@ -290,12 +333,14 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
         env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: target },
       })
-      await expect(inspectShortcut(shortcut, target)).resolves.toBe('owned')
-      await expect(inspectShortcut(shortcut, foreignTarget)).resolves.toBe('foreign')
-      await expect(inspectShortcut(join(directory, 'missing.lnk'), target)).resolves.toBe('missing')
+      await expect(inspectShortcut(shortcut, target)).resolves.toBe(0)
+      await expect(inspectShortcut(shortcut, foreignTarget)).resolves.toBe(11)
+      await expect(inspectShortcut(join(directory, 'missing.lnk'), target)).resolves.toBe(10)
+      await expect(inspectShortcut(shortcut, '')).resolves.toBe(2)
+      await expect(inspectShortcut('relative.lnk', target)).resolves.toBe(2)
       const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
       const newTarget = target
-      for (const [target, expected] of [[oldTarget, 'owned'], [newTarget, 'owned'], [foreignTarget, 'foreign']] as const) {
+      for (const [target, expected] of [[oldTarget, 0], [newTarget, 0], [foreignTarget, 11]] as const) {
         await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
           env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: target },
         })
@@ -304,6 +349,15 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+
+  it('uses only the ownership exit status without changing the production message path', async () => {
+    const source = await readFile(includePath, 'utf8')
+    const cleanup = source.match(/!macro DshRemoveOwnedShortcut Shortcut OldTarget NewTarget(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(cleanup).toContain('DshE2eTrace "shortcut inspect exit=$0 path=${Shortcut} old=${OldTarget} new=${NewTarget}"')
+    expect(cleanup).toContain('${if} $0 == "0"')
+    expect(cleanup).not.toContain('${andIf} $1 == "owned"')
+    expect(cleanup).toContain('Delete "${Shortcut}"')
   })
 
   it('captures the old location before builder registry replacement and cleans only quoted old or new Run values', async () => {
@@ -346,6 +400,8 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const source = await readFile(includePath, 'utf8')
     const hook = source.match(/!macro customCheckAppRunning(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
     expect(hook).toContain('Exec \'"$DshCloseTarget" --installer-request-close\'')
+    expect(hook).toContain('ReadEnvStr $DshCloseE2eMode "DSH_INSTALLER_E2E"')
+    expect(hook).toContain('"--dsh-installer-e2e-root=$DshCloseE2eRoot" "--dsh-installer-e2e-ownership=$DshCloseE2eOwnership"')
     expect(hook).not.toContain('ExecWait')
     expect(hook).toMatch(/ClearErrors[\s\S]*?Exec [^\n]*--installer-request-close[\s\S]*?IfErrors DshCloseBlocked/u)
     expect(hook).toMatch(/IntCmp \$1 \$\{DSH_CLOSE_POLL_ATTEMPTS\}/u)
@@ -377,8 +433,10 @@ describe('Windows installer configuration', { concurrent: false }, () => {
 
   it('removes shortcuts only through exact-target ownership checks', async () => {
     const source = await readFile(includePath, 'utf8')
-    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$DESKTOP\\DeepSeek Harness.lnk" "$DshOldAppExe" "$appExe"')
-    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\\DeepSeek Harness\\DeepSeek Harness.lnk" "$DshOldAppExe" "$appExe"')
+    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$DESKTOP\\$DshShortcutLeaf" "$DshOldAppExe" "$appExe"')
+    expect(source).toContain('!insertmacro DshRemoveOwnedShortcut "$SMPROGRAMS\\$DshStartMenuDirectory\\$DshShortcutLeaf" "$DshOldAppExe" "$appExe"')
+    expect(source).toMatch(/StrCpy \$DshShortcutLeaf "DeepSeek Harness\.lnk"/u)
+    expect(source).toMatch(/DshE2eMode[\s\S]*DeepSeek Harness E2E - \$R2\.lnk/u)
     expect(source).not.toMatch(/Delete "\$(?:DESKTOP|SMPROGRAMS)\\DeepSeek Harness/u)
   })
 })

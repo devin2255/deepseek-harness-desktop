@@ -9,7 +9,7 @@ import { RedactedStderrTail } from './sensitive-text-redactor.ts'
 
 const CAPABILITY_BYTES = 32
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
-const DEFAULT_STARTUP_TIMEOUT_MS = 30_000
+const DEFAULT_STARTUP_TIMEOUT_MS = 60_000
 const SENSITIVE_ENVIRONMENT_KEY = /KEY|SECRET|TOKEN|PASSWORD/iu
 const REQUIRED_DESKTOP_CAPABILITIES = ['host.describe', 'session.list'] as const
 
@@ -105,9 +105,10 @@ export class HarnessShutdownTimeoutError extends Error {
 export class HarnessStartupTimeoutError extends Error {
   /**
    * @param timeoutMs - The elapsed readiness deadline.
+   * @param diagnostics - Already bounded and redacted child stderr retained for local diagnostics.
    */
-  constructor(timeoutMs: number) {
-    super(`Harness utility process did not become ready before the ${timeoutMs}ms startup deadline`)
+  constructor(timeoutMs: number, diagnostics = '') {
+    super(`Harness utility process did not become ready before the ${timeoutMs}ms startup deadline${diagnostics === '' ? '' : `\n${diagnostics}`}`)
     this.name = 'HarnessStartupTimeoutError'
   }
 }
@@ -299,7 +300,7 @@ export function startHarness(
   if (child.stdout !== null) child.stdout.on('data', onStdout)
   if (child.stderr !== null) child.stderr.on('data', onStderr)
   const startupTimer = setTimeout(() => {
-    beginStartupFailure(new HarnessStartupTimeoutError(dependencies.startupTimeoutMs))
+    beginStartupFailure(new HarnessStartupTimeoutError(dependencies.startupTimeoutMs, stderrTail.finish()))
   }, dependencies.startupTimeoutMs)
   startupTimer.unref()
   options.signal?.addEventListener('abort', onAbort, { once: true })

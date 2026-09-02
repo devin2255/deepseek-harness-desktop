@@ -23,6 +23,15 @@ export const READINESS_PATH = '/.well-known/deepseek-harness-desktop/readiness'
 const DESKTOP_PRODUCT = 'deepseek-harness-desktop'
 const DESKTOP_CAPABILITIES = ['host.describe', 'session.list'] as const
 
+/**
+ * Return whether a value is one 32-byte launcher capability encoded without Base64 padding.
+ * @param value - Candidate inherited from the supervised desktop process.
+ * @returns Whether the candidate has the exact launcher encoding.
+ */
+export function isDesktopLaunchCapability(value: string | undefined): value is string {
+  return value !== undefined && /^[A-Za-z0-9_-]{43}$/u.test(value)
+}
+
 /** Match one exact Base64url bearer capability without exposing it. */
 function matchesBearer(req: IncomingMessage, capability: Buffer): boolean {
   if (req.headersDistinct.authorization?.length !== 1) return false
@@ -45,7 +54,7 @@ export function apply(ctx: Context): void {
   const version = process.env[DESKTOP_VERSION_ENV]
   delete process.env.DSH_DESKTOP_CAPABILITY
   delete process.env.DSH_DESKTOP_APP_VERSION
-  if (configured === undefined || !/^[A-Za-z0-9_-]+$/.test(configured)) {
+  if (!isDesktopLaunchCapability(configured)) {
     throw new Error(`desktop-app: ${CAPABILITY_ENV} must contain a per-launch capability`)
   }
   if (version === undefined || version.length === 0 || version.length > 128) {

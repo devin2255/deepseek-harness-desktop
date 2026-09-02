@@ -11,11 +11,17 @@ import {
 
 const TOKEN = 'abcdefghijklmnopqrstuvwxyzABCDEFGH012345678'
 
-function invoke(appData: string, argv: readonly string[] = [`--uninstall-delete-user-data=${TOKEN}`], token = TOKEN) {
+function invoke(
+  appData: string,
+  argv: readonly string[] = [`--uninstall-delete-user-data=${TOKEN}`],
+  token = TOKEN,
+  fallbackPackageRoots: readonly string[] = [],
+) {
   return runUninstallCleanup({
     argv,
     environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: token },
     maxSnapshotEntries: 100,
+    fallbackPackageRoots,
   })
 }
 
@@ -58,6 +64,7 @@ describe('runUninstallCleanup', () => {
       argv,
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: token },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     })).rejects.toThrow(/cleanup request|confirmation/iu)
     expect(readFileSync(join(product, 'sentinel.txt'), 'utf8')).toBe('keep')
   })
@@ -116,6 +123,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, operation === 'unlink'
       ? {
         unlink: async (path) => {
@@ -146,6 +154,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 1,
+      fallbackPackageRoots: [],
     })).rejects.toThrow(/snapshot/iu)
     expect(readFileSync(join(product, 'large.txt'), 'utf8')).toBe('too-large')
   })
@@ -163,6 +172,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       unlink: async () => { throw new Error('injected snapshot cleanup failure') },
     })).rejects.toThrow(/link|junction|reparse/iu)
@@ -184,6 +194,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       lstat: async (path) => {
         const text = path
@@ -215,6 +226,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       rename: async () => { throw new Error('injected commit rename failure') },
     })).rejects.toThrow(/commit/iu)
@@ -232,6 +244,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       rmdir: async (path) => {
         if (String(path).includes('uninstall-tombstone')) throw new Error('injected tombstone rmdir failure')
@@ -261,6 +274,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       rmdir: async (path) => {
         if (String(path).includes('uninstall-tombstone')) throw new Error('injected tombstone rmdir failure')
@@ -288,6 +302,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       rmdir: async (path) => {
         if (String(path).includes('uninstall-tombstone')) throw new Error('injected tombstone rmdir failure')
@@ -315,6 +330,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       rmdir: async (path) => {
         if (String(path).includes('uninstall-tombstone')) throw new Error('injected tombstone failure')
@@ -354,6 +370,7 @@ describe('runUninstallCleanup', () => {
         argv: [`--uninstall-delete-user-data=${TOKEN}`],
         environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
         maxSnapshotEntries: 100,
+        fallbackPackageRoots: [],
       }, {
         unlink: async (path) => {
           const candidate = String(path)
@@ -394,6 +411,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       openArchive: () => archiveHandleWithFailures(archive, statFailure, undefined, closeSpy),
     })).rejects.toBe(statFailure)
@@ -414,6 +432,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       openArchive: () => archiveHandleWithFailures(archive, statFailure, closeFailure, closeSpy),
     }).catch((error: unknown) => error)
@@ -434,6 +453,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       unlink: async (path) => {
         if (String(path).includes('uninstall-archive')) throw new Error('injected final archive unlink failure')
@@ -455,6 +475,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       unlink: async (path) => {
         if (String(path).includes('uninstall-archive')) {
@@ -479,6 +500,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       unlink: async (path) => {
         await unlink(path)
@@ -505,6 +527,47 @@ describe('runUninstallCleanup', () => {
     expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('keep')
   })
 
+  it('unlinks only generated profile fallback junctions targeting the current packaged runtime', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-fallback-link-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const fallback = join(product, 'Harness', 'profiles', 'node_modules', '@scope')
+    const runtimeRoot = mkdtempSync(join(tmpdir(), 'dsh-cleanup-runtime-'))
+    const runtimePackage = join(runtimeRoot, 'package')
+    mkdirSync(fallback, { recursive: true })
+    mkdirSync(runtimePackage)
+    writeFileSync(join(runtimePackage, 'sentinel.txt'), 'keep')
+    symlinkSync(runtimePackage, join(fallback, 'package'), process.platform === 'win32' ? 'junction' : 'dir')
+
+    await expect(invoke(appData, undefined, TOKEN, [runtimeRoot])).resolves.toBe(true)
+
+    expect(() => lstatSync(product)).toThrow()
+    expect(readFileSync(join(runtimePackage, 'sentinel.txt'), 'utf8')).toBe('keep')
+  })
+
+  it('does not unlink an approved fallback junction when another target is unknown', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-mixed-link-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const fallback = join(product, 'Harness', 'profiles', 'node_modules')
+    const runtimeRoot = mkdtempSync(join(tmpdir(), 'dsh-cleanup-runtime-'))
+    const runtimePackage = join(runtimeRoot, 'package')
+    const external = mkdtempSync(join(tmpdir(), 'dsh-cleanup-unknown-target-'))
+    const approved = join(fallback, 'approved')
+    const unknown = join(fallback, 'unknown')
+    mkdirSync(fallback, { recursive: true })
+    mkdirSync(runtimePackage)
+    writeFileSync(join(runtimePackage, 'sentinel.txt'), 'runtime')
+    writeFileSync(join(external, 'sentinel.txt'), 'external')
+    symlinkSync(runtimePackage, approved, process.platform === 'win32' ? 'junction' : 'dir')
+    symlinkSync(external, unknown, process.platform === 'win32' ? 'junction' : 'dir')
+
+    await expect(invoke(appData, undefined, TOKEN, [runtimeRoot])).rejects.toThrow(/unknown|junction|reparse/iu)
+
+    expect(lstatSync(approved).isSymbolicLink()).toBe(true)
+    expect(lstatSync(unknown).isSymbolicLink()).toBe(true)
+    expect(readFileSync(join(runtimePackage, 'sentinel.txt'), 'utf8')).toBe('runtime')
+    expect(readFileSync(join(external, 'sentinel.txt'), 'utf8')).toBe('external')
+  })
+
   it('recovers an authenticated interrupted transaction before starting a fresh cleanup', async () => {
     const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-interrupted-'))
     const product = join(appData, 'DeepSeek Harness')
@@ -516,6 +579,7 @@ describe('runUninstallCleanup', () => {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       rename: async () => {
         const archive = transactionArtifacts(appData).find(name => name.includes('uninstall-archive'))
@@ -707,6 +771,7 @@ async function stageArchive(appData: string): Promise<string> {
       argv: [`--uninstall-delete-user-data=${TOKEN}`],
       environment: { APPDATA: appData, [UNINSTALL_CLEANUP_ENVIRONMENT_KEY]: TOKEN },
       maxSnapshotEntries: 100,
+      fallbackPackageRoots: [],
     }, {
       rename: async () => {
         const archiveName = transactionArtifacts(appData).find(name => name.includes('uninstall-archive'))

@@ -498,7 +498,9 @@ describe('startDesktopMain', () => {
     const desktop = startDesktopMain(dependencies)
     await desktop.startup
 
-    app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close'])
+    app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close', '--dsh-installer-e2e-root=fixture'], '', {
+      type: 'deepseek-harness:installer-close',
+    })
     await desktop.shutdown
 
     expect(stop).toHaveBeenCalledTimes(1)
@@ -506,12 +508,12 @@ describe('startDesktopMain', () => {
     expect(app.quit).toHaveBeenCalledTimes(1)
   })
 
-  it('does not focus or shut down for malformed installer close-prefixed second-instance argv', async () => {
+  it.each([undefined, {}, { type: 'other' }, { type: 'deepseek-harness:installer-close', extra: true }])('does not close for unvalidated command-line intent and invalid notification %j', async (additionalData) => {
     const { app, dependencies, focus, stop } = fixture()
     const desktop = startDesktopMain(dependencies)
     await desktop.startup
 
-    app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close=unexpected'])
+    app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close'], '', additionalData)
     await flushLifecycle()
 
     expect(stop).not.toHaveBeenCalled()

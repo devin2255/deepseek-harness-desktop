@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { _electron as electron, type ElectronApplication, type Page, type Request } from 'playwright'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -28,15 +28,34 @@ describe('desktop Electron acceptance', () => {
   it('boots the secured desktop profile and reaches process quiescence on close', async () => {
     temporaryRoot = await mkdtemp(join(tmpdir(), 'dsh-desktop-e2e-'))
     const environment = await isolatedEnvironment(temporaryRoot)
+    // Electron reads appData through native shell folders on Windows, not APPDATA.
+    const entry = join(temporaryRoot, 'isolated-entry.mjs')
+    await writeFile(entry, [
+      "import { app } from 'electron'",
+      `app.setPath('appData', ${JSON.stringify(environment.APPDATA)})`,
+      `app.setPath('home', ${JSON.stringify(join(temporaryRoot, 'home'))})`,
+      `await import(${JSON.stringify(pathToFileURL(join(DESKTOP_ROOT, 'lib', 'main.js')).href)})`,
+      '',
+    ].join('\n'))
     application = await electron.launch({
-      args: [DESKTOP_ROOT, `--user-data-dir=${join(temporaryRoot, 'electron-profile')}`],
+      args: [entry, `--user-data-dir=${join(temporaryRoot, 'electron-profile')}`],
       env: environment,
       timeout: 15_000,
     })
 
-    const page = await application.firstWindow({ timeout: 45_000 })
-    expect(application.windows()).toHaveLength(1)
+    const startup = await application.firstWindow({ timeout: 5_000 })
+    expect(startup.url()).toMatch(/^file:/u)
+    expect(await application.evaluate(({ app }) => app.getPath('appData'))).toBe(environment.APPDATA)
+    expect(await application.evaluate(({ app }) => app.getPath('home'))).toBe(join(temporaryRoot, 'home'))
+    let mainWindow: Page | undefined
+    await expect.poll(() => {
+      mainWindow = application?.windows().find(window => /^http:\/\/127\.0\.0\.1:\d+\//u.test(window.url()))
+      return mainWindow !== undefined
+    }, { timeout: 75_000 }).toBe(true)
+    const page = mainWindow
+    if (page === undefined) throw new Error('The authorized desktop window did not open')
     await page.waitForLoadState('load')
+    await expect.poll(() => application?.windows().length, { timeout: 10_000 }).toBe(1)
     await expect.poll(() => page.title(), { timeout: 10_000 }).toBe('DeepSeek Harness')
     await expect.poll(async () => page.locator('#root').innerHTML(), { timeout: 10_000 })
       .not.toBe('')
@@ -78,7 +97,7 @@ describe('desktop Electron acceptance', () => {
     const closing = application
     await boundedClose(closing)
     application = undefined
-  }, 90_000)
+  }, 120_000)
 })
 
 function hostDescribeRequest(): RequestInit {
@@ -168,11 +187,9 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
     ...environment,
     APPDATA: roaming,
     DSH_HOME: join(home, '.dsh'),
-    HOME: home,
     LOCALAPPDATA: local,
     TEMP: temp,
     TMP: temp,
-    USERPROFILE: home,
   }
 }
 

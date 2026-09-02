@@ -78,6 +78,63 @@ async function rejectedError(promise: Promise<unknown>): Promise<Error> {
 }
 
 describe('startHarness', () => {
+  it('allows slow first-read startup past thirty seconds within the production deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const { child, dependencies } = harness()
+      const { cliEntry, cwd, environment, startupTimeoutMs: _testTimeout, ...overrides } = dependencies
+      const start = startHarnessProduction({ cliEntry, cwd, environment }, {}, overrides)
+      const outcome = start.then(handle => handle, (error: unknown) => error)
+
+      await vi.advanceTimersByTimeAsync(50_000)
+      expect(child.kill).not.toHaveBeenCalled()
+      child.stdout.write('dsh web: http://127.0.0.1:4312\n')
+      await expect(outcome).resolves.toMatchObject({ endpoint: new URL('http://127.0.0.1:4312') })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the production cold-start allowance bounded to sixty seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      const { child, dependencies } = harness()
+      const { cliEntry, cwd, environment, startupTimeoutMs: _testTimeout, ...overrides } = dependencies
+      child.kill.mockImplementation(() => { child.exit(); return true })
+      const error = rejectedError(startHarnessProduction({ cliEntry, cwd, environment }, {}, overrides))
+
+      await vi.advanceTimersByTimeAsync(59_999)
+      expect(child.kill).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(error).resolves.toBeInstanceOf(HarnessStartupTimeoutError)
+      expect(child.kill).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retains bounded, redacted child diagnostics when startup times out', async () => {
+    vi.useFakeTimers()
+    try {
+      const secret = 'sk-cold-start-private'
+      const { child, dependencies } = harness({ environment: { DEEPSEEK_API_KEY: secret } })
+      child.kill.mockImplementation(() => { child.exit(); return true })
+      const error = rejectedError(startHarness(dependencies))
+      child.stderr.write('x'.repeat(40_000))
+      child.stderr.write(`\nslow module read; DEEPSEEK_API_KEY=${secret}\n`)
+
+      await vi.advanceTimersByTimeAsync(10)
+      const actual = await error
+      expect(actual.message).toContain('slow module read')
+      expect(actual.message).not.toContain(secret)
+      expect(actual.message.length).toBeLessThan(17_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('reports validation, endpoint discovery, and authenticated readiness at their real commit points', async () => {
     let finishProbe: (() => void) | undefined
     const milestones: string[] = []

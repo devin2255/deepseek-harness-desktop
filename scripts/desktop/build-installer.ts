@@ -32,6 +32,7 @@ import {
   validatePackage,
 } from './validate-package.ts'
 import { verifyInstallerPowerShellCommands } from './generate-installer-powershell.ts'
+import { verifyInstallerFileOperations } from './generate-installer-file-operations.ts'
 
 const WIN_UNPACKED = join(DESKTOP_INSTALLER, 'win-unpacked')
 
@@ -149,6 +150,7 @@ function runPnpm(args: readonly string[], environment: NodeJS.ProcessEnv = proce
 
 async function main(): Promise<void> {
   await verifyInstallerPowerShellCommands()
+  await verifyInstallerFileOperations()
   runPnpm(['--filter', '@deepseek-ai/dsh-desktop', 'build'])
   runPnpm(['run', 'desktop:stage'])
   const prunedNativeFiles = await pruneForeignNativePayloads(DESKTOP_STAGE)
