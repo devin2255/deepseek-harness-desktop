@@ -26,6 +26,7 @@ interface ComWorld {
   showHr: number
   getResultHr: number
   getDisplayNameHr: number
+  omitDisplayName: boolean
   hasThreadDpi: boolean
   /** Contexts `SetThreadDpiAwarenessContext` accepts; others return NULL. */
   supportedDpiContexts: number[]
@@ -34,6 +35,7 @@ interface ComWorld {
   titles: string[]
   options: number[]
   dpiContexts: unknown[]
+  viewed: number
   freed: unknown[]
   released: string[]
   posted: { hwnd: unknown; message: number }[]
@@ -44,10 +46,10 @@ interface ComWorld {
 
 function comWorld(overrides: Partial<ComWorld> = {}): ComWorld {
   return {
-    coInitHr: 0, coCreateHr: 0, showHr: 0, getResultHr: 0, getDisplayNameHr: 0,
+    coInitHr: 0, coCreateHr: 0, showHr: 0, getResultHr: 0, getDisplayNameHr: 0, omitDisplayName: false,
     hasThreadDpi: true, supportedDpiContexts: [-4], enumThrows: false,
     path: 'C:\\选中\\directory',
-    titles: [], options: [], dpiContexts: [], freed: [], released: [], posted: [],
+    titles: [], options: [], dpiContexts: [], viewed: 0, freed: [], released: [], posted: [],
     registered: 0, unregistered: 0, uninitialized: 0,
     ...overrides,
   }
@@ -80,7 +82,7 @@ function installFakeKoffi(world: ComWorld): void {
     switch (slot) {
       case 5: {
         if (world.getDisplayNameHr < 0) return world.getDisplayNameHr
-        ;(args[1] as unknown[])[0] = namePtr
+        if (!world.omitDisplayName) (args[1] as unknown[])[0] = namePtr
         return 0
       }
       case 2: world.released.push('item'); return 0
@@ -125,9 +127,11 @@ function installFakeKoffi(world: ComWorld): void {
         },
       }),
       proto: (declaration: string) => ({ declaration }),
+      disposable: (name: string, type: string, free: (value: unknown) => void) => ({ name, type, free }),
       pointer: (type: unknown) => type,
       sizeof: (type: string) => { void type; return FAKE_POINTER_SIZE },
       view: (value: unknown, len: number): ArrayBuffer => {
+        world.viewed += 1
         const bytes = Buffer.alloc(len)
         bytes.write((value as FakePtr).text as string, 'utf16le')
         return bytes.buffer
@@ -146,7 +150,18 @@ function installFakeKoffi(world: ComWorld): void {
         if (outBuffers.has(value)) return outBuffers.get(value)
         return { owner: value as FakePtr }
       },
-      call: (fn: { call: (args: unknown[]) => number }, _proto: unknown, _self: unknown, ...args: unknown[]) => fn.call(args),
+      call: (fn: { call: (args: unknown[]) => number }, proto: { declaration: string }, _self: unknown, ...args: unknown[]) => {
+        const result = fn.call(args)
+        if (result >= 0 && proto.declaration.includes('DshTaskMemStr16')) {
+          const out = args[1] as unknown[]
+          const pointer = out[0] as FakePtr | null
+          if (pointer !== null) {
+            out[0] = pointer.text
+            world.freed.push(pointer)
+          }
+        }
+        return result
+      },
     },
   }))
 }
@@ -175,6 +190,7 @@ describe('loadWin32DialogBindings over the fake COM world', () => {
     expect(world.titles).toEqual(['选择工作区目录'])
     expect(world.options).toHaveLength(1)
     expect(showing).toHaveBeenCalledWith(31337)
+    expect(world.viewed).toBe(0)
     expect(world.freed).toHaveLength(1)
     expect(world.released).toEqual(['item', 'dialog'])
     expect(world.uninitialized).toBe(1)
@@ -239,6 +255,15 @@ describe('loadWin32DialogBindings over the fake COM world', () => {
     expect(nameWorld.released).toEqual(['item', 'dialog'])
     expect(nameWorld.freed).toHaveLength(0)
   })
+
+  it('rejects a successful display-name call that returns no path', async () => {
+    const world = comWorld({ omitDisplayName: true })
+    installFakeKoffi(world)
+    const bindings = await (await loadBindingsModule()).loadWin32DialogBindings()
+    expect(() => runFolderDialog(bindings, 'Pick', vi.fn())).toThrow('succeeded without returning a path')
+    expect(world.freed).toHaveLength(0)
+    expect(world.released).toEqual(['item', 'dialog'])
+  })
 })
 
 describe('closeThreadWindows over the fake COM world', () => {
@@ -266,25 +291,38 @@ describe('closeThreadWindows over the fake COM world', () => {
 
 describe('the worker entry over a mocked process boundary', () => {
   const originalSend = process.send?.bind(process)
+  const originalDisconnect = process.disconnect?.bind(process)
+  const originalConnected = process.connected
   const originalTitle = process.env.DSH_DIALOG_TITLE
 
-  const installBoundary = (): { posted: { kind: string; message?: string }[] } => {
+  const installBoundary = (flushSends = false): {
+    disconnectedAfter: string[]
+    posted: { kind: string; message?: string }[]
+  } => {
     const posted: { kind: string; message?: string }[] = []
+    const disconnectedAfter: string[] = []
     process.env.DSH_DIALOG_TITLE = 'Pick'
-    // Never invoke the post callback: it runs the worker's disconnect(), and
-    // this process is IPC-connected under the forks pool — severing vitest's
-    // own channel would kill the test worker. The real close lifecycle
-    // belongs to built-worker.e2e.ts.
-    ;(process as { send?: unknown }).send = (message: { kind: string }) => {
+    ;(process as { connected: boolean }).connected = true
+    ;(process as { disconnect?: unknown }).disconnect = () => {
+      disconnectedAfter.push(posted.at(-1)?.kind ?? '<none>')
+    }
+    ;(process as { send?: unknown }).send = (
+      message: { kind: string },
+      callback?: (error: Error | null) => void,
+    ) => {
       posted.push(message)
+      if (flushSends) callback?.(null)
       return true
     }
-    return { posted }
+    return { disconnectedAfter, posted }
   }
 
   afterEach(() => {
     delete (process as { send?: unknown }).send
     if (originalSend !== undefined) (process as { send?: unknown }).send = originalSend
+    delete (process as { disconnect?: unknown }).disconnect
+    if (originalDisconnect !== undefined) (process as { disconnect?: unknown }).disconnect = originalDisconnect
+    ;(process as { connected: boolean }).connected = originalConnected
     if (originalTitle === undefined) delete process.env.DSH_DIALOG_TITLE
     else process.env.DSH_DIALOG_TITLE = originalTitle
     vi.doUnmock('../src/win32-dialog-bindings.ts')
@@ -313,6 +351,27 @@ describe('the worker entry over a mocked process boundary', () => {
       { kind: 'showing', threadId: 11 },
       { kind: 'done', path: 'C:\\from-worker' },
     ])
+  })
+
+  it('keeps IPC connected after showing and disconnects after the terminal result', async () => {
+    const { disconnectedAfter } = installBoundary(true)
+    vi.doMock('../src/win32-dialog-bindings.ts', () => ({
+      loadWin32DialogBindings: async () => ({
+        setThreadDpiAwareness: () => undefined,
+        coInitializeSta: () => 0,
+        coUninitialize: () => undefined,
+        currentThreadId: () => 11,
+        createFolderDialog: () => ({
+          setOptions: () => 0,
+          setTitle: () => 0,
+          show: () => 0,
+          resultPath: () => ({ hr: 0, path: 'C:\\from-worker' }),
+          release: () => undefined,
+        }),
+      }),
+    }))
+    await import('../src/win32-dialog-worker.ts')
+    expect(disconnectedAfter).toEqual(['done'])
   })
 
   it('posts the failure message when the native surface cannot load', async () => {

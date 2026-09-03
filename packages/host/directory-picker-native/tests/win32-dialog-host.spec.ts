@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { spawn as spawnProcess } from 'node:child_process'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
+
+type SpawnProcess = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess
 
 const { spawn } = vi.hoisted(() => ({
-  spawn: vi.fn<typeof spawnProcess>(() => ({} as ReturnType<typeof spawnProcess>)),
+  spawn: vi.fn<SpawnProcess>(() => ({} as ChildProcess)),
 }))
 
 vi.mock('node:child_process', () => ({ spawn }))
