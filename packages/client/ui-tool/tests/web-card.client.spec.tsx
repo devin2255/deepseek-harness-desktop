@@ -212,7 +212,7 @@ describe('DetailsPanel web Output section', () => {
     const chat = createChatStore().create()
     if (selection !== null) chat.actions.select(selection)
     const sessions = createSnapshotStore<SessionListState>({
-      ids: [], byId: {}, current: undefined, phase: 'ready',
+      ids: [], byId: {}, current: undefined, phase: 'ready', state: 'idle', error: null,
       subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
     })
     const workspaces = createSnapshotStore<WorkspaceListState>({

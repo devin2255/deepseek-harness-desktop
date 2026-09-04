@@ -72,7 +72,7 @@ function mountFrame() {
         ? {}
         : { [current]: { id: current, displayTitle: 'Test', running: false, blank: selectedSessionBlank.current, updatedAt: 1 } },
       current,
-      phase: 'ready',
+      phase: 'ready', state: 'idle', error: null,
     } as SessionListState
     return sel(sessionState)
   }) as never

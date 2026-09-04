@@ -2,7 +2,7 @@
 
 English | [中文](2026-09-04-parallel-task-overview-design.zh.md)
 
-Status: scope approved in conversation; written specification awaiting review. This document defines acceptance requirements, not shipped behavior.
+Status: scope and written specification approved in conversation. This document defines acceptance requirements, not shipped behavior.
 
 ## Scope
 

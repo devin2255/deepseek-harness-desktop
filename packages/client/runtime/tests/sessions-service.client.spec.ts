@@ -8,7 +8,8 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { RpcError, SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SessionListState } from '../src/client/sessions/service.ts'
 import { SessionCreateError, SessionRuntime, scopeOf } from '../src/client/sessions/service.ts'
 import { FakeApiClient, deferred, err, fakeRemote, ok } from './fake-api.client.ts'
 
@@ -53,6 +54,73 @@ async function feedList(b: Bench, rows: FeedRow[]): Promise<void> {
 }
 
 describe('list store projection', () => {
+  it('starts pending with no list request or error', () => {
+    const b = bench()
+    expect(b.svc.list.getSnapshot()).toMatchObject({
+      phase: 'pending', state: 'idle', error: null, ids: [], byId: {}, current: undefined,
+    })
+  })
+
+  it('publishes initial loading and failure before an empty successful retry becomes ready', async () => {
+    const b = bench()
+    const published: SessionListState[] = []
+    const unsubscribe = b.svc.list.subscribe(() => { published.push(b.svc.list.getSnapshot()) })
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const request = b.svc.refresh()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({ phase: 'pending', state: 'loading', error: null })
+
+    const failure: RpcError = { code: 'internal', message: 'list unavailable', details: {} }
+    gate.resolve(err(failure))
+    await request
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({ phase: 'pending', state: 'error', ids: [] })
+    expect(b.svc.list.getSnapshot().error).toBe(failure)
+
+    await feedList(b, [])
+    expect(b.svc.list.getSnapshot()).toMatchObject({
+      phase: 'ready', state: 'idle', error: null, ids: [], byId: {}, current: undefined,
+    })
+    expect(published.map(({ phase, state, error }) => ({ phase, state, error }))).toEqual([
+      { phase: 'pending', state: 'loading', error: null },
+      { phase: 'pending', state: 'error', error: failure },
+      { phase: 'pending', state: 'loading', error: null },
+      { phase: 'ready', state: 'idle', error: null },
+    ])
+    unsubscribe()
+  })
+
+  it('retains ready rows and selection during refresh loading and failure, then clears the error on retry', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 's1' }])
+    b.svc.open(sid('s1'))
+    await Promise.resolve()
+    const before = b.svc.list.getSnapshot()
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const request = b.svc.refresh()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({
+      phase: 'ready', state: 'loading', error: null,
+      ids: before.ids, byId: before.byId, current: sid('s1'),
+    })
+
+    const failure: RpcError = { code: 'internal', message: 'refresh unavailable', details: {} }
+    gate.resolve(err(failure))
+    await request
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot()).toMatchObject({
+      phase: 'ready', state: 'error', ids: before.ids, byId: before.byId, current: sid('s1'),
+    })
+    expect(b.svc.list.getSnapshot().error).toBe(failure)
+
+    await feedList(b, [{ id: 's1' }, { id: 's2' }])
+    expect(b.svc.list.getSnapshot()).toMatchObject({
+      phase: 'ready', state: 'idle', error: null, ids: ['s1', 's2'], current: sid('s1'),
+    })
+  })
+
   it('projects durable titles separately from cwd/id display fallbacks and parent links', async () => {
     const b = bench()
     b.svc.handleMuxEnvelope({

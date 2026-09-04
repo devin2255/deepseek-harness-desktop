@@ -26,6 +26,8 @@ The secured desktop-foundation vertical slice is implemented: it provides the su
 
 ## Product structure
 
+The runtime exposes list request activity and errors through its existing session-list observable, as documented in the [runtime list semantics](../../../../packages/client/runtime/README.md#workspace-and-session-lists). This prerequisite does not establish transport freshness or implement task overview navigation; those remain part of the overview acceptance requirements.
+
 The [parallel task overview specification](../../../../docs/superpowers/specs/2026-09-04-parallel-task-overview-design.md) scopes the first task-supervision slice. It reuses session activity and interaction facts without interpreting inactivity or unread reminders as successful delivery; worktree isolation and review remain separate acceptance targets.
 
 The default task overview groups work by human attention, active execution, and recent completion rather than by conversation recency. A task workspace renders the agent dependency graph, plan, terminals, files, preview, conversation, artifacts, and a right-hand inspector. Review is a distinct mode that combines success criteria, Diff, verification evidence, unresolved risks, and worktree actions. Harness Studio progressively reveals the selected task's preset, plugin graph, model route, tools, permissions, workflows, and event stream.

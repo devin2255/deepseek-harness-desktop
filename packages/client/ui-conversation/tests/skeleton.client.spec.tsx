@@ -113,7 +113,7 @@ function mount(
     ids: listed ? [root, SID] : [root],
     byId: { [root]: rootRow, ...listed && { [SID]: childRow } },
     current: SID,
-    phase: 'ready', subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+    phase: 'ready', state: 'idle', error: null, subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
   })
   const workspaces = createSnapshotStore<WorkspaceListState>(workspaceState(workspaceRows))
   const session = createSnapshotStore<ConversationSnapshot>(snapshot)
