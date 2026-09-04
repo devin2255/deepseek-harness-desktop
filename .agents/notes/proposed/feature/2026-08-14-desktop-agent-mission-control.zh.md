@@ -26,6 +26,8 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 ## 产品结构
 
+[并行任务总览规格](../../../../docs/superpowers/specs/2026-09-04-parallel-task-overview-design.md)界定任务监督的第一阶段。它复用会话活动和交互事实，不把非活动状态或未读提醒解释为成功交付；worktree 隔离和审查仍是独立的验收目标。
+
 默认任务总览按需要人工介入、正在执行和最近完成分组，而不是按对话时间排序。任务工作区呈现 Agent 依赖图、计划、终端、文件、预览、对话、工件和右侧检查器。审查是独立模式，组合成功条件、Diff、验证证据、未解决风险和 worktree 操作。Harness Studio 渐进展示选中任务的 Preset、插件图、模型路由、工具、权限、工作流和事件流。
 
 第一版支持 Windows x64 和 macOS arm64 本地执行。云端执行、手机接力、SSH 主机、计算机控制、市场分发、团队共享和自动创建 Pull Request 不属于第一版。
