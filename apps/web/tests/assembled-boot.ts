@@ -111,17 +111,36 @@ export function installAssembledBootEnv(): void {
 /**
  * Mount the assembled application on the fixture transport; the teardown
  * registered by installAssembledBootEnv disposes it.
+ * @param options - explicit desktop-only plugin opt-ins; ordinary Web stays unchanged.
  */
-export function mountAssembledApp(): void {
-  history.replaceState(null, '', '/?fixture')
+export function mountAssembledApp(options: { taskOverview?: boolean } = {}): void {
+  const plugins = options.taskOverview === true ? [...PLUGINS,
+    {
+      id: '@deepseek-ai/dsh-client-ui-user-questions',
+      bundlePath: 'packages/client/ui-user-questions/lib/client.js',
+      url: '/plugins/ui-user-questions.js', rev: 'fx',
+      inject: ['@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-conversation'],
+    },
+    {
+      id: '@deepseek-ai/dsh-client-ui-task-overview',
+      bundlePath: 'packages/client/ui-task-overview/lib/client.js',
+      url: '/plugins/ui-task-overview.js', rev: 'fx',
+      inject: ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-connection'],
+    },
+  ] : PLUGINS
+  const selectedBundles = new Map(bundles)
+  for (const plugin of plugins) {
+    if (!selectedBundles.has(plugin.url)) selectedBundles.set(plugin.url, readFileSync(join(process.cwd(), plugin.bundlePath), 'utf8'))
+  }
+  history.replaceState(null, '', options.taskOverview === true ? '/?fixture=task-overview' : '/?fixture')
   const root = document.createElement('div')
   root.id = 'root'
   document.body.appendChild(root)
-  win.__DSH_BOOT__ = { rev: 'fx', entries: PLUGINS.map(({ bundlePath: _bundlePath, ...plugin }) => plugin) }
+  win.__DSH_BOOT__ = { rev: 'fx', entries: plugins.map(({ bundlePath: _bundlePath, ...plugin }) => plugin) }
   act(() => {
     const entry = new AppWebEntry(root, {
       loadBundle: async (url) => {
-        const code = bundles.get(url)
+        const code = selectedBundles.get(url)
         if (code === undefined) throw new Error(`missing built bundle ${url}`)
         ;(0, eval)(code)
       },

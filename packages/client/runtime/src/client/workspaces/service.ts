@@ -330,6 +330,11 @@ export class WorkspaceRuntime implements IWorkspaces {
     this.manager.handleConnected()
   }
 
+  /** Invalidate the disconnected generation's pending Workspace baseline. */
+  handleDisconnected(): void {
+    this.manager.handleDisconnected()
+  }
+
   private project(): void {
     const workspace = this.manager.getSnapshot()
     const sessions = this.sessions.list.getSnapshot()

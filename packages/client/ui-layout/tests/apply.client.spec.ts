@@ -53,15 +53,27 @@ describe('ui-layout client apply', () => {
     expect(slots.spec('details')).toEqual({ kind: 'single', scope: 'session' })
   })
 
-  it('injects no business face and attaches the layout actions', async () => {
+  it('attaches layout actions and a stable live home-occupancy source', async () => {
     const { ctx, slots } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     const actions = {
       setSidebar: vi.fn(), setDetails: vi.fn(), toggleSidebar: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
     }
-    const injected = (slots.entries('root')[0]!.inject as (actions: never) => object)(actions as never)
-    expect(injected).toEqual({})
+    const factory = slots.entries('root')[0]!.inject as (actions: never) => { hooks: { homeAvailable: { getSnapshot(): boolean; subscribe(listener: () => void): () => void } } }
+    const injected = factory(actions as never)
+    expect(factory(actions as never).hooks.homeAvailable).toBe(injected.hooks.homeAvailable)
+    const source = injected.hooks.homeAvailable
+    expect(source.getSnapshot()).toBe(false)
+    const changed = vi.fn()
+    const off = source.subscribe(changed)
+    const disposeHome = slots.register({ name: 'shell.home' }, () => null)
+    expect(source.getSnapshot()).toBe(true)
+    await Promise.resolve()
+    expect(changed).toHaveBeenCalled()
+    disposeHome()
+    expect(source.getSnapshot()).toBe(false)
+    off()
     const layout = ctx.get('layout') as LayoutController
     layout.toggleSidebar()
     expect(actions.toggleSidebar).toHaveBeenCalledOnce()

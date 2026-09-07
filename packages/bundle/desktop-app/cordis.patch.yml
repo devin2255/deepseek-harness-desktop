@@ -13,3 +13,5 @@
 - insert:
     - id: desktop-app
       name: '@deepseek-ai/dsh-desktop-app'
+    - id: ui-task-overview
+      name: '@deepseek-ai/dsh-client-ui-task-overview'

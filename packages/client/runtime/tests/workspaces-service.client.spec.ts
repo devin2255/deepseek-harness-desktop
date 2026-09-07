@@ -17,6 +17,55 @@ function workspace(id: string, sessionIds: SessionId[] = [], createdAt = '2026-0
 }
 
 describe('WorkspaceManager', () => {
+  it('replaces the disconnected pull without accepting its rows or archive baseline', async () => {
+    const api = new FakeApiClient()
+    const old = deferred<Awaited<ReturnType<FakeApiClient['onWorkspaceList']>>>()
+    const fresh = deferred<Awaited<ReturnType<FakeApiClient['onWorkspaceList']>>>()
+    api.onWorkspaceList = () => old.promise
+    const manager = new WorkspaceManager(api)
+    const oldRequest = manager.refresh()
+    manager.handleDisconnected()
+    api.onWorkspaceList = () => fresh.promise
+    manager.handleConnected()
+    const newRequest = manager.refresh()
+    expect(api.callsOf('workspace.list')).toHaveLength(2)
+    old.resolve(ok({ items: [workspace('obsolete')] as never[], archivedSessionIds: [sid('old')] as never[] }))
+    await oldRequest
+    expect(manager.getSnapshot()).toMatchObject({ state: 'loading', items: [], archivedSessionIds: [] })
+    expect(manager.refresh()).toBe(newRequest)
+    manager.handleHostEnvelope({
+      rpcId: 'fresh-workspace' as never,
+      payload: { type: 'host/workspace-changed', workspace: workspace('fresh') },
+    })
+    fresh.resolve(ok({ items: [], archivedSessionIds: [sid('fresh-archive')] as never[] }))
+    await newRequest
+    expect(manager.getSnapshot()).toMatchObject({ state: 'idle', archivedSessionIds: ['fresh-archive'] })
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['fresh'])
+  })
+
+  it.each(['success', 'failure', 'rejection'] as const)('ignores obsolete workspace %s after a fresh failure', async (outcome) => {
+    const api = new FakeApiClient()
+    api.onWorkspaceList = () => Promise.resolve(ok({ items: [workspace('retained')] as never[] }))
+    const manager = new WorkspaceManager(api)
+    await manager.refresh()
+    const old = deferred<Awaited<ReturnType<FakeApiClient['onWorkspaceList']>>>()
+    api.onWorkspaceList = () => old.promise
+    const oldRequest = manager.refresh()
+    manager.handleDisconnected()
+    expect(manager.getSnapshot()).toMatchObject({ phase: 'ready', state: 'loading' })
+    const failure = { code: 'internal' as const, message: 'fresh failure', details: {} }
+    api.onWorkspaceList = () => Promise.resolve(err(failure))
+    manager.handleConnected()
+    expect(api.callsOf('workspace.list')).toHaveLength(3)
+    await manager.refresh()
+    if (outcome === 'success') old.resolve(ok({ items: [] }))
+    else if (outcome === 'failure') old.resolve(err({ ...failure, message: 'obsolete failure' }))
+    else old.reject(new Error('obsolete transport failure'))
+    await oldRequest
+    expect(manager.getSnapshot()).toMatchObject({ state: 'error', error: failure })
+    expect(manager.getSnapshot().items.map(item => item.workspaceId)).toEqual(['retained'])
+  })
+
   it('replays changed frames over hydration and adopts the durable order on refresh', async () => {
     const api = new FakeApiClient()
     const gate = deferred<Awaited<ReturnType<FakeApiClient['onWorkspaceList']>>>()

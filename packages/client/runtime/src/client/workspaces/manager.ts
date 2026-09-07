@@ -43,6 +43,8 @@ export class WorkspaceManager {
   private phase: WorkspaceListPhase = 'pending'
   private error: RpcError | null = null
   private inflight: Promise<void> | null = null
+  /** Disconnect invalidates earlier list responses without discarding retained registry rows. */
+  private listGeneration = 0
   private refreshFrames: WorkspaceDelta[] | null = null
   /**
    * True once a frame or unary echo installed the archive set while a list
@@ -88,11 +90,13 @@ export class WorkspaceManager {
     this.state = 'loading'
     this.error = null
     const frames: WorkspaceDelta[] = []
+    const generation = this.listGeneration
     this.refreshFrames = frames
     this.notifier.markDirty()
     this.inflight = (async () => {
       try {
         const { result } = await this.api.workspace.list({})
+        if (generation !== this.listGeneration) return
         if (result.ok) {
           let items = result.value.items
           items = items.filter(workspace => !this.removedIds.has(workspace.workspaceId))
@@ -106,15 +110,18 @@ export class WorkspaceManager {
           this.error = result.error
         }
       } catch (error) {
+        if (generation !== this.listGeneration) return
         this.state = 'error'
         const folded = transportError<never>(error)
         /* v8 ignore next -- transportError always returns the failure branch. */
         this.error = folded.ok ? null : folded.error
       } finally {
-        this.refreshFrames = null
-        this.archivedSupersedesRefresh = false
-        this.inflight = null
-        this.notifier.markDirty()
+        if (generation === this.listGeneration) {
+          this.refreshFrames = null
+          this.archivedSupersedesRefresh = false
+          this.inflight = null
+          this.notifier.markDirty()
+        }
       }
     })()
     return this.inflight
@@ -251,6 +258,17 @@ export class WorkspaceManager {
   /** Re-pull the baseline after each connection generation. */
   handleConnected(): void {
     void this.refresh()
+  }
+
+  /** Invalidate the old list pull and retain registry rows until a fresh baseline arrives. */
+  handleDisconnected(): void {
+    this.listGeneration += 1
+    this.inflight = null
+    this.refreshFrames = null
+    this.archivedSupersedesRefresh = false
+    this.state = 'loading'
+    this.error = null
+    this.notifier.markDirty()
   }
 
   /**

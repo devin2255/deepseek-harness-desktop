@@ -22,11 +22,11 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 当前基础没有感知任务的托盘生命周期：在 Windows 和 Linux 上关闭最后一个窗口会退出，macOS 则保留应用并在激活时重建窗口。Mission Control 将让活动工作继续驻留系统托盘或 macOS 菜单栏，在显式退出时报告活动任务数量，并提供继续运行、停止后退出或取消选项。其恢复流程将根据已记录的事实报告 interrupted、failed 或 settled 状态，不重放未经确认的工具调用。
 
-安全的桌面基础垂直切片已实现：它提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 投影、应用所有的 worktree、感知任务的托盘行为、Mission Control UI、审查、Harness Studio、签名和更新仍是未实现的后续切片。它们保持在 Electron Main 和 preload 之外，避免这些组件获得产品领域状态。
+安全的桌面基础和初始活动及注意事项总览已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。结果与审查投影、应用所有的 worktree、感知任务的托盘行为、更完整的 Mission Control UI、Harness Studio、签名和更新仍是后续切片。它们保持在 Electron Main 和 preload 之外，避免这些组件获得产品领域状态。
 
 ## 产品结构
 
-运行时通过现有会话列表可观察数据源暴露列表请求活动和错误，详见[运行时列表语义](../../../../packages/client/runtime/README.md#workspace-and-session-lists)。这个前置步骤不能证明传输数据新鲜，也没有实现任务总览导航；两者仍属于总览验收要求。
+[任务总览插件](../../../../packages/client/ui-task-overview/README.md)从现有元数据派生活动和待处理所有者导航，不另建任务数据库。布局拥有独立的首页插槽，隐藏时保持会话挂载，因此返回监督视图不会重置选择或草稿。两个列表所有者在接受新基线前使断连请求失效，详见[运行时列表语义](../../../../packages/client/runtime/README.md#workspace-and-session-lists)；传输健康状态仍由连接负责。纯选择器、导航与组件测试、已构建无密钥导航快照和真实 Electron 验收覆盖独立一次性工作区中的并发根任务、传输重连期间保留任务行，以及进入拥有待回答问题的权威子会话。
 
 [并行任务总览规格](../../../../docs/superpowers/specs/2026-09-04-parallel-task-overview-design.md)界定任务监督的第一阶段。它复用会话活动和交互事实，不把非活动状态或未读提醒解释为成功交付；worktree 隔离和审查仍是独立的验收目标。
 

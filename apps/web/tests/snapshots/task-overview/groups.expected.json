@@ -1,0 +1,20 @@
+[
+  {
+    "group": "Needs You",
+    "tasks": [
+      "Fixture 历史会话fixtureNeeds You1 known running subagent(s)fixture — Question"
+    ]
+  },
+  {
+    "group": "Running",
+    "tasks": [
+      "fixturefixtureRunning0 known running subagent(s)"
+    ]
+  },
+  {
+    "group": "Other",
+    "tasks": [
+      "fixturefixtureIdle0 known running subagent(s)"
+    ]
+  }
+]

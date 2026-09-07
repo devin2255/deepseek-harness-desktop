@@ -226,6 +226,7 @@ export function apply(ctx: Context): void {
       // the only safe moment to drop generation-scoped interaction state.
       if (state === 'reconnecting') {
         sessions.handleDisconnected()
+        workspaces.handleDisconnected()
       }
     },
   })

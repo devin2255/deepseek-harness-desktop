@@ -1430,6 +1430,8 @@ interface ReasoningChunkStormState {
 export interface FixtureOptions {
   /** Start with no real Workspace or Session. */
   empty?: boolean
+  /** Add deterministic descendant activity for the assembled task-overview journey. */
+  taskOverviewRoster?: boolean
   /** Reject every prompt before appending its user event. */
   rejectPrompt?: boolean
   /** Publish the Session but fail its Workspace account write. */
@@ -1515,7 +1517,11 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   const sessions: SessionSummary[] = options.empty ? [] : [
     { sessionId: sid('fx-alpha'), updatedAt: Date.now(), running: true, blank: false, cwd: '/tmp/fixture' },
     { sessionId: sid('fx-beta'), updatedAt: Date.now() - 60_000, running: false, blank: false, parentSessionId: sid('fx-alpha'), cwd: '/tmp/fixture' },
-    { sessionId: sid('fx-gamma'), updatedAt: Date.now() - 120_000, running: false, blank: false, cwd: '/tmp/fixture' },
+    { sessionId: sid('fx-gamma'), updatedAt: Date.now() - 120_000, running: options.taskOverviewRoster === true, blank: false, cwd: '/tmp/fixture' },
+    ...(options.taskOverviewRoster === true ? [
+      { sessionId: sid('fx-child-running'), updatedAt: Date.now() - 10_000, running: true, blank: false, parentSessionId: sid('fx-alpha'), origin: 'subagent' as const, cwd: '/tmp/fixture' },
+      { sessionId: sid('fx-child-waiting'), updatedAt: Date.now() - 20_000, running: false, blank: false, parentSessionId: sid('fx-alpha'), origin: 'subagent' as const, cwd: '/tmp/fixture' },
+    ] : []),
   ]
   const logs = new Map<SessionId, SessionEvent[]>([[sid('fx-alpha'), buildAlphaLog()]])
   const modelSelections = new Map<SessionId, ModelSelection>(sessions.map(session => [
@@ -1555,7 +1561,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     workspaceId: wid('fx-ws-fixture'),
     path: '/tmp/fixture',
     title: 'fixture',
-    sessionIds: [sid('fx-alpha'), sid('fx-beta'), sid('fx-gamma')],
+    sessionIds: options.taskOverviewRoster === true
+      ? sessions.map(session => session.sessionId)
+      : [sid('fx-alpha'), sid('fx-beta'), sid('fx-gamma')],
     createdAt: fixtureEpoch,
     updatedAt: fixtureEpoch,
   }]
@@ -1601,6 +1609,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   /** Cleared once answered through respond; replay stops and approval/resolved is broadcast. */
   let approvalPending = true
   const pendingQuestionRpcId = mint()
+  const pendingQuestionSessionId = sid(options.taskOverviewRoster === true ? 'fx-child-waiting' : 'fx-alpha')
   let questionPending = true
   const fixtureQuestions: Extract<MuxFrame, { type: 'question/requested' }>['questions'] = [
     {
@@ -2508,7 +2517,15 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       },
     },
     subagents: {
-      list: request => ok(request, { entries: [], parentAvailable: true }),
+      list: request => ok(request, {
+        entries: options.taskOverviewRoster === true && request.payload.parentSessionId === sid('fx-alpha')
+          ? [
+            { kind: 'child' as const, id: sid('fx-child-running'), mode: 'continuable' as const, label: 'Running child', activity: 'running' as const, hasChildren: false },
+            { kind: 'child' as const, id: sid('fx-child-waiting'), mode: 'continuable' as const, label: 'Waiting child', activity: 'inactive' as const, hasChildren: false },
+          ]
+          : [],
+        parentAvailable: true,
+      }),
       history: (request) => {
         const log = logs.get(request.payload.childSessionId) ?? []
         return Promise.resolve(ok(
@@ -2846,7 +2863,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             conn.push({ rpcId: mint(), payload: { type: 'session/projection', sessionId: s.sessionId, key, value: values[key], seq: log.length - 1 } })
           }
         }
-        if (approvalPending) {
+        if (approvalPending && options.taskOverviewRoster !== true) {
           conn.push({
             rpcId: pendingApprovalRpcId,
             payload: {
@@ -2860,7 +2877,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           conn.push({
             rpcId: pendingQuestionRpcId,
             payload: {
-              type: 'question/requested', sessionId: sid('fx-alpha'), questions: fixtureQuestions,
+              type: 'question/requested',
+              sessionId: pendingQuestionSessionId,
+              questions: fixtureQuestions,
             },
           })
         }
@@ -2981,7 +3000,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       }
       questionPending = false
       emitMux({
-        type: 'question/resolved', sessionId: sid('fx-alpha'),
+        type: 'question/resolved', sessionId: pendingQuestionSessionId,
         questionRpcId: pendingQuestionRpcId,
         outcome: message.result.ok ? 'answered' : 'cancelled',
       })
@@ -3180,6 +3199,7 @@ function fixtureOptionsFromLocation(): FixtureOptions {
   const query = new URLSearchParams(location.search)
   return {
     empty: query.get('fixture') === 'empty',
+    taskOverviewRoster: query.get('fixture') === 'task-overview',
     rejectPrompt: query.get('fixturePrompt') === 'reject',
     failWorkspaceAttach: query.get('fixtureAttach') === 'fail',
     dropSessionCreateResponse: query.get('fixtureSessionCreate') === 'drop-response',

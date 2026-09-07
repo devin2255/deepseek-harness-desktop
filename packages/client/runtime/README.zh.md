@@ -16,7 +16,7 @@
 
 ## Workspace 与 Session 列表
 
-`SessionListState.phase` 记录首次成功的列表基线是否已经到达。其 `state` 和 `error` 通过同一个可观察数据源投影管理器最近的列表请求：刷新失败会保留此前的行和选择，并设置 `state: 'error'`，即使 `phase` 已经是 `ready`。启动下一个请求会清除 `error` 并发布 `loading`；成功时发布 `idle`。这些字段描述列表请求，不代表传输健康状态或任务结果。
+`SessionListState.phase` 记录首次成功的列表基线是否已经到达。其 `state` 和 `error` 通过同一个可观察数据源投影列表同步状态：刷新失败会保留此前的行和选择，并设置 `state: 'error'`，即使 `phase` 已经是 `ready`。启动下一个请求会清除 `error` 并发布 `loading`；成功时发布 `idle`。断连使进行中的 Session 和 Workspace 列表响应失效，保留行并发布 `loading`；过期响应不能清除更新的请求或错误。重连启动新基线。消费者需结合连接服务的 Host 描述判断行是否为当前状态；列表状态和未读提醒都不能证明任务结果。两个公开列表服务均通过现有单飞请求所有者暴露 `refresh()`；失败保留在各自快照中。
 
 Workspace 和 Session 列表各自具有单调的 `pending` → `ready` 基线阶段，也有各自的刷新活动／错误状态。列表请求期间到达的增量插入或更新／移除／顺序帧与一元变更回显会在其响应之上回放。每次成功的 Workspace 基线都会重新建立 Host 持久 Workspace 顺序，因此重连会接纳该客户端离线期间提交的变更。`WorkspaceRuntime.insertBefore` 会立即安装乐观顺序；只有最新一元回声可以替换它，更新的 Host 顺序帧优先于旧回声，而最新请求被拒时会恢复最近一次由 Host 确认的顺序，不会恢复更早且尚未提交的拖拽。已移除的 Workspace id 会保留进程本地删除标记，避免延迟到达的 changed 帧将其复活。Workspace 新近程度只在两条基线都 ready 后派生，且绝不改变 Workspace 列表顺序。
 

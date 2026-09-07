@@ -52,15 +52,16 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
   return function useSelector<S>(sel: (s: T) => S): S { return sel(useSyncExternalStore(inst.subscribe, inst.getSnapshot)) }
 }
 
-function mountFrame() {
+function mountFrame(homeAvailable = false) {
   window.innerWidth = frameWidth // first-render viewport source before the observer fires
   const instance = createLayoutStore().create()
   const slotCalls: { key: string; props: unknown }[] = []
   const renderSlot = ((key: string, owner: object) => {
     slotCalls.push({ key, props: owner })
     if (key === 'sidebar') return <div data-testid="sidebar-content" />
-    if (key === 'conversation') return <div data-testid="center-content" />
-    if (key === 'details') return <div data-testid="details-content" />
+    if (key === 'conversation') return <input aria-label="Draft" data-testid="center-content" defaultValue="kept draft" />
+    if (key === 'shell.home') return <div data-testid="home-content" />
+    if (key === 'details') return <div data-testid="details-content"><button type="button">Details control</button></div>
     if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
   }) as AppFrameProps['renderSlot']
@@ -83,6 +84,7 @@ function mountFrame() {
   const element = () => (
     <AppFrame
       useStore={hookOf(instance)}
+      useHomeAvailable={selector => selector(homeAvailable)}
       actions={instance.actions}
       renderSlot={renderSlot}
       useSessions={useSessions}
@@ -137,6 +139,44 @@ afterEach(() => {
 })
 
 describe('AppFrame', () => {
+  it('excludes mounted details controls from accessible home navigation', () => {
+    const b = mountFrame(true)
+    const details = b.getByTestId('details-content')
+    expect(b.queryByRole('button', { name: 'Details control' })).toBeNull()
+    act(() => { b.instance.actions.openDetails(); b.instance.actions.showConversation() })
+    expect(b.getByRole('button', { name: 'Details control' })).toBeTruthy()
+    act(() => { b.instance.actions.showHome() })
+    expect(b.queryByRole('button', { name: 'Details control' })).toBeNull()
+    expect(b.getByTestId('details-content')).toBe(details)
+    expect(b.instance.getSnapshot().details).toBe(360)
+  })
+  it('shows home without unmounting the conversation draft or resetting details', () => {
+    const b = mountFrame(true)
+    const draft = b.getByTestId('center-content') as HTMLInputElement
+    expect(draft.closest('[hidden]')).not.toBeNull()
+    expect(b.getByTestId('home-content').closest('[hidden]')).toBeNull()
+    act(() => { b.instance.actions.openDetails(); b.instance.actions.showConversation() })
+    expect(draft.closest('[hidden]')).toBeNull()
+    expect(tracks(b.frame)).toEqual([280, 360])
+    draft.value = 'retained input'
+    act(() => { b.instance.actions.showHome() })
+    expect(tracks(b.frame)).toEqual([280, 0])
+    expect(b.instance.getSnapshot().details).toBe(360)
+    act(() => { b.instance.actions.showConversation() })
+    expect(b.getByTestId('center-content')).toBe(draft)
+    expect(draft.value).toBe('retained input')
+  })
+
+  it('falls back to conversation without a home occupant and leaves automatic selection on home', () => {
+    const web = mountFrame()
+    expect(web.getByTestId('center-content').closest('[hidden]')).toBeNull()
+    web.unmount()
+    const desktop = mountFrame(true)
+    selectedSession.current = 'auto-selected' as SessionId
+    desktop.rerenderFrame()
+    expect(desktop.instance.getSnapshot().centerPage).toBe('home')
+    expect(desktop.getByTestId('center-content').closest('[hidden]')).not.toBeNull()
+  })
   it('renders three tracks from store state', () => {
     const { frame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])

@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
@@ -20,17 +20,18 @@ import css from './AppFrame.module.css'
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
+  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'shell.home'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
+  & InjectFace<{ hooks: { homeAvailable: HostObservable<boolean> } }>
 
 /** Center column grid item (session-body building block). */
-function CenterColumn(props: { children?: ReactNode }) {
-  return <div className={css.centerCol}>{props.children}</div>
+function CenterColumn(props: { children?: ReactNode; hidden?: boolean }) {
+  return <div className={css.centerCol} hidden={props.hidden}>{props.children}</div>
 }
 
 /** Details column grid item; width 0 keeps the subtree mounted (never unmount on close). */
-function DetailsColumn(props: { children?: ReactNode }) {
-  return <div className={css.detailsCol}>{props.children}</div>
+function DetailsColumn(props: { children?: ReactNode; hidden: boolean }) {
+  return <div className={css.detailsCol} hidden={props.hidden}>{props.children}</div>
 }
 
 /**
@@ -87,10 +88,13 @@ function DragHandle(props: { side: 'sidebar' | 'details'; left: number; onStart:
 export function AppFrame({
   useStore,
   useSessions,
+  useHomeAvailable,
   actions,
   renderSlot,
 }: AppFrameProps) {
   const panels = useStore(s => s)
+  const homeAvailable = useHomeAvailable(s => s)
+  const home = panels.centerPage === 'home' && homeAvailable
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
@@ -139,7 +143,7 @@ export function AppFrame({
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
-  const cols = computeColumns(viewport, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
+  const cols = computeColumns(viewport, sidebarPreference, home || detailsSession === undefined ? 0 : panels.details)
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -187,8 +191,9 @@ export function AppFrame({
             the shell's own pending rendering. The conversation
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
-        <CenterColumn>{renderSlot('conversation', {})}</CenterColumn>
-        <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
+        <CenterColumn hidden={home}>{renderSlot('conversation', {})}</CenterColumn>
+        <DetailsColumn hidden={home}>{renderSlot('details', {})}</DetailsColumn>
+        <CenterColumn hidden={!home}>{renderSlot('shell.home', {})}</CenterColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}

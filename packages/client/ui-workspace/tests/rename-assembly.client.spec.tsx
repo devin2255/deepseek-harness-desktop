@@ -31,6 +31,7 @@ beforeEach(() => { localStorage.clear() })
 /** Runtime with the locale face installed (the browser entry declares `locale:` — zh default backs the t seat). */
 async function createRuntime(): Promise<SlotTestRuntime> {
   const runtime = await SlotTestRuntime.create()
+  runtime.provide('layout', { showConversation: vi.fn() })
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.provide('locale', locale)
   runtime.slots.installLocale(locale)

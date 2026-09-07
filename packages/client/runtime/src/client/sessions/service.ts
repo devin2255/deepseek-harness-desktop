@@ -85,7 +85,7 @@ export interface SessionListState {
   current: SessionId | undefined
   /** First successful list arrival; stays ready during later requests, including failures. */
   phase: SessionListPhase
-  /** Latest list request status, independent of first arrival; does not guarantee transport health. */
+  /** List synchronization status; loading also covers a disconnected baseline awaiting refresh. */
   state: SessionListSnapshot['state']
   /** Latest list request failure; cleared when another request starts or succeeds. */
   error: SessionListSnapshot['error']

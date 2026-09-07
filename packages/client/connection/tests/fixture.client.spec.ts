@@ -1092,6 +1092,52 @@ describe('FixtureApiClient (protocol-level fake carrier)', () => {
     expect(rejected.result).toMatchObject({ ok: false, error: { code: 'agent-busy' } })
   })
 
+  it('maps the explicit task-overview roster to authoritative child metadata', async () => {
+    vi.stubGlobal('location', { search: '?fixture=task-overview' })
+    const client = new FixtureApiClient()
+    const listed = await client.sessions.list({})
+    if (!listed.result.ok) throw new Error('session list failed')
+    expect(listed.result.value.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sessionId: 'fx-child-running', parentSessionId: 'fx-alpha', origin: 'subagent', running: true }),
+      expect.objectContaining({ sessionId: 'fx-child-waiting', parentSessionId: 'fx-alpha', origin: 'subagent', running: false }),
+      expect.objectContaining({ sessionId: 'fx-gamma', running: true }),
+    ]))
+    const catalog = await client.subagents.list({ parentSessionId: sid('fx-alpha') })
+    expect(catalog.result).toMatchObject({
+      ok: true,
+      value: {
+        parentAvailable: true,
+        entries: [
+          { kind: 'child', id: 'fx-child-running', mode: 'continuable', label: 'Running child', activity: 'running' },
+          { kind: 'child', id: 'fx-child-waiting', mode: 'continuable', label: 'Waiting child', activity: 'inactive' },
+        ],
+      },
+    })
+    const abort = new AbortController()
+    const questions: RpcRequest<MuxFrame>[] = []
+    const consuming = (async () => {
+      for await (const envelope of client.events.mux({}, abort.signal)) {
+        if (envelope.payload.type !== 'question/requested' && envelope.payload.type !== 'question/resolved') continue
+        questions.push(envelope)
+        if (envelope.payload.type === 'question/resolved') abort.abort()
+      }
+    })()
+    await vi.waitFor(() => {
+      expect(questions.some(envelope =>
+        envelope.payload.type === 'question/requested'
+        && envelope.payload.sessionId === sid('fx-child-waiting'))).toBe(true)
+    })
+    const requested = questions.find(envelope => envelope.payload.type === 'question/requested')
+    if (requested === undefined) throw new Error('fixture question missing')
+    expect(await client.respond({
+      type: 'client-response', rpcId: requested.rpcId, result: { ok: true, value: {} },
+    })).toEqual({ accepted: true })
+    await consuming
+    expect(questions.some(envelope =>
+      envelope.payload.type === 'question/resolved'
+      && envelope.payload.sessionId === sid('fx-child-waiting'))).toBe(true)
+  })
+
   it('maps attach-failure and dropped-response query scenarios', async () => {
     vi.stubGlobal('location', { search: '?fixture&fixtureAttach=fail' })
     const partial = new FixtureApiClient()

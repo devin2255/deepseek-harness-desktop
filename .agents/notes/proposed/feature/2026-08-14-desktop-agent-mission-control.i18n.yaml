@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-14-desktop-agent-mission-control.md
-2026-08-14-desktop-agent-mission-control.md: 995ef4c32e19d2763ea1f953dab272e66eb4bc9f
-2026-08-14-desktop-agent-mission-control.zh.md: bb28b5940450bbdfc4b5428cc2f9e7a7cfe999c0
+2026-08-14-desktop-agent-mission-control.md: 383d7a0f9ac6508c0e2bae2cb4d4236c2a12ef41
+2026-08-14-desktop-agent-mission-control.zh.md: 12697f68631960b8d1bfb1b6b8930322eeb10f72
