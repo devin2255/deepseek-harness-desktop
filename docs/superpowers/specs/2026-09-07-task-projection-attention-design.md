@@ -25,7 +25,7 @@ New task facts are whole-value Session events on the root Session:
 - `task/risk-recorded` stores one unresolved or resolved risk with its stable id, severity, summary, and resolution.
 - `task/review-decided` stores the explicit review outcome: changes requested, ready, committed, applied, archived, or discarded.
 
-Task ids and criterion ids are branded. Definitions reject blank goals, duplicate criterion ids, invalid status transitions, unknown evidence references, and terminal review decisions while owned work is still active. Updating a Task appends an event through the owning service; callers never mutate projection state directly.
+Task ids and criterion ids are branded. A first-release evidence reference names an exact event sequence on the root or one of its descendants; the Provider verifies that the event exists inside the same Task tree before accepting it. Definitions reject blank goals, duplicate criterion ids, invalid status transitions, foreign or missing evidence references, and terminal review decisions while owned work is still active. Updating a Task appends an event through the owning service; callers never mutate projection state directly.
 
 The first task prompt may create `task/defined` before agent execution. Existing root Sessions with no definition remain visible as legacy tasks with an undefined goal and no criteria; reading them never writes migration events.
 
@@ -58,7 +58,7 @@ The queue sorts actionable items before informational resolved items, then by se
 
 The Host exposes `task.list` for the complete current snapshot and a generation-scoped `task.changed` stream carrying whole task rows plus removals. The initial list and every reconnect baseline include a monotonically increasing generation token. A client discards frames from older generations and keeps prior rows visibly stale until a fresh baseline succeeds.
 
-`task.define`, `task.updateCriterion`, `task.recordRisk`, and `task.review` are typed commands. Each command validates the target root Session and expected event sequence before appending, so two windows cannot silently overwrite a newer task definition. Business failures use stable RPC codes; malformed wire input is rejected by schemas before dispatch.
+`task.define`, `task.updateCriterion`, `task.recordRisk`, and `task.review` are typed commands. Each command validates the target root Session and `expectedSeq` against the root's next event sequence before appending, so two windows cannot silently overwrite newer Task facts. Business failures use stable RPC codes; malformed wire input is rejected by schemas before dispatch.
 
 The client runtime owns a `TaskListState` store with `phase`, request `state`, `error`, `freshness`, ordered ids, and rows by id. The task-overview plugin migrates from its local Session selector to this store. During rollout, ordinary Web compositions without the Task service retain the existing Session-derived overview as an explicitly limited fallback; the desktop profile requires the Task API and fails composition when it is absent.
 

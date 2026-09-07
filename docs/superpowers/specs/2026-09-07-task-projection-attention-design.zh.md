@@ -25,7 +25,7 @@
 - `task/risk-recorded` 保存一个未解决或已解决的风险，包含稳定 id、严重程度、摘要和解决说明。
 - `task/review-decided` 保存明确的审查结果：要求修改、就绪、已提交、已应用、已归档或已丢弃。
 
-Task id 和条件 id 使用 branded 类型。定义会拒绝空目标、重复条件 id、无效状态转换、未知证据引用，以及仍有归属运行活动时的终态审查决定。更新 Task 必须通过所属服务追加事件；调用方不能直接修改投影状态。
+Task id 和条件 id 使用 branded 类型。首个版本的证据引用指向根或其一个后代上的准确事件序号；Provider 在接受前验证该事件存在于同一 Task 树中。定义会拒绝空目标、重复条件 id、无效状态转换、外部或缺失的证据引用，以及仍有归属运行活动时的终态审查决定。更新 Task 必须通过所属服务追加事件；调用方不能直接修改投影状态。
 
 首个任务提示词可以在 Agent 执行前创建 `task/defined`。没有定义的现有根 Session 仍作为兼容任务展示，目标未定义且没有条件；读取它们绝不写入迁移事件。
 
@@ -58,7 +58,7 @@ Task 状态采用以下优先级：
 
 Host 通过 `task.list` 暴露完整当前快照，并通过 generation-scoped `task.changed` 流发送 whole task rows 和删除项。初始列表和每次重连基线都包含单调递增的 generation token。客户端丢弃旧 generation 的帧，并在新基线成功前保留旧行且明确显示为过期。
 
-`task.define`、`task.updateCriterion`、`task.recordRisk` 和 `task.review` 是类型化命令。每条命令在追加事件前验证目标根 Session 和预期事件序号，因此两个窗口不能静默覆盖较新的任务定义。业务失败使用稳定 RPC code；不合法 wire 输入在分发前由 schema 拒绝。
+`task.define`、`task.updateCriterion`、`task.recordRisk` 和 `task.review` 是类型化命令。每条命令在追加事件前根据根的下一个事件序号验证目标根 Session 和 `expectedSeq`，因此两个窗口不能静默覆盖较新的 Task 事实。业务失败使用稳定 RPC code；不合法 wire 输入在分发前由 schema 拒绝。
 
 客户端 runtime 拥有一个 `TaskListState` store，包含 `phase`、请求 `state`、`error`、`freshness`、有序 id 和按 id 索引的行。task-overview 插件从本地 Session 选择器迁移到该 store。迁移期间，没有 Task 服务的普通 Web 组合继续使用现有 Session 派生总览，并明确标注能力受限；desktop profile 强制要求 Task API，缺失时组合失败。
 
