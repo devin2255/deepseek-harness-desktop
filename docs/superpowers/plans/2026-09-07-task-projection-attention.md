@@ -29,6 +29,7 @@ English | [中文](2026-09-07-task-projection-attention.zh.md)
 - Create: `packages/task/task/README.i18n.yaml`
 - Modify: `packages/README.md`
 - Modify: `packages/README.zh.md`
+- Modify: `tsconfig.base.json`
 - Modify: `tsconfig.host.json`
 
 - [ ] **Step 1: Write the failing type and event test**
@@ -121,7 +122,7 @@ export interface TaskSnapshot {
 
 - [ ] **Step 4: Register the package in repository aggregates and documentation**
 
-Add the `task/` group to both package hierarchy tables, add `packages/task/task` to `tsconfig.host.json`, and create matching package READMEs with the no-direct-model-effect statement and explicit deferred cross-session Provider limitation.
+Add the `task/` group to both package hierarchy tables and both source-resolution wildcard lists, add `packages/task/task` to `tsconfig.host.json`, and create matching package READMEs with the no-direct-model-effect statement and explicit deferred cross-session Provider limitation.
 
 - [ ] **Step 5: Verify GREEN and package constraints**
 
@@ -139,10 +140,8 @@ git commit -m "feat(task): define durable task vocabulary"
 ### Task 2: Pure fold and Service Definition
 
 **Files:**
-- Create: `packages/task/task/src/fold.ts`
-- Create: `packages/task/task/src/service.ts`
-- Create: `packages/task/task/tests/fold.spec.ts`
-- Create: `packages/task/task/tests/service.spec.ts`
+- Create under `packages/task/task/src/`: `fold.ts` and `service.ts`
+- Create under `packages/task/task/tests/`: `fold.spec.ts` and `service.spec.ts`
 - Modify: `packages/task/task/src/index.ts`
 - Modify: `packages/task/task/README.md`
 - Modify: `packages/task/task/README.zh.md`
@@ -164,7 +163,7 @@ it('requires explicit evidence before ready', () => {
 
 - [ ] **Step 2: Verify RED**
 
-Run: `pnpm exec vitest run packages/task/task/tests/fold.spec.ts packages/task/task/tests/service.spec.ts`
+Run: `pnpm exec vitest run packages/task/task/tests`
 
 Expected: FAIL because the fold and service do not exist.
 
@@ -206,7 +205,7 @@ The Service Definition exports `TaskError` and stable error-code values but does
 
 - [ ] **Step 5: Verify GREEN**
 
-Run: `pnpm exec vitest run packages/task/task/tests/fold.spec.ts packages/task/task/tests/service.spec.ts`
+Run: `pnpm exec vitest run packages/task/task/tests`
 
 Expected: all fold and command tests pass.
 
@@ -269,7 +268,7 @@ Every command resolves a non-subagent root without resuming an Agent, compares `
 
 - [ ] **Step 5: Verify GREEN and invariants**
 
-Run: `pnpm exec vitest run packages/task/task-session/tests && pnpm exec tsc -p packages/task/task-session/tsconfig.json --noEmit`
+Run: `pnpm exec vitest run packages/task/task-session/tests && pnpm exec tsc -b packages/task/task-session/tsconfig.json`
 
 Expected: Provider tests and typecheck pass.
 

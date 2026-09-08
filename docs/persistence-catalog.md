@@ -706,6 +706,64 @@ Source: [`packages/core/session/src/types.ts:254`](../packages/core/session/src/
 
 Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
 
+### `task/*`
+
+<a id="taskcriterion-updated--log-only"></a>
+
+#### `task/criterion-updated` — log-only
+
+```ts persistence-catalog
+/**
+ * Replaces one criterion in the current definition by stable identity.
+ * @param data - complete post-change criterion.
+ */
+'task/criterion-updated': { readonly criterion: TaskCriterion }
+```
+
+Source: [`packages/task/task/src/index.ts:23`](../packages/task/task/src/index.ts)
+
+<a id="taskdefined--log-only"></a>
+
+#### `task/defined` — log-only
+
+```ts persistence-catalog
+/**
+ * Replaces the complete user-authored definition of one root task.
+ * @param data - complete post-change definition.
+ */
+'task/defined': { readonly definition: TaskDefinition }
+```
+
+Source: [`packages/task/task/src/index.ts:18`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-decided--log-only"></a>
+
+#### `task/review-decided` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the current explicit review or landing decision.
+ * @param data - complete post-change decision.
+ */
+'task/review-decided': { readonly decision: TaskReviewDecision }
+```
+
+Source: [`packages/task/task/src/index.ts:33`](../packages/task/task/src/index.ts)
+
+<a id="taskrisk-recorded--log-only"></a>
+
+#### `task/risk-recorded` — log-only
+
+```ts persistence-catalog
+/**
+ * Replaces one durable risk by stable identity.
+ * @param data - complete post-change risk.
+ */
+'task/risk-recorded': { readonly risk: TaskRisk }
+```
+
+Source: [`packages/task/task/src/index.ts:28`](../packages/task/task/src/index.ts)
+
 ### `todo/*`
 
 <a id="todowrite--log-only"></a>

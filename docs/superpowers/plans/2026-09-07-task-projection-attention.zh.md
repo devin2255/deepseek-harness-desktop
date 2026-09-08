@@ -29,6 +29,7 @@
 - 新建：`packages/task/task/README.i18n.yaml`
 - 修改：`packages/README.md`
 - 修改：`packages/README.zh.md`
+- 修改：`tsconfig.base.json`
 - 修改：`tsconfig.host.json`
 
 - [ ] **步骤 1：编写失败的类型与事件测试**
@@ -121,7 +122,7 @@ export interface TaskSnapshot {
 
 - [ ] **步骤 4：在仓库聚合与文档中注册包**
 
-在两个包层级表中加入 `task/` 组，在 `tsconfig.host.json` 加入 `packages/task/task`，并创建配对的包 README，其中包含无直接模型影响说明和明确的跨 Session Provider 延后限制。
+在两个包层级表和两组源码解析通配列表中加入 `task/` 组，在 `tsconfig.host.json` 加入 `packages/task/task`，并创建配对的包 README，其中包含无直接模型影响说明和明确的跨 Session Provider 延后限制。
 
 - [ ] **步骤 5：确认 GREEN 和包约束**
 
@@ -139,10 +140,8 @@ git commit -m "feat(task): define durable task vocabulary"
 ### 任务 2：纯折叠与 Service Definition
 
 **文件：**
-- 新建：`packages/task/task/src/fold.ts`
-- 新建：`packages/task/task/src/service.ts`
-- 新建：`packages/task/task/tests/fold.spec.ts`
-- 新建：`packages/task/task/tests/service.spec.ts`
+- 在 `packages/task/task/src/` 下新建：`fold.ts` 和 `service.ts`
+- 在 `packages/task/task/tests/` 下新建：`fold.spec.ts` 和 `service.spec.ts`
 - 修改：`packages/task/task/src/index.ts`
 - 修改：`packages/task/task/README.md`
 - 修改：`packages/task/task/README.zh.md`
@@ -164,7 +163,7 @@ it('requires explicit evidence before ready', () => {
 
 - [ ] **步骤 2：确认 RED**
 
-运行：`pnpm exec vitest run packages/task/task/tests/fold.spec.ts packages/task/task/tests/service.spec.ts`
+运行：`pnpm exec vitest run packages/task/task/tests`
 
 预期：失败，因为折叠与服务尚不存在。
 
@@ -206,7 +205,7 @@ Service Definition 导出 `TaskError` 和稳定错误码，但不解析 Session�
 
 - [ ] **步骤 5：确认 GREEN**
 
-运行：`pnpm exec vitest run packages/task/task/tests/fold.spec.ts packages/task/task/tests/service.spec.ts`
+运行：`pnpm exec vitest run packages/task/task/tests`
 
 预期：所有折叠与命令测试通过。
 
@@ -269,7 +268,7 @@ invalidateLiveGeneration(generation: number): void
 
 - [ ] **步骤 5：确认 GREEN 与 invariant**
 
-运行：`pnpm exec vitest run packages/task/task-session/tests && pnpm exec tsc -p packages/task/task-session/tsconfig.json --noEmit`
+运行：`pnpm exec vitest run packages/task/task-session/tests && pnpm exec tsc -b packages/task/task-session/tsconfig.json`
 
 预期：Provider 测试和 typecheck 通过。
 

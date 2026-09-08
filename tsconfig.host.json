@@ -167,6 +167,7 @@
     { "path": "./packages/core/agent-default-model" },
     { "path": "./packages/interaction/commands" },
     { "path": "./packages/goal/goal" },
+    { "path": "./packages/task/task" },
     { "path": "./packages/goal/tool-goal" },
     { "path": "./packages/goal/goal-round-driver" },
     { "path": "./packages/goal/command-goal" },

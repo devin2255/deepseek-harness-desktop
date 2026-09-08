@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/superpowers/plans/2026-09-07-task-projection-attention.md
-2026-09-07-task-projection-attention.md: f2945c12c6720b3560a8fe785a855dbac0937b11
-2026-09-07-task-projection-attention.zh.md: d69c644a218cfa400a5626991404ad6795c5b997
+2026-09-07-task-projection-attention.md: 13d1b3cc54ac47ccfbf37c759e2ef472340f10dd
+2026-09-07-task-projection-attention.zh.md: 3228d72f4b440e3712b434fd2512a82d7e93801d
