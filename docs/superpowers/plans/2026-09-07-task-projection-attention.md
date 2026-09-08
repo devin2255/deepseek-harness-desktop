@@ -207,7 +207,7 @@ Run: `pnpm exec vitest run packages/task/task/tests`
 
 Expected: all fold and command tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/task/task
@@ -228,7 +228,7 @@ git commit -m "feat(task): define task projection service"
 - Modify: `packages/task/README.zh.md`
 - Modify: `tsconfig.host.json`
 
-- [ ] **Step 1: Write failing aggregation tests**
+- [x] **Step 1: Write failing aggregation tests**
 
 Use real in-memory Sessions. Cover root discovery, uninterrupted subagent ancestry, ordinary fork separation, cycles, missing descendants, status precedence, exact attention identity, sibling settlement, stable sorting, and generation invalidation.
 
@@ -241,17 +241,17 @@ it('keeps sibling attention when one source settles', () => {
 })
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `pnpm exec vitest run packages/task/task-session/tests`
 
 Expected: FAIL because `@deepseek-ai/dsh-task-session` does not exist.
 
-- [ ] **Step 3: Implement pure aggregation**
+- [x] **Step 3: Implement pure aggregation**
 
 `aggregate.ts` accepts detached root, descendant, persistent fold, and live-fact inputs. It traces only consecutive `origin: 'subagent'` parent links, reports missing logs through `freshness: 'unavailable'`, computes status in the design's precedence order, and sorts attention by actionable, severity, creation time, task update time, task id, then item id. It never infers `ready` from idle state.
 
-- [ ] **Step 4: Implement the Provider lifecycle**
+- [x] **Step 4: Implement the Provider lifecycle**
 
 `TaskSessionProvider` extends `TaskService`, subscribes through `ctx.on()` and `ctx.effect()`, rebuilds persistent rows from Session logs, and implements:
 
@@ -264,13 +264,13 @@ invalidateLiveGeneration(generation: number): void
 
 Every command resolves a non-subagent root without resuming an Agent, compares `expectedSeq` with `session.seq`, validates evidence references against existing events in the same root tree, and appends exactly one event. It rejects blank normalized strings, duplicate ids, foreign or missing evidence, stale sequences, invalid criterion transitions, and terminal review decisions with active owned runs. Old-generation publications and settlements are ignored. Invalidation marks retained rows disconnected before the next baseline. Listener exceptions are logged and cannot starve later listeners. Disposal closes notification registration before releasing Session subscriptions.
 
-- [ ] **Step 5: Verify GREEN and invariants**
+- [x] **Step 5: Verify GREEN and invariants**
 
 Run: `pnpm exec vitest run packages/task/task-session/tests && pnpm exec tsc -b packages/task/task-session/tsconfig.json`
 
 Expected: Provider tests and typecheck pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/task/task-session packages/task/README.md packages/task/README.zh.md packages/task/README.i18n.yaml tsconfig.host.json pnpm-lock.yaml

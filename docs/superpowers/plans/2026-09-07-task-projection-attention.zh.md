@@ -207,7 +207,7 @@ Service Definition 导出 `TaskError` 和稳定错误码，但不解析 Session�
 
 预期：所有折叠与命令测试通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```sh
 git add packages/task/task
@@ -228,7 +228,7 @@ git commit -m "feat(task): define task projection service"
 - 修改：`packages/task/README.zh.md`
 - 修改：`tsconfig.host.json`
 
-- [ ] **步骤 1：编写失败的聚合测试**
+- [x] **步骤 1：编写失败的聚合测试**
 
 使用真实内存 Session。覆盖根发现、连续 subagent 血缘、普通 fork 分离、循环、缺失后代、状态优先级、准确注意事项标识、相邻事项结束、稳定排序和 generation 失效。
 
@@ -241,17 +241,17 @@ it('keeps sibling attention when one source settles', () => {
 })
 ```
 
-- [ ] **步骤 2：确认 RED**
+- [x] **步骤 2：确认 RED**
 
 运行：`pnpm exec vitest run packages/task/task-session/tests`
 
 预期：失败，因为 `@deepseek-ai/dsh-task-session` 尚不存在。
 
-- [ ] **步骤 3：实现纯聚合**
+- [x] **步骤 3：实现纯聚合**
 
 `aggregate.ts` 接收分离的 root、descendant、持久折叠与实时事实输入。它只追踪连续的 `origin: 'subagent'` 父链，通过 `freshness: 'unavailable'` 报告日志缺失，按设计优先级计算状态，并按 actionable、严重程度、创建时间、任务更新时间、Task id、事项 id 排序。它绝不根据 idle 推断 `ready`。
 
-- [ ] **步骤 4：实现 Provider 生命周期**
+- [x] **步骤 4：实现 Provider 生命周期**
 
 `TaskSessionProvider` 扩展 `TaskService`，通过 `ctx.on()` 和 `ctx.effect()` 订阅，从 Session 日志重建持久行，并实现：
 
@@ -264,13 +264,13 @@ invalidateLiveGeneration(generation: number): void
 
 每条命令解析非 subagent 根且不恢复 Agent，将 `expectedSeq` 与 `session.seq` 比较，根据同一根任务树中的现有事件验证证据引用，并且恰好追加一个事件。它拒绝规范化后为空的字符串、重复 id、外部或缺失证据、过期序号、无效条件转换，以及仍有归属运行活动时的终态审查决定。忽略旧 generation 的发布与结束。失效会在下一份基线前把保留行标记为 disconnected。listener 异常会被记录且不能阻止后续 listener。disposal 在释放 Session 订阅前关闭通知注册。
 
-- [ ] **步骤 5：确认 GREEN 与 invariant**
+- [x] **步骤 5：确认 GREEN 与 invariant**
 
 运行：`pnpm exec vitest run packages/task/task-session/tests && pnpm exec tsc -b packages/task/task-session/tsconfig.json`
 
 预期：Provider 测试和 typecheck 通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```sh
 git add packages/task/task-session packages/task/README.md packages/task/README.zh.md packages/task/README.i18n.yaml tsconfig.host.json pnpm-lock.yaml

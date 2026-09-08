@@ -2,7 +2,7 @@
 
 English | [中文](2026-09-07-task-projection-attention-design.zh.md)
 
-Status: extracted from the approved desktop product specification; durable vocabulary, strict replay, and the Service Definition are implemented, while Provider, Host, client, and acceptance work remain.
+Status: extracted from the approved desktop product specification; durable vocabulary, strict replay, Service Definition, and Session-backed Provider are implemented, while Host, client, and acceptance work remain.
 
 ## Purpose
 

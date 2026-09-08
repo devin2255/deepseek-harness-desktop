@@ -2,10 +2,13 @@
 
 [English](README.md) | 中文
 
-持久任务事件词汇及其跨会话投影实现。首个包当前仅负责事件与分离值词汇。
+持久任务事件词汇及其跨会话投影实现。服务定义将可安全传输的值与基于 Session 的 Host Provider 分离。
 
 | 包 | 角色 | ctx 键 |
 |---|---|---|
-| `task/` | 带品牌的任务值与全值持久 Session 事件 | （无） |
+| `task/` | 服务定义、带品牌的任务值与全值持久 Session 事件 | `tasks` |
+| `task-session/` | Session 持久化 Provider、子 Agent 树聚合、实时代次与注意事项投影 | `tasks` |
 
-任务事实仅写入日志，不进入模型请求或模型可见的 Session 表面。
+任务事实仅写入日志，不进入模型请求或模型可见的 Session 表面。Provider 启动时列出已持久化 Session，再以准确的实时 Session 日志覆盖，并且只把连续的 `origin: 'subagent'` 祖先链归入根 Task。普通 fork 仍是独立根任务。
+
+`TaskSessionProvider` 发布分离的全行快照。持久定义、条件、风险、审查决定、待处理审批和最近一次运行失败都从 Session 事件回放。按代次划分的活动和注意事项可以原子替换；代次失效后保留最近事实并标记为 `disconnected`，直到新的基线到达。命令使用 `expectedSeq` 比较根日志，针对同一 Task 树验证证据，并在不恢复 Agent 的情况下只追加一个事件。
