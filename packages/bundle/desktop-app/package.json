@@ -33,7 +33,9 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh-client-ui-task-overview": "workspace:^"
+    "@deepseek-ai/dsh-client-ui-task-overview": "workspace:^",
+    "@deepseek-ai/dsh-task": "workspace:^",
+    "@deepseek-ai/dsh-task-session": "workspace:^"
   },
   "dsh": {
     "bundle": {

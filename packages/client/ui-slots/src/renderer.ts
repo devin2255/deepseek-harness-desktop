@@ -177,6 +177,11 @@ export interface SlotRendererHost {
     /** Workspace list source backing the useWorkspaces standard hook. */
     list: HostObservable<unknown>
   }
+  /** Optional Task projection source; desktop compositions require it. */
+  tasks?: {
+    /** Task list source backing the useTasks standard hook. */
+    list: HostObservable<unknown>
+  }
   /**
    * Installed locale face backing the `t` standard seat (absent until the
    * locale plugin installs one; rendering an entry that declared `locale:`

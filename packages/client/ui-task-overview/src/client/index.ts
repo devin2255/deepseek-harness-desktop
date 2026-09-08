@@ -33,6 +33,7 @@ export const inject = ['slots', 'sessions', 'workspaces', 'layout', 'locale', 'c
  */
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
+  const tasks = ctx.get('tasks')
   const navigation = createTaskNavigation(ctx.sessions, ctx.layout)
   const lifetime = new AbortController()
   ctx.effect(() => () => { lifetime.abort(); navigation.dispose() }, 'ui-task-overview: navigation lifetime')
@@ -42,6 +43,7 @@ export function apply(ctx: ClientContext): void {
     && connection.hostDescription.getSnapshot() !== undefined
     && ctx.sessions.list.getSnapshot().state !== 'loading'
     && ctx.workspaces.list.getSnapshot().state !== 'loading'
+    && tasks?.list.getSnapshot().state !== 'loading'
   const injected = (): OverviewInjected => ({
     openTask: id => navigation.open(id),
     startTask: (workspaceId) => {
@@ -52,7 +54,9 @@ export function apply(ctx: ClientContext): void {
     },
     refresh: async () => {
       if (!ready()) return
-      await Promise.all([ctx.sessions.refresh(), ctx.workspaces.refresh()])
+      await Promise.all([
+        ctx.sessions.refresh(), ctx.workspaces.refresh(), ...(tasks === undefined ? [] : [tasks.refresh()]),
+      ])
     },
     hooks: { hostDescription: connection.hostDescription },
   })

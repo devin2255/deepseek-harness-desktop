@@ -1318,6 +1318,12 @@ importers:
       '@deepseek-ai/dsh-client-ui-task-overview':
         specifier: workspace:^
         version: link:../../client/ui-task-overview
+      '@deepseek-ai/dsh-task':
+        specifier: workspace:^
+        version: link:../../task/task
+      '@deepseek-ai/dsh-task-session':
+        specifier: workspace:^
+        version: link:../../task/task-session
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^

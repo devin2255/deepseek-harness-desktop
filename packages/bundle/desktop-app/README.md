@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The Desktop profile overlay for the Web application. [`cordis.patch.yml`](cordis.patch.yml) preserves the invocation's `webStartup` host and port, requires `desktop-capability` before the Web server admits a request, keeps the settled URL line, suppresses Web-GUI model context, and inserts this plugin. The Electron launcher supplies its per-launch capability through `DSH_DESKTOP_CAPABILITY`; this package does not create windows or manage application tasks.
+The Desktop profile overlay for the Web application. [`cordis.patch.yml`](cordis.patch.yml) preserves the invocation's `webStartup` host and port, requires `desktop-capability` before the Web server admits a request, keeps the settled URL line, suppresses Web-GUI model context, mounts the Session-backed Task Provider before Task-aware Host API activation, and inserts this plugin plus the task overview. The Electron launcher supplies its per-launch capability through `DSH_DESKTOP_CAPABILITY`; this package does not create windows or own Task state.
 
 At activation, the plugin reads `DSH_DESKTOP_CAPABILITY` and `DSH_DESKTOP_APP_VERSION` once and deletes both environment entries immediately. A missing, empty, or non-base64url capability, or a missing, empty, or oversized application version, stops startup. The registered guard accepts exactly one string `Authorization` value in the form `Bearer <base64url capability>` and rejects missing, malformed, duplicate, or unequal values. It compares equal-length UTF-8 buffers with `timingSafeEqual`; differing lengths reject before comparison. `WebServer` fails closed for its complete lifetime when the required guard is missing or rejects.
 

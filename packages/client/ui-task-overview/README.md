@@ -4,11 +4,11 @@ English | [中文](README.zh.md)
 
 Desktop task overview plugin. It occupies the layout's optional `shell.home` slot and adds a persistent Tasks action to `sidebar.footer.action`, including the collapsed sidebar. The Desktop bundle installs it; the ordinary Web bundle does not. There is no package configuration.
 
-The overview derives ordinary, nonblank, unarchived tasks from the runtime's listed session ids. Workspace labels use registry membership, never directory matching. Known descendants count only across uninterrupted subagent-origin parent chains; ordinary forks remain independent tasks. A pending approval, plan review, or question on the task or a known descendant places it in Needs You. Otherwise a running task or known descendant places it in Running; remaining tasks appear in Other. Each group orders by last update descending, then session id. Unread activity is a reminder, not a success or review-readiness claim.
+In the Desktop profile, the overview consumes the runtime's authoritative Task projection. Each row shows the user-defined goal (falling back to the root Session title for legacy roots), registered Workspace, one of the six derived Task states, active descendant count, satisfied-or-waived criterion progress, unresolved risk count, and live, disconnected, or unavailable freshness. Needs-attention and failed rows appear in Needs You, active rows in Running, and reviewing, ready, and settled rows in Other; Host order is retained within each group. When the Task hook is absent in another composition, the explicit `Session activity only` fallback uses the legacy pure Session selector and never claims criteria, risks, review readiness, or Task freshness.
 
-Each pending owner has a navigation action. Ordinary tasks use session navigation; subagents use retained catalog addresses, refreshing only the known direct parent's catalog once when necessary. Missing or rejected addresses remain readable errors in the overview. A superseding navigation or plugin disposal prevents a pending lookup from opening a conversation. These actions never submit interaction responses.
+Each attention item has a navigation action for its exact owner Session. Root Sessions use ordinary navigation; subagents use retained catalog addresses, refreshing only the known direct parent's catalog once when necessary. Missing or rejected addresses remain readable errors in the overview. A superseding navigation or plugin disposal prevents a pending lookup from opening a conversation. Navigation never answers a question, grants approval, marks a review ready, or clears an attention item.
 
-New Task accepts an explicit registered workspace or uses the runtime's existing current/recent-workspace and directory-setup flow. Tasks run directly in the selected directories, without automatic worktree isolation. Refresh requests both metadata lists. Initial loading, synchronized emptiness, failures, and stale retained rows have distinct messages; disconnected or loading metadata disables Refresh and New Task. Runtime error details remain readable.
+New Task accepts an explicit registered Workspace or uses the runtime's existing current/recent-Workspace and directory-setup flow. Tasks run directly in the selected directories, without automatic worktree isolation. Refresh requests the Task, Session, and Workspace mirrors. Initial loading, synchronized emptiness, refresh failures, stale retained rows, and transport disconnection have distinct messages; disconnected or loading data disables Refresh and New Task. Structured Task command errors remain readable.
 
 ## Model Experience
 
@@ -20,5 +20,5 @@ None; this package neither assembles nor sends model requests.
 
 ## Known Limitations and Deferred Work
 
-- Only already known subagent summaries contribute pending states and running counts; the overview does not enumerate logs or poll undiscovered catalogs.
+- Active-descendant display uses already known Session summaries; the Task Provider owns descendant membership and attention aggregation.
 - Archived tasks have no overview or unarchive control, and this plugin does not manage isolated worktrees.

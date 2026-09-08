@@ -156,6 +156,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     useSessions: SnapshotSelectorHook<SessionListState>
     /** Selector hook over real Workspaces and their independent baseline lifecycle. */
     useWorkspaces: SnapshotSelectorHook<import('./workspaces/service.ts').WorkspaceListState>
+    /** Optional Task projection hook; the desktop profile requires this capability. */
+    useTasks?: MaybeSnapshotSelectorHook<import('./tasks/manager.ts').TaskListState>
   }
 }
 
@@ -197,18 +199,18 @@ export const inject = ['connection', 'typert', 'remote', 'remote.commands']
  * @param ctx - Client Cordis context.
  */
 export function apply(ctx: Context): void {
+  const connection = ctx.get('connection') as ConnectionHandle
+  const tasks = new TaskRuntime(ctx, connection.api)
   ctx.plugin(SlotRegistry)
   const conversation = {
     events: new ConversationEventRegistry(ctx),
     views: new ConversationViewRegistry(ctx),
   }
-  const connection = ctx.get('connection') as ConnectionHandle
   const sessions = new SessionRuntime(ctx, connection.api, ctx.remote, conversation)
   ctx.typert.contexts.registerClient('agent', {
     identity: candidate => sessions.scopeOf(candidate),
   })
   const workspaces = new WorkspaceRuntime(ctx, connection.api, sessions)
-  const tasks = new TaskRuntime(ctx, connection.api)
   ctx.effect(
     () => workspaces.startInitialSelection(),
     'runtime: initial Workspace selection',

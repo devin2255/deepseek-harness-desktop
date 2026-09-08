@@ -1,36 +1,89 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionId, SessionListState, SessionSummary, WorkspaceListState, WorkspaceView } from '@deepseek-ai/dsh-client-runtime/client'
-import { selectTasks } from '../src/client/select-tasks.ts'
+import type {
+  SessionId, SessionListState, SessionSummary, TaskListState, TaskSnapshot,
+  WorkspaceListState, WorkspaceView,
+} from '@deepseek-ai/dsh-client-runtime/client'
+import { selectSessionActivity, selectTasks } from '../src/client/select-tasks.ts'
 
 const id = (value: string) => value as SessionId
 const summary = (value: string, patch: Partial<SessionSummary> = {}): SessionSummary => ({
   id: id(value), displayTitle: value, running: false, blank: false, updatedAt: 1, ...patch,
 })
-const workspace: WorkspaceView = { workspaceId: 'ws' as never, title: 'Registry project', path: '/different', sessionIds: [id('root')], createdAt: '0', updatedAt: '0' }
-const workspaces = (items: WorkspaceView[] = [], archivedSessionIds: SessionId[] = []): WorkspaceListState => ({ items, archivedSessionIds, state: 'idle', phase: 'ready', error: null, baselinesReady: true, recentWorkspaceId: undefined })
-const list = (rows: SessionSummary[], ids = rows.map(row => row.id)): SessionListState => ({ ids, byId: Object.fromEntries(rows.map(row => [row.id, row])), current: undefined, phase: 'ready', state: 'idle', error: null, subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined })
+const sessionList = (rows: SessionSummary[], ids = rows.map(row => row.id)): SessionListState => ({
+  ids, byId: Object.fromEntries(rows.map(row => [row.id, row])), current: undefined,
+  phase: 'ready', state: 'idle', error: null, subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+})
+const workspace: WorkspaceView = {
+  workspaceId: 'ws' as never, title: 'Registry project', path: '/different', sessionIds: [id('root')],
+  createdAt: '0', updatedAt: '0',
+}
+const workspaces = (items: WorkspaceView[] = [], archivedSessionIds: SessionId[] = []): WorkspaceListState => ({
+  items, archivedSessionIds, state: 'idle', phase: 'ready', error: null,
+  baselinesReady: true, recentWorkspaceId: undefined,
+})
+const task = (value: string, patch: Partial<TaskSnapshot> = {}): TaskSnapshot => ({
+  taskId: id(value), descendantSessionIds: [], status: 'settled', freshness: 'live', attention: [], risks: [],
+  updatedAt: 1, asOfSeq: 0, ...patch,
+})
+const taskList = (rows: TaskSnapshot[]): TaskListState => ({
+  ids: rows.map(row => row.taskId), byId: Object.fromEntries(rows.map(row => [row.taskId, row])),
+  phase: 'ready', state: 'idle', error: null, freshness: 'fresh', generation: 1,
+})
 
 describe('selectTasks', () => {
-  it('uses only listed ordinary nonblank unarchived roots and registry membership', () => {
-    const rows = [summary('root', { cwd: '/unrelated' }), summary('blank', { blank: true }), summary('archived'), summary('child', { origin: 'subagent', parentId: id('root') }), summary('unlisted'), summary('same-cwd', { cwd: '/different' })]
-    const selected = selectTasks(list(rows, [id('root'), id('root'), id('blank'), id('archived'), id('child'), id('same-cwd'), id('missing')]), workspaces([workspace], [id('archived')]))
-    expect(selected.map(row => row.root.id)).toEqual(['root', 'same-cwd'])
-    expect(selected[0]?.workspace).toBe(workspace)
-    expect(selected[1]?.workspace).toBeUndefined()
+  it('projects all statuses, durable outcome facts, active descendants, workspace, and every attention owner', () => {
+    const statuses = ['needs-attention', 'failed', 'running', 'reviewing', 'ready', 'settled'] as const
+    const sessions = sessionList([
+      summary('needs-attention', { displayTitle: 'Legacy title' }),
+      summary('child-running', { origin: 'subagent', parentId: id('needs-attention'), running: true }),
+      summary('child-idle', { origin: 'subagent', parentId: id('needs-attention') }),
+    ])
+    const rows = selectTasks(taskList(statuses.map(status => task(status, status === 'needs-attention' ? {
+      status,
+      workspaceId: workspace.workspaceId,
+      definition: {
+        goal: 'Ship the desktop',
+        criteria: [
+          { id: 'a' as never, text: 'Build', status: 'satisfied', evidence: [{ sessionId: id('needs-attention'), seq: 1 }] },
+          { id: 'b' as never, text: 'Verify', status: 'waived', evidence: [] },
+          { id: 'c' as never, text: 'Package', status: 'pending', evidence: [] },
+        ],
+      },
+      descendantSessionIds: [id('child-running'), id('child-idle')],
+      risks: [
+        { id: 'r1' as never, severity: 'high', summary: 'Installer' },
+        { id: 'r2' as never, severity: 'low', summary: 'Docs', resolution: 'Done' },
+      ],
+      attention: [
+        { id: 'q' as never, taskId: id('needs-attention'), ownerSessionId: id('child-running'), kind: 'question', severity: 'warning', summary: 'Choose path', createdAt: 1, sourceId: 'q', actionable: true },
+        { id: 'v' as never, taskId: id('needs-attention'), ownerSessionId: id('needs-attention'), kind: 'validation-failure', severity: 'error', summary: 'Tests failed', createdAt: 2, sourceId: 'v', actionable: true },
+      ],
+    } : { status }))), sessions, workspaces([workspace]))
+
+    expect(rows.map(row => row.task.status)).toEqual(statuses)
+    expect(rows[0]).toMatchObject({
+      goal: 'Ship the desktop', group: 'needs-you', activeDescendants: 1,
+      criterionProgress: { completed: 2, total: 3 }, unresolvedRiskCount: 1, workspace,
+    })
+    expect(rows[0]?.attention.map(entry => [entry.item.kind, entry.owner?.id]))
+      .toEqual([['question', 'child-running'], ['validation-failure', 'needs-attention']])
+    expect(rows[1]?.group).toBe('needs-you')
+    expect(rows[2]?.group).toBe('running')
   })
 
-  it('follows only uninterrupted known subagent chains and lists every pending owner', () => {
-    const rows = [summary('root', { pendingInteraction: 'approval' }), summary('child', { origin: 'subagent', parentId: id('root'), pendingInteraction: 'question', running: true }), summary('grandchild', { origin: 'subagent', parentId: id('child'), pendingInteraction: 'plan-review' }), summary('fork', { parentId: id('child') }), summary('fork-child', { origin: 'subagent', parentId: id('fork'), running: true }), summary('missing-parent', { origin: 'subagent', parentId: id('missing') }), summary('cycle-a', { origin: 'subagent', parentId: id('cycle-b') }), summary('cycle-b', { origin: 'subagent', parentId: id('cycle-a') })]
-    const selected = selectTasks(list(rows, [id('root'), id('fork')]), workspaces())
-    expect(selected[0]).toMatchObject({ group: 'needs-you', runningDescendants: 1 })
-    expect(selected[0]?.descendants.map(row => row.id)).toEqual(['child', 'grandchild'])
-    expect(selected[0]?.pending.map(row => row.id)).toEqual(['root', 'child', 'grandchild'])
-    expect(selected[1]?.descendants.map(row => row.id)).toEqual(['fork-child'])
-  })
-
-  it('prioritizes pending then running and sorts each group by update time then id', () => {
-    const rows = [summary('idle', { updatedAt: 30 }), summary('unread', { completed: true, updatedAt: 20 }), summary('running', { running: true }), summary('pending', { pendingInteraction: 'approval', running: true }), summary('a', { updatedAt: 20 }), summary('b', { updatedAt: 20 }), summary('parent'), summary('descendant', { parentId: id('parent'), origin: 'subagent', running: true })]
-    const selected = selectTasks(list(rows), workspaces())
-    expect(selected.map(row => [row.root.id, row.group])).toEqual([['pending', 'needs-you'], ['parent', 'running'], ['running', 'running'], ['idle', 'other'], ['a', 'other'], ['b', 'other'], ['unread', 'other']])
+  it('keeps the explicit legacy Session activity selector for ordinary Web composition', () => {
+    const rows = [
+      summary('root', { cwd: '/unrelated', pendingInteraction: 'approval' }),
+      summary('blank', { blank: true }),
+      summary('archived'),
+      summary('child', { origin: 'subagent', parentId: id('root'), running: true, pendingInteraction: 'question' }),
+    ]
+    const selected = selectSessionActivity(
+      sessionList(rows, [id('root'), id('blank'), id('archived'), id('child')]),
+      workspaces([workspace], [id('archived')]),
+    )
+    expect(selected).toHaveLength(1)
+    expect(selected[0]).toMatchObject({ group: 'needs-you', runningDescendants: 1, workspace })
+    expect(selected[0]?.pending.map(row => row.id)).toEqual(['root', 'child'])
   })
 })

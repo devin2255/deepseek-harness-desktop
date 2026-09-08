@@ -1,15 +1,27 @@
 /** Desktop task overview over framework-provided runtime metadata. */
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { SessionId, TaskListState, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { OverviewInjected } from './index.ts'
-import { selectTasks, type TaskRow } from './select-tasks.ts'
+import {
+  selectSessionActivity, selectTasks, type SessionActivityRow, type TaskRow,
+} from './select-tasks.ts'
 import css from './TaskOverview.module.css'
 
 /** Runtime, locale and injected shares; no business-state store. */
 export type TaskOverviewProps = PropsRuntime<'shell.home'> & PropsLocale<'taskOverview'> & InjectFace<OverviewInjected>
 
-function pendingOwnerTitle(owner: TaskRow['pending'][number], pending: TaskRow['pending']): string {
+const absentTasks = { getSnapshot: () => undefined, subscribe: () => () => {} }
+
+function useAbsentTasks<S>(_selector: (state: TaskListState) => S): S | undefined {
+  useSyncExternalStore(absentTasks.subscribe, absentTasks.getSnapshot, absentTasks.getSnapshot)
+  return undefined
+}
+
+function pendingOwnerTitle(
+  owner: SessionActivityRow['pending'][number],
+  pending: SessionActivityRow['pending'],
+): string {
   const duplicates = pending.filter(candidate => candidate.id !== owner.id
     && candidate.displayTitle === owner.displayTitle
     && candidate.pendingInteraction === owner.pendingInteraction)
@@ -22,12 +34,38 @@ function pendingOwnerTitle(owner: TaskRow['pending'][number], pending: TaskRow['
   return `${owner.displayTitle} · ${owner.id.slice(0, prefixLength)}`
 }
 
+function attentionOwnerTitle(entry: TaskRow['attention'][number], attention: TaskRow['attention']): string {
+  const title = entry.owner?.displayTitle ?? entry.item.ownerSessionId
+  const duplicates = attention.filter(candidate => candidate.item.id !== entry.item.id
+    && (candidate.owner?.displayTitle ?? candidate.item.ownerSessionId) === title
+    && candidate.item.kind === entry.item.kind)
+  if (duplicates.length === 0) return title
+  let prefixLength = Math.min(8, entry.item.ownerSessionId.length)
+  while (prefixLength < entry.item.ownerSessionId.length
+    && duplicates.some(candidate => candidate.item.ownerSessionId
+      .startsWith(entry.item.ownerSessionId.slice(0, prefixLength)))) {
+    prefixLength += 1
+  }
+  return `${title} · ${entry.item.ownerSessionId.slice(0, prefixLength)}`
+}
+
 /** Overview page with task groups and metadata health. */
-export function TaskOverview({ useSessions, useWorkspaces, useHostDescription, openTask, startTask, refresh, t }: TaskOverviewProps) {
+export function TaskOverview({
+  useSessions, useWorkspaces, useTasks, useHostDescription, openTask, startTask, refresh, t,
+}: TaskOverviewProps) {
   const sessions = useSessions(value => value)
   const workspaces = useWorkspaces(value => value)
+  const useTaskProjection = useTasks ?? useAbsentTasks
+  const tasks = useTaskProjection(value => value)
   const connected = useHostDescription(value => value !== undefined)
-  const rows = useMemo(() => selectTasks(sessions, workspaces), [sessions, workspaces])
+  const taskRows = useMemo(
+    () => tasks === undefined ? undefined : selectTasks(tasks, sessions, workspaces),
+    [sessions, tasks, workspaces],
+  )
+  const activityRows = useMemo(
+    () => tasks === undefined ? selectSessionActivity(sessions, workspaces) : undefined,
+    [sessions, tasks, workspaces],
+  )
   const [workspaceId, setWorkspaceId] = useState<WorkspaceId | undefined>()
   const [failure, setFailure] = useState<string>()
   const attempt = useRef(0)
@@ -40,14 +78,17 @@ export function TaskOverview({ useSessions, useWorkspaces, useHostDescription, o
     })
   }
   const open = (id: SessionId): void => { run(() => openTask(id)) }
-  const initial = sessions.phase === 'pending' || workspaces.phase === 'pending'
-  const loading = sessions.state === 'loading' || workspaces.state === 'loading'
-  const failed = sessions.state === 'error' || workspaces.state === 'error'
+  const initial = sessions.phase === 'pending' || workspaces.phase === 'pending' || tasks?.phase === 'pending'
+  const loading = sessions.state === 'loading' || workspaces.state === 'loading' || tasks?.state === 'loading'
+  const failed = sessions.state === 'error' || workspaces.state === 'error' || tasks?.state === 'error'
   const synchronized = connected && !initial && !loading && !failed
   const selectedWorkspace = workspaces.items.find(item => item.workspaceId === workspaceId)?.workspaceId
-  const requestErrors = [sessions.error?.message, workspaces.error?.message].filter(message => message !== undefined)
+  const requestErrors = [sessions.error?.message, workspaces.error?.message, tasks?.error?.message]
+    .filter(message => message !== undefined)
   const status = !connected ? t(initial ? 'loading' : 'disconnected')
-    : failed ? t('failed') : initial ? t('loading') : loading ? t('refreshing') : undefined
+    : failed ? t('failed') : initial ? t('loading') : loading ? t('refreshing')
+      : tasks?.freshness === 'stale' ? t('stale') : undefined
+  const rowCount = taskRows?.length ?? activityRows?.length ?? 0
 
   return (
     <main className={css.root} aria-label={t('tasks')}>
@@ -74,18 +115,45 @@ export function TaskOverview({ useSessions, useWorkspaces, useHostDescription, o
             }}>{t('newTask')}</button>
         </div>
         <p className={css.notice}>{t('notice')}</p>
+        {tasks === undefined && <p className={css.status}>{t('sessionActivityOnly')}</p>}
         {status !== undefined && <p role="status" className={css.status}>{status}</p>}
         {(failure !== undefined || requestErrors.length > 0) &&
           <div role="alert" className={css.error}>{[failure, ...requestErrors].filter(Boolean).join('\n')}</div>}
-        {synchronized && rows.length === 0 && <p className={css.empty}>{t('empty')}</p>}
+        {synchronized && rowCount === 0 && <p className={css.empty}>{t('empty')}</p>}
         {(['needs-you', 'running', 'other'] as const).map((group) => {
-          const grouped = rows.filter(row => row.group === group)
+          const groupedTasks = taskRows?.filter(row => row.group === group) ?? []
+          const groupedActivity = activityRows?.filter(row => row.group === group) ?? []
           return (
             <section key={group} className={css.section} aria-labelledby={`tasks-${group}`}>
               <h2 id={`tasks-${group}`}>{t(`group.${group}`)}</h2>
-              {synchronized && grouped.length === 0 && <p className={css.empty}>{t(`empty.${group}`)}</p>}
+              {synchronized && groupedTasks.length + groupedActivity.length === 0 &&
+                <p className={css.empty}>{t(`empty.${group}`)}</p>}
               <ul className={css.list}>
-                {grouped.map(row => (
+                {groupedTasks.map(row => (
+                  <li key={row.task.taskId} className={css.task}>
+                    <button type="button" className={css.taskTitle} title={row.goal}
+                      onClick={() => { open(row.task.taskId) }}>{row.goal}</button>
+                    <div className={css.metadata}>
+                      <span>{row.workspace?.title ?? t('unassigned')}</span>
+                      <span>{t(`status.${row.task.status}`)}</span>
+                      <span>{t('subagents', { n: row.activeDescendants })}</span>
+                      <span>{t('criteria', row.criterionProgress)}</span>
+                      <span>{t('risks', { n: row.unresolvedRiskCount })}</span>
+                      <span>{t(`freshness.${row.task.freshness}`)}</span>
+                    </div>
+                    {row.attention.length > 0 && <ul className={css.pending}>
+                      {row.attention.map(entry => (
+                        <li key={entry.item.id}>
+                          <button type="button" className={css.pendingAction}
+                            onClick={() => { open(entry.item.ownerSessionId) }}>
+                            {attentionOwnerTitle(entry, row.attention)} — {t(`attention.${entry.item.kind}`)}: {entry.item.summary}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>}
+                  </li>
+                ))}
+                {groupedActivity.map(row => (
                   <li key={row.root.id} className={css.task}>
                     <button type="button" className={css.taskTitle} title={row.root.displayTitle}
                       onClick={() => { open(row.root.id) }}>{row.root.displayTitle}</button>

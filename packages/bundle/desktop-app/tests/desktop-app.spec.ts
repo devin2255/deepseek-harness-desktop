@@ -28,6 +28,7 @@ const webPatchPath = fileURLToPath(new URL('../../web-app/cordis.patch.yml', imp
 const LAUNCH_CAPABILITY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 
 interface DesktopBundleManifest {
+  dependencies?: Record<string, string>
   dsh?: { bundle?: { patch?: unknown } }
 }
 
@@ -251,6 +252,7 @@ async function rawUpgrade(port: number, authorization: readonly string[]): Promi
 describe('desktop launch capability', () => {
   it('composes the manifest-declared patch over the actual Web bundle rows', async () => {
     const { entries, patch } = await readDesktopBundleComposition()
+    const manifest = JSON.parse(await readFile(desktopManifestPath, 'utf8')) as DesktopBundleManifest
 
     expect(patch).toBe('./cordis.patch.yml')
     expect(entries.find(entry => entry.id === 'webserver')).toMatchObject({
@@ -268,6 +270,20 @@ describe('desktop launch capability', () => {
     })
     expect(entries.find(entry => entry.id === 'desktop-app')).toMatchObject({
       name: '@deepseek-ai/dsh-desktop-app',
+    })
+    expect(entries.find(entry => entry.id === 'task-session')).toMatchObject({
+      name: '@deepseek-ai/dsh-task-session',
+    })
+    expect(entries.find(entry => entry.id === 'ui-task-overview')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-task-overview',
+    })
+    expect(entries.find(entry => entry.id === 'api-gateway')?.inject).toContain('tasks')
+    expect(entries.findIndex(entry => entry.id === 'task-session'))
+      .toBeLessThan(entries.findIndex(entry => entry.id === 'ui-task-overview'))
+    expect(manifest.dependencies).toMatchObject({
+      '@deepseek-ai/dsh-task': 'workspace:^',
+      '@deepseek-ai/dsh-task-session': 'workspace:^',
+      '@deepseek-ai/dsh-client-ui-task-overview': 'workspace:^',
     })
   })
 

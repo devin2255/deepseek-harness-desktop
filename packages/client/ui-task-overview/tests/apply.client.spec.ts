@@ -11,17 +11,19 @@ async function bench() {
   const slots = ctx.get('slots') as SlotRegistry
   const sessions = { refresh: vi.fn(async () => {}), open: vi.fn(), list: { getSnapshot: () => ({ state: 'idle', byId: { root: { id: 'root' }, child: { id: 'child', origin: 'subagent', parentId: 'root' } }, subagentsByParent: {} }) }, subagentAddress: vi.fn(), refreshSubagents: vi.fn(async () => {}), openSubagent: vi.fn() }
   const workspaces = { refresh: vi.fn(async () => {}), startSession: vi.fn(), list: { getSnapshot: () => ({ state: 'idle' }) } }
+  const tasks = { refresh: vi.fn(async () => {}), list: { getSnapshot: () => ({ state: 'idle' }) } }
   const layout = { showHome: vi.fn(), showConversation: vi.fn() }
   const hostDescription = { getSnapshot: () => ({}), subscribe: () => () => {} }
   const locale = new LocaleRuntime(ctx)
   ctx.provide('sessions', sessions as never)
   ctx.provide('workspaces', workspaces as never)
+  ctx.provide('tasks', tasks as never)
   ctx.provide('layout', layout as never)
   ctx.provide('connection', { hostDescription } as never)
   ctx.provide('locale', locale)
   const declare = () => slots.register({ name: 'root', children: { 'shell.home': { kind: 'single', scope: 'root' }, 'sidebar.footer.action': { kind: 'list', scope: 'root' } } }, ({ renderSlot }: PropsRenderSlots<'shell.home' | 'sidebar.footer.action'>) => [renderSlot('shell.home', {}), renderSlot('sidebar.footer.action', { wide: true })])
   const face = () => (slots.entries('shell.home')[0]!.inject as () => OverviewInjected)()
-  return { ctx, slots, sessions, workspaces, layout, hostDescription, locale, declare, face }
+  return { ctx, slots, sessions, workspaces, tasks, layout, hostDescription, locale, declare, face }
 }
 
 describe('overview composition', () => {
@@ -60,7 +62,7 @@ describe('overview composition', () => {
     expect(b.slots.entries('shell.home')).toHaveLength(0)
     expect(b.slots.entries('sidebar.footer.action')).toHaveLength(0)
   })
-  it('routes new tasks, refreshes both metadata lists and reveals root navigation', async () => {
+  it('routes new tasks, refreshes all three mirrors and reveals root navigation', async () => {
     const b = await bench()
     b.declare()
     const fiber = b.ctx.plugin({ inject, apply })
@@ -73,6 +75,7 @@ describe('overview composition', () => {
     await face.refresh()
     expect(b.sessions.refresh).toHaveBeenCalledOnce()
     expect(b.workspaces.refresh).toHaveBeenCalledOnce()
+    expect(b.tasks.refresh).toHaveBeenCalledOnce()
     await face.openTask('root' as never)
     expect(b.sessions.open).toHaveBeenCalledWith('root')
     const footer = (b.slots.entries('sidebar.footer.action')[0]!.inject as () => { showHome(): void })()

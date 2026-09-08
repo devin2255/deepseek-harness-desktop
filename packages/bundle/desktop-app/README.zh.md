@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-桌面 Web 应用的 profile 覆盖层。[`cordis.patch.yml`](cordis.patch.yml) 保留调用方的 `webStartup` host 和 port，在 Web server 接受请求前要求 `desktop-capability`，保留完成结算后的 URL 输出，关闭 Web GUI 模型上下文，并插入本插件。Electron 启动器通过 `DSH_DESKTOP_CAPABILITY` 提供每次启动专用 capability；本包不创建窗口，也不管理应用任务。
+桌面 Web 应用的 profile 覆盖层。[`cordis.patch.yml`](cordis.patch.yml) 保留调用方的 `webStartup` host 和 port，在 Web server 接受请求前要求 `desktop-capability`，保留完成结算后的 URL 输出，关闭 Web GUI 模型上下文，在感知 Task 的 Host API 激活前挂载基于 Session 的 Task Provider，并插入本插件与任务总览。Electron 启动器通过 `DSH_DESKTOP_CAPABILITY` 提供每次启动专用 capability；本包不创建窗口，也不拥有 Task 状态。
 
 激活时，插件只读取一次 `DSH_DESKTOP_CAPABILITY` 和 `DSH_DESKTOP_APP_VERSION`，随后立即删除这两个环境变量。capability 缺失、为空或不是 base64url，或者应用版本缺失、为空或超长时，启动会停止。已注册的 guard 只接受一个形式为 `Bearer <base64url capability>` 的字符串 `Authorization` 值，拒绝缺失、格式错误、重复或不相等的值。它只在 UTF-8 buffer 长度相等时调用 `timingSafeEqual`；长度不同会在比较前拒绝。所需 guard 缺失或拒绝时，`WebServer` 在完整生命周期内保持 fail-closed。
 
