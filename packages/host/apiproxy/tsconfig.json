@@ -72,6 +72,9 @@
       "path": "../../subagent/subagent"
     },
     {
+      "path": "../../task/task"
+    },
+    {
       "path": "../../skill/skill"
     },
     {

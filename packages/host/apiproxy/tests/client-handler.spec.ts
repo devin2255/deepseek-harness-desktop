@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { ApiProxy, GoalRef, HostFrame, MuxFrame, RpcMessage, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy'
+import type { ApiProxy, GoalRef, HostFrame, MuxFrame, RpcMessage, RpcRequest, RpcResponse, TaskSnapshot } from '@deepseek-ai/dsh-host-apiproxy'
 import { InProcessApiClient, RpcId, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 
 const sid = (id: string): SessionId => id as SessionId
@@ -25,6 +25,7 @@ function scriptedApi(overrides: {
   agentPresets?: Partial<ApiProxy['agentPresets']>
   events?: Partial<ApiProxy['events']>
   goals?: Partial<ApiProxy['goals']>
+  tasks?: Partial<ApiProxy['tasks']>
   settings?: Partial<ApiProxy['settings']>
   credentials?: Partial<ApiProxy['credentials']>
   llm?: Partial<ApiProxy['llm']>
@@ -107,6 +108,14 @@ function scriptedApi(overrides: {
       complete: err,
       clear: err,
       ...overrides.goals,
+    },
+    tasks: {
+      list: err,
+      define: err,
+      updateCriterion: err,
+      recordRisk: err,
+      review: err,
+      ...overrides.tasks,
     },
     settings: {
       describe: r => ok(r, { writable: true, hasDocument: false, namespaces: [] }),
@@ -647,6 +656,40 @@ describe('goals unary surface', () => {
     expect(emptyEdit.result.ok).toBe(false)
     if (!emptyEdit.result.ok) expect(emptyEdit.result.error.code).toBe('bad-request')
     expect(editCalls).toBe(0)
+  })
+})
+
+describe('tasks unary surface', () => {
+  const task: TaskSnapshot = {
+    taskId: sid('root'),
+    descendantSessionIds: [],
+    status: 'running',
+    freshness: 'live',
+    attention: [],
+    risks: [],
+    updatedAt: 1,
+    asOfSeq: 0,
+  }
+
+  it('round-trips the baseline and every mutation through the strict route table', async () => {
+    const seen: { method: string; payload: unknown }[] = []
+    const record = recorderInto(seen)
+    const api = scriptedApi({ tasks: {
+      list: record('task.list', r => ok(r, { generation: 1, tasks: [task] })),
+      define: record('task.define', r => ok(r, task)),
+      updateCriterion: record('task.updateCriterion', r => ok(r, task)),
+      recordRisk: record('task.recordRisk', r => ok(r, task)),
+      review: record('task.review', r => ok(r, task)),
+    } })
+    const c = client(api)
+    expect((await c.tasks.list({})).result).toEqual({ ok: true, value: { generation: 1, tasks: [task] } })
+    await c.tasks.define({ sessionId: sid('root'), goal: 'Ship', criteria: [{ text: 'Passes' }], expectedSeq: 0 })
+    await c.tasks.updateCriterion({ sessionId: sid('root'), criterion: { id: 'c1' as never, text: 'Passes', status: 'satisfied', evidence: [] }, expectedSeq: 1 })
+    await c.tasks.recordRisk({ sessionId: sid('root'), risk: { id: 'r1' as never, severity: 'high', summary: 'Signing' }, expectedSeq: 2 })
+    await c.tasks.review({ sessionId: sid('root'), decision: 'ready', expectedSeq: 3 })
+    expect(seen.map(entry => entry.method)).toEqual([
+      'task.list', 'task.define', 'task.updateCriterion', 'task.recordRisk', 'task.review',
+    ])
   })
 })
 

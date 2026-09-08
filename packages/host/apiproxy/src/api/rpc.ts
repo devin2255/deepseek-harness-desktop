@@ -92,6 +92,16 @@ export interface RpcErrorDetailsMap {
   'subagent-not-resumable': { childSessionId: SessionId }
   'subagent-unauthorized': { childSessionId: SessionId }
   'subagent-delivery-unavailable': { childSessionId: SessionId }
+  'task-not-found': { sessionId: SessionId }
+  'task-target-not-root': { sessionId: SessionId }
+  'task-stale-sequence': { sessionId: SessionId }
+  'task-invalid-definition': { sessionId: SessionId }
+  'task-invalid-criterion': { sessionId: SessionId }
+  'task-invalid-risk': { sessionId: SessionId }
+  'task-invalid-review': { sessionId: SessionId }
+  'task-invalid-evidence': { sessionId: SessionId }
+  'task-active': { sessionId: SessionId }
+  'task-unavailable': { sessionId?: SessionId }
   'internal': {}
 }
 

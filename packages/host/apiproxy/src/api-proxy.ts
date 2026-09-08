@@ -58,9 +58,11 @@ import {
 } from './api/session-search.ts'
 // Type-only: resolves `ctx.get('sessionProjections')` to the projection registry.
 import type {} from '@deepseek-ai/dsh-session-projection'
-// Type-only: resolves `ctx.get('tasks')` to the background job registry.
+// Type-only: resolves the background-job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
+import { TaskError } from '@deepseek-ai/dsh-task'
+import type { TaskErrorCode } from '@deepseek-ai/dsh-task'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -1777,6 +1779,31 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return err(request, { code: 'internal', message: String(error), details })
   }
 
+  const TASK_ERROR_CODES = {
+    TASK_NOT_FOUND: 'task-not-found',
+    TASK_TARGET_NOT_ROOT: 'task-target-not-root',
+    TASK_STALE_SEQUENCE: 'task-stale-sequence',
+    TASK_INVALID_DEFINITION: 'task-invalid-definition',
+    TASK_INVALID_CRITERION: 'task-invalid-criterion',
+    TASK_INVALID_RISK: 'task-invalid-risk',
+    TASK_INVALID_REVIEW: 'task-invalid-review',
+    TASK_INVALID_EVIDENCE: 'task-invalid-evidence',
+    TASK_ACTIVE: 'task-active',
+    TASK_UNAVAILABLE: 'task-unavailable',
+  } as const satisfies Record<TaskErrorCode, RpcError['code']>
+
+  /** Map one Task service failure to its stable host protocol code. */
+  function taskError(request: RpcRequest<{ sessionId: SessionId }>, error: unknown): RpcResponse<never> {
+    if (error instanceof TaskError) {
+      return err(request, {
+        code: TASK_ERROR_CODES[error.code],
+        message: error.message,
+        details: { sessionId: request.payload.sessionId },
+      })
+    }
+    return err(request, { code: 'internal', message: String(error), details: {} })
+  }
+
   /** Resolve a session's agent, apply one goal mutation, and acknowledge with the new CAS ref. */
   async function mutateGoal(
     request: RpcRequest<{ sessionId: SessionId }>,
@@ -2998,6 +3025,60 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
     },
 
+    tasks: {
+      list(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) {
+          return Promise.resolve(err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: {} }))
+        }
+        return Promise.resolve(ok(request, tasks.snapshot()))
+      },
+
+      async define(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, goal, criteria, expectedSeq } = request.payload
+          return ok(request, await tasks.define(sessionId, { goal, criteria, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+
+      async updateCriterion(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, criterion, expectedSeq } = request.payload
+          return ok(request, await tasks.updateCriterion(sessionId, { criterion, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+
+      async recordRisk(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, risk, expectedSeq } = request.payload
+          return ok(request, await tasks.recordRisk(sessionId, { risk, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+
+      async review(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, decision, expectedSeq } = request.payload
+          return ok(request, await tasks.review(sessionId, { decision, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+    },
+
     agentPresets: {
       // A deployment with no roster answers with an empty list rather than an
       // error: composing no presets is a valid deployment, and the browser
@@ -3470,6 +3551,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       host(_request, signal) {
         const queue = new FrameQueue<RpcRequest<HostFrame>>()
+        const tasks = ctx.get('tasks')
         const committedWorkspaces = ctx.workspaceRegistry.list()
         const committedWorkspaceIds = new Set(
           committedWorkspaces.map(workspace => String(workspace.id)),
@@ -3551,6 +3633,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               workspace: changedWorkspaceView(change.key, change.value),
             }))
           }),
+          ...tasks === undefined ? [] : [tasks.onChanged((change) => {
+            queue.push(frame({ type: 'task/changed', ...change }))
+          })],
           // Allowlisted host events ride one verbatim wrapper frame each. The
           // allowlist is api-remotes', and `ctx.remote.$on` is the consumer
           // face; nothing here projects, redacts, or renames.

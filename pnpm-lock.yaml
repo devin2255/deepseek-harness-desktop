@@ -4917,6 +4917,9 @@ importers:
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:^
         version: link:../../subagent/subagent
+      '@deepseek-ai/dsh-task':
+        specifier: workspace:^
+        version: link:../../task/task
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../core/tools
