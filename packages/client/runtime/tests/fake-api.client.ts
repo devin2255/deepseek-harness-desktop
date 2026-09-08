@@ -4,7 +4,7 @@
 import type {
   ClientResponse, HostFrame, IApiClient, ModelSelection, MuxFrame,
   RpcError, RpcReceipt, RpcRequest, RpcResponse, SessionId, SessionModels, SessionSearchItem, SkillEntry,
-  WorkspaceId, WorkspaceView,
+  WorkspaceId, WorkspaceView, TaskListSnapshot, TaskSnapshot,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { RpcId } from '@deepseek-ai/dsh-client-connection/client'
 import type { SessionRemotes } from '../src/client/sessions/remotes.ts'
@@ -180,6 +180,19 @@ export class FakeApiClient implements IApiClient {
     listDirectory: (payload: unknown) => this.record('host.listDirectory', payload, this.onListDirectory(payload)),
     createDirectory: (payload: unknown) => this.record('host.createDirectory', payload, this.onCreateDirectory(payload)),
     openPath: (payload: unknown) => this.record('host.openPath', payload, this.onOpenPath(payload)),
+  }
+
+  onTaskList: (payload: unknown) => Promise<RpcResponse<TaskListSnapshot>> =
+    () => Promise.resolve(ok({ generation: 0, tasks: [] }))
+  onTaskMutation: (payload: unknown) => Promise<RpcResponse<TaskSnapshot>> =
+    () => Promise.resolve(err({ code: 'task-unavailable', message: 'stub', details: {} }))
+
+  readonly tasks: IApiClient['tasks'] = {
+    list: (payload: unknown) => this.record('task.list', payload, this.onTaskList(payload)),
+    define: (payload: unknown) => this.record('task.define', payload, this.onTaskMutation(payload)),
+    updateCriterion: (payload: unknown) => this.record('task.updateCriterion', payload, this.onTaskMutation(payload)),
+    recordRisk: (payload: unknown) => this.record('task.recordRisk', payload, this.onTaskMutation(payload)),
+    review: (payload: unknown) => this.record('task.review', payload, this.onTaskMutation(payload)),
   }
 
   // The archive-set field defaults at the binding below so list stubs keep

@@ -11,6 +11,7 @@ import { SlotRegistry } from './slots.ts'
 import { SessionRuntime } from './sessions/service.ts'
 import type { SessionListState } from './sessions/service.ts'
 import { WorkspaceRuntime } from './workspaces/service.ts'
+import { TaskRuntime } from './tasks/service.ts'
 import type { ConversationSnapshot } from './sessions/conversation.ts'
 import type { UseProjection } from './sessions/projection-store.ts'
 import { ConversationEventRegistry } from './conversation/event-registry.ts'
@@ -46,6 +47,9 @@ export type { SessionProvideChannelHost } from './sessions/provide.ts'
 export { createScope } from './agents/scope.ts'
 export type { AgentScopeHandle } from './agents/scope.ts'
 export { DirectoryBrowseError, WorkspaceCreateError, WorkspaceRuntime } from './workspaces/service.ts'
+export { TaskRuntime } from './tasks/service.ts'
+export { TaskManager } from './tasks/manager.ts'
+export type { TaskListFreshness, TaskListPhase, TaskListState } from './tasks/manager.ts'
 export { resolveWorkspacePath } from './workspaces/path.ts'
 // Contract only: the scope implementation and its Host transport belong to
 // dsh-client-ui-settings (see that package's settings-scope.ts).
@@ -56,11 +60,16 @@ export type { Session } from './sessions/session.ts'
 export type { ISession, ProjectionsFace, SessionFace } from './contract/session.ts'
 export type { AgentContext, ISessions } from './contract/sessions.ts'
 export type { IWorkspaces } from './contract/workspaces.ts'
+export type { ITasks } from './contract/tasks.ts'
 export type {
   SessionBinding, SessionListState, SessionProvideContribution, SessionProvideDescriptor, SessionSummary,
 } from './sessions/service.ts'
 export type { SessionListPhase, SessionSearchResultItem, SubagentCatalogSnapshot } from './sessions/manager.ts'
 export type { SubagentAddress, JobView } from '@deepseek-ai/dsh-client-connection/client'
+export type {
+  AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
+  TaskListChange, TaskListSnapshot, TaskReviewDecision, TaskRisk, TaskSnapshot,
+} from '@deepseek-ai/dsh-client-connection/client'
 export type { WorkspaceListPhase } from './workspaces/manager.ts'
 export type { WorkspaceListState } from './workspaces/service.ts'
 export type {
@@ -176,6 +185,8 @@ declare module '@deepseek-ai/cordis' {
     sessions: import('./contract/sessions.ts').ISessions
     /** The outward face only; the concrete service stays inside the runtime. */
     workspaces: import('./contract/workspaces.ts').IWorkspaces
+    /** Root-task baseline, attention, and compare-and-set commands. */
+    tasks: import('./contract/tasks.ts').ITasks
   }
 }
 
@@ -197,6 +208,7 @@ export function apply(ctx: Context): void {
     identity: candidate => sessions.scopeOf(candidate),
   })
   const workspaces = new WorkspaceRuntime(ctx, connection.api, sessions)
+  const tasks = new TaskRuntime(ctx, connection.api)
   ctx.effect(
     () => workspaces.startInitialSelection(),
     'runtime: initial Workspace selection',
@@ -208,6 +220,7 @@ export function apply(ctx: Context): void {
     onHostEnvelope: (envelope) => {
       sessions.handleHostEnvelope(envelope)
       workspaces.handleHostEnvelope(envelope)
+      tasks.handleHostEnvelope(envelope)
       // Forwarded-event bridge: the session layer ignores registry frames (no
       // session routing). This plugin owns the frame sink, so it hands the
       // decoded frame straight to the Remote service, which fans it out to
@@ -218,6 +231,7 @@ export function apply(ctx: Context): void {
     onConnected: () => {
       sessions.handleConnected()
       workspaces.handleConnected()
+      tasks.handleConnected()
       ctx.emit('connection/reset')
     },
     onStateChange: (state) => {
@@ -227,6 +241,7 @@ export function apply(ctx: Context): void {
       if (state === 'reconnecting') {
         sessions.handleDisconnected()
         workspaces.handleDisconnected()
+        tasks.handleDisconnected()
       }
     },
   })

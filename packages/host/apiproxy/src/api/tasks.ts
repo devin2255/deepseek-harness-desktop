@@ -7,7 +7,7 @@ import type {
   TaskReviewDecision,
   TaskRisk,
   TaskSnapshot,
-} from '@deepseek-ai/dsh-task'
+} from '@deepseek-ai/dsh-task/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { RpcRequest, RpcResponse } from './rpc.ts'
 
@@ -53,4 +53,4 @@ export type {
   TaskReviewDecision,
   TaskRisk,
   TaskSnapshot,
-} from '@deepseek-ai/dsh-task'
+} from '@deepseek-ai/dsh-task/types'

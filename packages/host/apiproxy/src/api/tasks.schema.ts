@@ -1,7 +1,7 @@
 /** Strict wire schemas for task baselines, changes, and mutations. */
 
 import { z } from 'zod'
-import type { TaskListChange, TaskListSnapshot, TaskSnapshot } from '@deepseek-ai/dsh-task'
+import type { TaskListChange, TaskListSnapshot, TaskSnapshot } from '@deepseek-ai/dsh-task/types'
 import type { RequestPayload, ResponseValue } from './rpc-map.ts'
 import type { Wire } from './rpc.schema.ts'
 

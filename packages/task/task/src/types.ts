@@ -2,7 +2,7 @@
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 
 /** Opaque identity of one acceptance criterion. */
 export type TaskCriterionId = Branded<'TaskCriterionId'>

@@ -2846,6 +2846,25 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         ),
       ),
     },
+    tasks: {
+      list: request => ok(request, { generation: 0, tasks: [] }),
+      define: request => err(request, {
+        code: 'task-unavailable', message: 'fixture task mutations are not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      updateCriterion: request => err(request, {
+        code: 'task-unavailable', message: 'fixture task mutations are not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      recordRisk: request => err(request, {
+        code: 'task-unavailable', message: 'fixture task mutations are not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      review: request => err(request, {
+        code: 'task-unavailable', message: 'fixture task mutations are not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+    },
     events: {
       async *mux(_request, signal) {
         const conn = new FxInbox<MuxFrame>()
@@ -3137,6 +3156,11 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'goal.resume': return this.api.goals.resume(request)
       case 'goal.complete': return this.api.goals.complete(request)
       case 'goal.clear': return this.api.goals.clear(request)
+      case 'task.list': return this.api.tasks.list(request)
+      case 'task.define': return this.api.tasks.define(request)
+      case 'task.updateCriterion': return this.api.tasks.updateCriterion(request)
+      case 'task.recordRisk': return this.api.tasks.recordRisk(request)
+      case 'task.review': return this.api.tasks.review(request)
       case 'settings.describe': return this.api.settings.describe(request)
       case 'settings.openDocument': return this.api.settings.openDocument(request, signal)
       case 'settings.update': return this.api.settings.update(request)

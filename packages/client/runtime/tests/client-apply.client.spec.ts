@@ -14,6 +14,7 @@ import type { ConversationNodeDefinition } from '../src/client/contract/conversa
 import { Session } from '../src/client/sessions/session.ts'
 import type { SessionRuntime } from '../src/client/sessions/service.ts'
 import type { WorkspaceRuntime } from '../src/client/workspaces/service.ts'
+import type { TaskRuntime } from '../src/client/tasks/service.ts'
 import { FakeApiClient, fakeRemote, ok } from './fake-api.client.ts'
 
 interface Bench {
@@ -55,7 +56,7 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('runtime client apply', () => {
-  it('mounts slots, Sessions, and Workspaces and fans host frames into both managers', async () => {
+  it('mounts Slots, Sessions, Workspaces, and Tasks and fans Host frames into their managers', async () => {
     const bench = await mount()
     expect(bench.ctx.get('slots') !== undefined).toBe(true)
     // The built-in 'root' declaration ships with this package's SlotRegistry
@@ -63,8 +64,10 @@ describe('runtime client apply', () => {
     expect(bench.ctx.slots.spec('root')).toEqual({ kind: 'single', scope: 'root' })
     const sessions = bench.ctx.get('sessions')
     const workspaces = bench.ctx.get('workspaces')
+    const tasks = bench.ctx.get('tasks')
     expect(sessions !== undefined).toBe(true)
     expect(workspaces !== undefined).toBe(true)
+    expect(tasks !== undefined).toBe(true)
     // The bound the wire schema enforces, not a per-connection negotiation.
     expect((sessions as SessionRuntime).searchResultLimit).toBe(SESSION_SEARCH_RESULT_LIMIT)
     if (workspaces === undefined) throw new Error('WorkspaceRuntime missing after runtime apply')
@@ -92,6 +95,20 @@ describe('runtime client apply', () => {
     // Mux sink and onConnected route without throwing (manager semantics own the behavior).
     bench.sinks?.onMuxEnvelope?.({ rpcId: 'r2' as never, payload: { type: 'stream/error', message: 'x' } as never })
     bench.sinks?.onConnected?.({ version: '0', cwd: '/f', attachedSessions: 0, canOpenPath: true })
+    await flushMicrotasks()
+    bench.sinks?.onHostEnvelope?.({
+      rpcId: 'r-task' as never,
+      payload: {
+        type: 'task/changed', generation: 0,
+        upserts: [{
+          taskId: 'task-root', descendantSessionIds: [], status: 'running', freshness: 'live',
+          attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+        }],
+        removed: [],
+      } as never,
+    })
+    await Promise.resolve()
+    expect((tasks as TaskRuntime).list.getSnapshot().ids).toEqual(['task-root'])
   })
 
   it('selects the recent Workspace once when the first baselines have no current session', async () => {
