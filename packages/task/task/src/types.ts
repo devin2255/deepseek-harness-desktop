@@ -2,6 +2,7 @@
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 
 /** Opaque identity of one acceptance criterion. */
 export type TaskCriterionId = Branded<'TaskCriterionId'>
@@ -54,8 +55,19 @@ export type TaskStatus = 'needs-attention' | 'failed' | 'running' | 'reviewing' 
 /** Availability of the inputs used to derive a task row. */
 export type TaskFreshness = 'live' | 'disconnected' | 'unavailable'
 
+/** Merge-extensible attention categories keyed by their wire discriminant. */
+export interface AttentionKindMap {
+  approval: unknown
+  question: unknown
+  'plan-review': unknown
+  'run-failure': unknown
+  'merge-conflict': unknown
+  'validation-failure': unknown
+  'review-request': unknown
+}
+
 /** Source category of an attention item. */
-export type AttentionKind = 'approval' | 'question' | 'plan-review' | 'run-failure' | 'merge-conflict' | 'validation-failure' | 'review-request'
+export type AttentionKind = keyof AttentionKindMap
 
 /** User-facing urgency of an attention item. */
 export type AttentionSeverity = 'info' | 'warning' | 'error' | 'critical'
@@ -104,6 +116,7 @@ export interface AttentionItem {
 /** Detached whole-row task projection safe to send across process boundaries. */
 export interface TaskSnapshot {
   readonly taskId: SessionId
+  readonly workspaceId?: WorkspaceId
   readonly definition?: TaskDefinition
   readonly descendantSessionIds: readonly SessionId[]
   readonly status: TaskStatus
@@ -113,4 +126,74 @@ export interface TaskSnapshot {
   readonly reviewDecision?: TaskReviewDecision
   readonly updatedAt: number
   readonly asOfSeq: number
+}
+
+/** Complete ordered task baseline for one runtime generation. */
+export interface TaskListSnapshot {
+  readonly generation: number
+  readonly tasks: readonly TaskSnapshot[]
+}
+
+/** Whole-row task changes within one runtime generation. */
+export interface TaskListChange {
+  readonly generation: number
+  readonly upserts: readonly TaskSnapshot[]
+  readonly removed: readonly SessionId[]
+}
+
+/** Authoritative live activity for one root or descendant Session. */
+export interface LiveTaskActivity {
+  readonly kind: 'activity'
+  readonly taskId: SessionId
+  readonly ownerSessionId: SessionId
+  readonly sourceId: string
+  readonly state: 'running' | 'failed'
+  readonly createdAt: number
+  readonly summary?: string
+}
+
+/** Generation-scoped interactive or informational attention. */
+export interface LiveTaskAttention {
+  readonly kind: 'attention'
+  readonly item: AttentionItem
+}
+
+/** Merge-extensible live fact variants keyed by their discriminant. */
+export interface LiveTaskFactMap {
+  activity: LiveTaskActivity
+  attention: LiveTaskAttention
+}
+
+/** One generation-scoped fact consumed by a Task Provider. */
+export type LiveTaskFact = LiveTaskFactMap[keyof LiveTaskFactMap]
+
+/** One criterion requested while defining a root task. */
+export interface DefineTaskCriterion {
+  readonly id?: TaskCriterionId
+  readonly text: string
+}
+
+/** Compare-and-set input for defining or replacing one root task. */
+export interface DefineTaskRequest {
+  readonly goal: string
+  readonly criteria: readonly DefineTaskCriterion[]
+  readonly expectedSeq: number
+}
+
+/** Compare-and-set input for replacing one criterion. */
+export interface UpdateTaskCriterionRequest {
+  readonly criterion: TaskCriterion
+  readonly expectedSeq: number
+}
+
+/** Compare-and-set input for recording or resolving one risk. */
+export interface RecordTaskRiskRequest {
+  readonly risk: TaskRisk
+  readonly expectedSeq: number
+}
+
+/** Compare-and-set input for recording one review decision. */
+export interface ReviewTaskRequest {
+  readonly decision: TaskReviewDecision
+  readonly expectedSeq: number
 }

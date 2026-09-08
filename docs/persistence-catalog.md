@@ -720,7 +720,7 @@ Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent
 'task/criterion-updated': { readonly criterion: TaskCriterion }
 ```
 
-Source: [`packages/task/task/src/index.ts:23`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:25`](../packages/task/task/src/index.ts)
 
 <a id="taskdefined--log-only"></a>
 
@@ -734,7 +734,7 @@ Source: [`packages/task/task/src/index.ts:23`](../packages/task/task/src/index.t
 'task/defined': { readonly definition: TaskDefinition }
 ```
 
-Source: [`packages/task/task/src/index.ts:18`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:20`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-decided--log-only"></a>
 
@@ -748,7 +748,7 @@ Source: [`packages/task/task/src/index.ts:18`](../packages/task/task/src/index.t
 'task/review-decided': { readonly decision: TaskReviewDecision }
 ```
 
-Source: [`packages/task/task/src/index.ts:33`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:35`](../packages/task/task/src/index.ts)
 
 <a id="taskrisk-recorded--log-only"></a>
 
@@ -762,7 +762,7 @@ Source: [`packages/task/task/src/index.ts:33`](../packages/task/task/src/index.t
 'task/risk-recorded': { readonly risk: TaskRisk }
 ```
 
-Source: [`packages/task/task/src/index.ts:28`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:30`](../packages/task/task/src/index.ts)
 
 ### `todo/*`
 

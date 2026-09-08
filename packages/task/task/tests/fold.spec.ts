@@ -1,0 +1,261 @@
+import { describe, expect, it } from 'vitest'
+import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import {
+  TaskCriterionId,
+  TaskLogError,
+  TaskRiskId,
+  applyTaskEvent,
+  emptyTaskFoldState,
+  foldTask,
+} from '@deepseek-ai/dsh-task'
+import type { TaskCriterion, TaskDefinition, TaskRisk } from '@deepseek-ai/dsh-task'
+
+const firstCriterion: TaskCriterion = {
+  id: TaskCriterionId('installer'),
+  text: 'Installer launches the application',
+  status: 'pending',
+  evidence: [],
+}
+
+const secondCriterion: TaskCriterion = {
+  id: TaskCriterionId('parallel-agents'),
+  text: 'One window manages parallel agents',
+  status: 'pending',
+  evidence: [],
+}
+
+function definition(goal = 'Ship the desktop product'): TaskDefinition {
+  return { goal, criteria: [firstCriterion, secondCriterion] }
+}
+
+function event(type: string, data: unknown, seq: number, time = 1_700_000_000_000 + seq): SessionEvent {
+  return { type, data, seq, time } as SessionEvent
+}
+
+const defined = (value: TaskDefinition, seq = 0): SessionEvent =>
+  event('task/defined', { definition: value }, seq)
+
+const criterionUpdated = (criterion: TaskCriterion, seq = 1): SessionEvent =>
+  event('task/criterion-updated', { criterion }, seq)
+
+const riskRecorded = (risk: TaskRisk, seq = 2): SessionEvent =>
+  event('task/risk-recorded', { risk }, seq)
+
+const reviewed = (decision: string, seq = 3): SessionEvent =>
+  event('task/review-decided', { decision }, seq)
+
+describe('task replay fold', () => {
+  it('starts empty and preserves identity for unrelated events', () => {
+    const state = emptyTaskFoldState()
+    expect(state).toEqual({
+      definition: undefined,
+      risks: [],
+      reviewDecision: undefined,
+      updatedAt: undefined,
+    })
+    expect(applyTaskEvent(state, event('turn/start', { turn: 1 }, 0))).toBe(state)
+  })
+
+  it('replaces definitions and detaches their ordered criteria', () => {
+    const input = definition()
+    const state = foldTask([
+      defined(input),
+      defined({ goal: 'Ship version two', criteria: [secondCriterion] }, 1),
+    ])
+
+    expect(state.definition).toEqual({ goal: 'Ship version two', criteria: [secondCriterion] })
+    expect(state.updatedAt).toBe(1_700_000_000_001)
+    expect(state.definition).not.toBe(input)
+    expect(state.definition?.criteria).not.toBe(input.criteria)
+  })
+
+  it('updates a criterion in place without reordering siblings', () => {
+    const satisfied: TaskCriterion = {
+      ...firstCriterion,
+      status: 'satisfied',
+      evidence: [{ sessionId: SessionId('acceptance'), seq: 42 }],
+    }
+    const state = foldTask([defined(definition()), criterionUpdated(satisfied)])
+
+    expect(state.definition?.criteria.map(item => item.id)).toEqual([
+      TaskCriterionId('installer'),
+      TaskCriterionId('parallel-agents'),
+    ])
+    expect(state.definition?.criteria[0]).toEqual(satisfied)
+  })
+
+  it('replaces risks by identity while preserving risk order and resolutions', () => {
+    const first: TaskRisk = {
+      id: TaskRiskId('signing'), severity: 'high', summary: 'Unsigned installer',
+    }
+    const second: TaskRisk = {
+      id: TaskRiskId('update'), severity: 'medium', summary: 'Updater unavailable',
+    }
+    const resolved: TaskRisk = { ...first, resolution: 'Certificate configured' }
+    const state = foldTask([
+      riskRecorded(first, 0),
+      riskRecorded(second, 1),
+      riskRecorded(resolved, 2),
+    ])
+
+    expect(state.risks).toEqual([resolved, second])
+  })
+
+  it('accepts ready only after every criterion has evidence or is waived and risks are resolved', () => {
+    const satisfied: TaskCriterion = {
+      ...firstCriterion,
+      status: 'satisfied',
+      evidence: [{ sessionId: SessionId('acceptance'), seq: 7 }],
+    }
+    const waived: TaskCriterion = { ...secondCriterion, status: 'waived' }
+    const risk: TaskRisk = {
+      id: TaskRiskId('signing'),
+      severity: 'high',
+      summary: 'Unsigned installer',
+      resolution: 'Certificate configured',
+    }
+    const state = foldTask([
+      defined(definition()),
+      criterionUpdated(satisfied),
+      criterionUpdated(waived, 2),
+      riskRecorded(risk, 3),
+      reviewed('ready', 4),
+    ])
+
+    expect(state.reviewDecision).toBe('ready')
+  })
+
+  it.each([
+    ['blank goal', defined({ goal: ' ', criteria: [firstCriterion] }, 8), 'goal must be non-empty and normalized'],
+    ['empty criteria', defined({ goal: 'Ship', criteria: [] }, 8), 'criteria must contain at least one item'],
+    ['duplicate criterion', defined({ goal: 'Ship', criteria: [firstCriterion, firstCriterion] }, 8), 'criterion ids must be unique'],
+    ['missing criterion', criterionUpdated(firstCriterion, 8), 'criterion update requires a current definition'],
+    ['satisfied without evidence', criterionUpdated({ ...firstCriterion, status: 'satisfied' }, 8), 'satisfied criterion requires evidence'],
+    ['invalid evidence sequence', criterionUpdated({
+      ...firstCriterion,
+      status: 'satisfied',
+      evidence: [{ sessionId: SessionId('acceptance'), seq: -1 }],
+    }, 8), 'evidence seq must be a non-negative safe integer'],
+    ['blank risk', riskRecorded({ id: TaskRiskId('r'), severity: 'high', summary: ' ' }, 8), 'risk summary must be non-empty and normalized'],
+    ['unknown review', reviewed('approved', 8), 'review decision is invalid'],
+  ])('rejects malformed persisted data: %s', (_label: string, candidate: SessionEvent, message: string) => {
+    expect(() => foldTask([candidate])).toThrow(message)
+  })
+
+  it('rejects an update for an unknown criterion and an invalid terminal progression', () => {
+    const unknown = { ...firstCriterion, id: TaskCriterionId('unknown') }
+    expect(() => foldTask([defined(definition()), criterionUpdated(unknown)]))
+      .toThrow(/criterion "unknown" does not exist/)
+    expect(() => foldTask([defined(definition()), reviewed('ready')]))
+      .toThrow(/ready requires every criterion to be satisfied or waived/)
+    expect(() => foldTask([defined(definition()), reviewed('committed')]))
+      .toThrow(/committed requires a ready decision/)
+  })
+
+  it('rejects forbidden criterion transitions', () => {
+    const waived = { ...firstCriterion, status: 'waived' as const }
+    const satisfied = {
+      ...firstCriterion,
+      status: 'satisfied' as const,
+      evidence: [{ sessionId: SessionId('acceptance'), seq: 1 }],
+    }
+    expect(() => foldTask([
+      defined(definition()),
+      criterionUpdated(waived),
+      criterionUpdated(satisfied, 2),
+    ])).toThrow(/criterion transition waived -> satisfied is invalid/)
+  })
+
+  it.each([
+    ['criterion status type', { ...firstCriterion, status: 1 }, 'criterion status is invalid'],
+    ['criterion status value', { ...firstCriterion, status: 'done' }, 'criterion status is invalid'],
+    ['criterion evidence container', { ...firstCriterion, evidence: null }, 'criterion evidence must be an array'],
+    ['duplicate evidence', {
+      ...firstCriterion,
+      status: 'satisfied',
+      evidence: [
+        { sessionId: SessionId('acceptance'), seq: 1 },
+        { sessionId: SessionId('acceptance'), seq: 1 },
+      ],
+    }, 'criterion evidence references must be unique'],
+  ])('rejects malformed criterion fields: %s', (_label, criterion, message) => {
+    expect(() => foldTask([
+      defined(definition()),
+      criterionUpdated(criterion as TaskCriterion),
+    ])).toThrow(message)
+  })
+
+  it('requires definitions to contain canonical pending criteria', () => {
+    expect(() => foldTask([defined({
+      goal: 'Ship',
+      criteria: [{
+        ...firstCriterion,
+        status: 'satisfied',
+        evidence: [{ sessionId: SessionId('acceptance'), seq: 1 }],
+      }],
+    })])).toThrow(/defined criteria must start pending without evidence/)
+    expect(() => foldTask([event('task/defined', {
+      definition: { goal: 'Ship', criteria: null },
+    }, 0)])).toThrow(/criteria must contain at least one item/)
+  })
+
+  it.each([
+    ['non-record', null, 'risk must be a record'],
+    ['severity type', { id: 'risk', severity: 1, summary: 'Unsafe' }, 'risk severity is invalid'],
+    ['severity value', { id: 'risk', severity: 'urgent', summary: 'Unsafe' }, 'risk severity is invalid'],
+  ])('rejects malformed risk fields: %s', (_label, risk, message) => {
+    expect(() => foldTask([event('task/risk-recorded', { risk }, 0)])).toThrow(message)
+  })
+
+  it('enforces complete review progression and unresolved-risk blocking', () => {
+    const satisfied = {
+      ...firstCriterion,
+      status: 'satisfied' as const,
+      evidence: [{ sessionId: SessionId('acceptance'), seq: 1 }],
+    }
+    const oneCriterion = { goal: 'Ship', criteria: [firstCriterion] }
+    const readyPrefix = [defined(oneCriterion), criterionUpdated(satisfied)]
+    expect(() => foldTask([...readyPrefix, riskRecorded({
+      id: TaskRiskId('risk'), severity: 'high', summary: 'Unsafe',
+    }), reviewed('ready')])).toThrow(/ready requires every risk to be resolved/)
+    expect(() => foldTask([...readyPrefix, reviewed('applied')])).toThrow(/applied requires a committed decision/)
+    expect(() => foldTask([...readyPrefix, reviewed('archived')])).toThrow(/archived requires an applied decision/)
+    expect(() => foldTask([reviewed('changes-requested')])).toThrow(/changes-requested requires a current definition/)
+    expect(() => foldTask([reviewed('discarded')])).toThrow(/discarded requires a current definition/)
+
+    const state = foldTask([
+      ...readyPrefix,
+      reviewed('ready'),
+      reviewed('committed', 3),
+      reviewed('applied', 4),
+      reviewed('archived', 5),
+    ])
+    expect(state.reviewDecision).toBe('archived')
+    expect(foldTask([defined(oneCriterion), reviewed('changes-requested')]).reviewDecision)
+      .toBe('changes-requested')
+    expect(foldTask([defined(oneCriterion), reviewed('discarded')]).reviewDecision).toBe('discarded')
+  })
+
+  it('rejects a satisfied criterion becoming waived', () => {
+    const satisfied = {
+      ...firstCriterion,
+      status: 'satisfied' as const,
+      evidence: [{ sessionId: SessionId('acceptance'), seq: 1 }],
+    }
+    expect(() => foldTask([
+      defined({ goal: 'Ship', criteria: [firstCriterion] }),
+      criterionUpdated(satisfied),
+      criterionUpdated({ ...firstCriterion, status: 'waived' }, 2),
+    ])).toThrow(/criterion transition satisfied -> waived is invalid/)
+  })
+
+  it('exposes the failing event sequence on TaskLogError', () => {
+    try {
+      foldTask([defined({ goal: '', criteria: [firstCriterion] }, 19)])
+      throw new Error('expected fold to fail')
+    } catch (error) {
+      expect(error).toBeInstanceOf(TaskLogError)
+      expect((error as TaskLogError).seq).toBe(19)
+    }
+  })
+})

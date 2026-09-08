@@ -22,7 +22,7 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 当前基础没有感知任务的托盘生命周期：在 Windows 和 Linux 上关闭最后一个窗口会退出，macOS 则保留应用并在激活时重建窗口。Mission Control 将让活动工作继续驻留系统托盘或 macOS 菜单栏，在显式退出时报告活动任务数量，并提供继续运行、停止后退出或取消选项。其恢复流程将根据已记录的事实报告 interrupted、failed 或 settled 状态，不重放未经确认的工具调用。
 
-安全的桌面基础和初始活动及注意事项总览已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。结果与审查投影、应用所有的 worktree、感知任务的托盘行为、更完整的 Mission Control UI、Harness Studio、签名和更新仍是后续切片。它们保持在 Electron Main 和 preload 之外，避免这些组件获得产品领域状态。
+安全的桌面基础和初始活动及注意事项总览已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义现已拥有品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及未来 Provider、Host API 和客户端共享的分离列表投影。Session 支持的 Provider、Host RPC、结果与审查 UI、应用所有的 worktree、感知任务的托盘行为、更完整的 Mission Control UI、Harness Studio、签名和更新仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
 
 ## 产品结构
 

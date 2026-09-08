@@ -1743,6 +1743,49 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'tasks',
+    summary: 'Root-task projection seam.',
+    description: 'Root-task projection seam. Implementations own Session resolution, replay, compare-and-set appends, live generations, and subscriber containment.',
+    methods: [
+      {
+        signature: 'abstract snapshot(): TaskListSnapshot',
+        description: 'Read the current task-list baseline.',
+        parameters: [],
+        returns: 'a detached whole-list baseline for the current generation.',
+      },
+      {
+        signature: 'abstract onChanged(listener: (change: TaskListChange) => void): () => void',
+        description: 'Subscribe to whole-row changes.',
+        parameters: [{ name: 'listener', description: 'callback invoked for each committed change batch.' }],
+        returns: 'a disposer that removes this exact subscription.',
+      },
+      {
+        signature: 'abstract define(sessionId: SessionId, request: DefineTaskRequest): Promise<TaskSnapshot>',
+        description: 'Define or replace one root Task.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'normalized definition input and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract updateCriterion(sessionId: SessionId, request: UpdateTaskCriterionRequest): Promise<TaskSnapshot>',
+        description: 'Replace one criterion by stable identity.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'complete criterion and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract recordRisk(sessionId: SessionId, request: RecordTaskRiskRequest): Promise<TaskSnapshot>',
+        description: 'Record or resolve one risk by stable identity.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'complete risk and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot>',
+        description: 'Record an explicit review or delivery decision.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'decision and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+    ],
+  },
+  {
     key: 'terminals',
     summary: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
     description: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
@@ -2726,6 +2769,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AttachmentId = Branded<\'AttachmentId\'>;',
   },
   {
+    name: 'AttentionItem',
+    declaration: 'export interface AttentionItem {\n    readonly id: AttentionItemId;\n    readonly taskId: SessionId;\n    readonly ownerSessionId: SessionId;\n    readonly kind: AttentionKind;\n    readonly severity: AttentionSeverity;\n    readonly summary: string;\n    readonly createdAt: number;\n    readonly sourceId: string;\n    readonly actionable: boolean;\n}',
+  },
+  {
+    name: 'AttentionItemId',
+    declaration: 'export type AttentionItemId = Branded<\'AttentionItemId\'>;',
+  },
+  {
+    name: 'AttentionKind',
+    declaration: 'export type AttentionKind = keyof AttentionKindMap;',
+  },
+  {
+    name: 'AttentionKindMap',
+    declaration: 'export interface AttentionKindMap {\n    approval: unknown;\n    question: unknown;\n    \'plan-review\': unknown;\n    \'run-failure\': unknown;\n    \'merge-conflict\': unknown;\n    \'validation-failure\': unknown;\n    \'review-request\': unknown;\n}',
+  },
+  {
+    name: 'AttentionSeverity',
+    declaration: 'export type AttentionSeverity = \'info\' | \'warning\' | \'error\' | \'critical\';',
+  },
+  {
     name: 'BackendRegistry',
     declaration: 'export class BackendRegistry {\n    register(name: string, backend: StorageBackend): () => void;\n    get(name: string): StorageBackend;\n    names(): string[];\n}',
   },
@@ -2932,6 +2995,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DefineTaskCriterion',
+    declaration: 'export interface DefineTaskCriterion {\n    readonly id?: TaskCriterionId;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'DefineTaskRequest',
+    declaration: 'export interface DefineTaskRequest {\n    readonly goal: string;\n    readonly criteria: readonly DefineTaskCriterion[];\n    readonly expectedSeq: number;\n}',
   },
   {
     name: 'DiffCallView',
@@ -3586,6 +3657,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
   },
   {
+    name: 'RecordTaskRiskRequest',
+    declaration: 'export interface RecordTaskRiskRequest {\n    readonly risk: TaskRisk;\n    readonly expectedSeq: number;\n}',
+  },
+  {
     name: 'RedactedSecret',
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
   },
@@ -3640,6 +3715,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResumeAgentOptions',
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+  },
+  {
+    name: 'ReviewTaskRequest',
+    declaration: 'export interface ReviewTaskRequest {\n    readonly decision: TaskReviewDecision;\n    readonly expectedSeq: number;\n}',
   },
   {
     name: 'RpcError',
@@ -4258,6 +4337,62 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TableValueOf<S extends DomainSpec, N extends keyof S[\'tables\']> = S[\'tables\'][N] extends DomainTableSpec<string, infer V> ? V : never;',
   },
   {
+    name: 'TaskCriterion',
+    declaration: 'export interface TaskCriterion {\n    readonly id: TaskCriterionId;\n    readonly text: string;\n    readonly status: TaskCriterionStatus;\n    readonly evidence: readonly TaskEvidenceRef[];\n}',
+  },
+  {
+    name: 'TaskCriterionId',
+    declaration: 'export type TaskCriterionId = Branded<\'TaskCriterionId\'>;',
+  },
+  {
+    name: 'TaskCriterionStatus',
+    declaration: 'export type TaskCriterionStatus = \'pending\' | \'satisfied\' | \'failed\' | \'waived\';',
+  },
+  {
+    name: 'TaskDefinition',
+    declaration: 'export interface TaskDefinition {\n    readonly goal: string;\n    readonly criteria: readonly TaskCriterion[];\n}',
+  },
+  {
+    name: 'TaskEvidenceRef',
+    declaration: 'export interface TaskEvidenceRef {\n    readonly sessionId: SessionId;\n    readonly seq: number;\n}',
+  },
+  {
+    name: 'TaskFreshness',
+    declaration: 'export type TaskFreshness = \'live\' | \'disconnected\' | \'unavailable\';',
+  },
+  {
+    name: 'TaskListChange',
+    declaration: 'export interface TaskListChange {\n    readonly generation: number;\n    readonly upserts: readonly TaskSnapshot[];\n    readonly removed: readonly SessionId[];\n}',
+  },
+  {
+    name: 'TaskListSnapshot',
+    declaration: 'export interface TaskListSnapshot {\n    readonly generation: number;\n    readonly tasks: readonly TaskSnapshot[];\n}',
+  },
+  {
+    name: 'TaskReviewDecision',
+    declaration: 'export type TaskReviewDecision = \'changes-requested\' | \'ready\' | \'committed\' | \'applied\' | \'archived\' | \'discarded\';',
+  },
+  {
+    name: 'TaskRisk',
+    declaration: 'export interface TaskRisk {\n    readonly id: TaskRiskId;\n    readonly severity: TaskRiskSeverity;\n    readonly summary: string;\n    readonly resolution?: string;\n}',
+  },
+  {
+    name: 'TaskRiskId',
+    declaration: 'export type TaskRiskId = Branded<\'TaskRiskId\'>;',
+  },
+  {
+    name: 'TaskRiskSeverity',
+    declaration: 'export type TaskRiskSeverity = \'low\' | \'medium\' | \'high\' | \'critical\';',
+  },
+  {
+    name: 'TaskSnapshot',
+    declaration: 'export interface TaskSnapshot {\n    readonly taskId: SessionId;\n    readonly workspaceId?: WorkspaceId;\n    readonly definition?: TaskDefinition;\n    readonly descendantSessionIds: readonly SessionId[];\n    readonly status: TaskStatus;\n    readonly freshness: TaskFreshness;\n    readonly attention: readonly AttentionItem[];\n    readonly risks: readonly TaskRisk[];\n    readonly reviewDecision?: TaskReviewDecision;\n    readonly updatedAt: number;\n    readonly asOfSeq: number;\n}',
+  },
+  {
+    name: 'TaskStatus',
+    declaration: 'export type TaskStatus = \'needs-attention\' | \'failed\' | \'running\' | \'reviewing\' | \'ready\' | \'settled\';',
+  },
+  {
     name: 'TerminalBackend',
     declaration: 'export interface TerminalBackend {\n    readonly type: string;\n    spawn(spec: TerminalBackendSpawnSpec): Promise<TerminalBackendSession>;\n}',
   },
@@ -4536,6 +4671,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TypertTypeModel',
     declaration: 'export interface TypertTypeModel {\n    readonly name: string;\n    readonly declaration: string;\n}',
+  },
+  {
+    name: 'UpdateTaskCriterionRequest',
+    declaration: 'export interface UpdateTaskCriterionRequest {\n    readonly criterion: TaskCriterion;\n    readonly expectedSeq: number;\n}',
   },
   {
     name: 'UserMessage',

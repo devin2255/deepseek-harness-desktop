@@ -2,7 +2,7 @@
 
 [English](2026-09-07-task-projection-attention-design.md) | 中文
 
-状态：从已批准的桌面产品规格中提取；尚未实现。
+状态：从已批准的桌面产品规格中提取；持久词汇、严格回放和服务定义已经实现，Provider、Host、客户端与验收工作仍待完成。
 
 ## 目标
 

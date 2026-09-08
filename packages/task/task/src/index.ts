@@ -8,6 +8,8 @@ import type {
 } from './types.ts'
 
 export * from './types.ts'
+export * from './fold.ts'
+export * from './service.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {

@@ -130,7 +130,7 @@ Run: `pnpm install && pnpm exec vitest run packages/task/task/tests/types.spec.t
 
 Expected: the test and constraints pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/task/task packages/README.md packages/README.zh.md packages/README.i18n.yaml tsconfig.host.json pnpm-lock.yaml
@@ -146,32 +146,30 @@ git commit -m "feat(task): define durable task vocabulary"
 - Modify: `packages/task/task/README.md`
 - Modify: `packages/task/task/README.zh.md`
 
-- [ ] **Step 1: Write failing fold tests**
+- [x] **Step 1: Write failing fold tests**
 
 Cover empty state, definition replacement, criterion update, risk resolution, review decision, unrelated-event identity preservation, duplicate ids, blank text, missing criterion, terminal decision while active, and `ready` without satisfied criteria.
 
 ```text
 it('requires explicit evidence before ready', () => {
-  const state = foldTask(events(
+  expect(() => foldTask(events(
     defined('ship desktop', criterion('installer')),
     reviewed('ready'),
-  ))
-  expect(state.reviewDecision).toBeUndefined()
-  expect(state.violations).toContain('ready requires every criterion to be satisfied or waived')
+  ))).toThrow('ready requires every criterion to be satisfied or waived')
 })
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `pnpm exec vitest run packages/task/task/tests`
 
 Expected: FAIL because the fold and service do not exist.
 
-- [ ] **Step 3: Implement the strict replay fold**
+- [x] **Step 3: Implement the strict replay fold**
 
 `fold.ts` exports `emptyTaskFoldState`, `applyTaskEvent`, and `foldTask`. It validates every owned event, throws `TaskLogError` with the event sequence on malformed persisted data, returns the same reference for unrelated events, and stores no live activity. Whole-value events replace only their owned record; criterion updates preserve definition order.
 
-- [ ] **Step 4: Define the Task service interface**
+- [x] **Step 4: Define the Task service interface**
 
 `TaskService` is an abstract Cordis service at `ctx.tasks`. It owns no Session implementation. Its command methods use `expectedSeq`, and the Provider must compare it with the root Session's next sequence immediately before appending one validated whole-value event.
 
@@ -203,7 +201,7 @@ abstract review(sessionId: SessionId, request: {
 
 The Service Definition exports `TaskError` and stable error-code values but does not resolve Sessions, validate evidence, or append events. `TaskListSnapshot`, `TaskListChange`, and `LiveTaskFact` are detached JSON values shared by the Provider, Host Consumer, and tests.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run: `pnpm exec vitest run packages/task/task/tests`
 

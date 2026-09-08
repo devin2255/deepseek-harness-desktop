@@ -355,6 +355,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Folds revisioned objective state from the session log and keeps live continuation activation process-local.',
   },
   {
+    key: 'tasks',
+    pkg: 'task',
+    title: 'Root task projection seam',
+    mode: 'seam',
+    implementations: ['task-session'],
+    consumers: ['apiproxy'],
+    note: 'Projects one root Session and its uninterrupted subagent descendants into durable acceptance state plus generation-scoped activity and attention.',
+  },
+  {
     key: 'e2b',
     pkg: 'e2b',
     title: 'E2B sandbox lifecycle owner',

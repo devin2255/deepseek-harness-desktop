@@ -722,7 +722,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/criterion-updated': { readonly criterion: TaskCriterion }
 ```
 
-来源：[`packages/task/task/src/index.ts:23`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:25`](../packages/task/task/src/index.ts)
 
 <a id="taskdefined--log-only"></a>
 
@@ -736,7 +736,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/defined': { readonly definition: TaskDefinition }
 ```
 
-来源：[`packages/task/task/src/index.ts:18`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:20`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-decided--log-only"></a>
 
@@ -750,7 +750,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/review-decided': { readonly decision: TaskReviewDecision }
 ```
 
-来源：[`packages/task/task/src/index.ts:33`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:35`](../packages/task/task/src/index.ts)
 
 <a id="taskrisk-recorded--log-only"></a>
 
@@ -764,7 +764,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/risk-recorded': { readonly risk: TaskRisk }
 ```
 
-来源：[`packages/task/task/src/index.ts:28`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:30`](../packages/task/task/src/index.ts)
 
 ### `todo/*`
 

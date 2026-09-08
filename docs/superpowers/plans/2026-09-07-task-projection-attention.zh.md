@@ -130,7 +130,7 @@ export interface TaskSnapshot {
 
 预期：测试和约束通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```sh
 git add packages/task/task packages/README.md packages/README.zh.md packages/README.i18n.yaml tsconfig.host.json pnpm-lock.yaml
@@ -146,32 +146,30 @@ git commit -m "feat(task): define durable task vocabulary"
 - 修改：`packages/task/task/README.md`
 - 修改：`packages/task/task/README.zh.md`
 
-- [ ] **步骤 1：编写失败的折叠测试**
+- [x] **步骤 1：编写失败的折叠测试**
 
 覆盖空状态、定义替换、条件更新、风险解决、审查决定、无关事件的引用保持、重复 id、空文本、条件缺失、仍有活动时的终态决定，以及条件未满足时的 `ready`。
 
 ```text
 it('requires explicit evidence before ready', () => {
-  const state = foldTask(events(
+  expect(() => foldTask(events(
     defined('ship desktop', criterion('installer')),
     reviewed('ready'),
-  ))
-  expect(state.reviewDecision).toBeUndefined()
-  expect(state.violations).toContain('ready requires every criterion to be satisfied or waived')
+  ))).toThrow('ready requires every criterion to be satisfied or waived')
 })
 ```
 
-- [ ] **步骤 2：确认 RED**
+- [x] **步骤 2：确认 RED**
 
 运行：`pnpm exec vitest run packages/task/task/tests`
 
 预期：失败，因为折叠与服务尚不存在。
 
-- [ ] **步骤 3：实现严格回放折叠**
+- [x] **步骤 3：实现严格回放折叠**
 
 `fold.ts` 导出 `emptyTaskFoldState`、`applyTaskEvent` 和 `foldTask`。它验证每个所属事件，对不合法持久数据抛出包含事件序号的 `TaskLogError`，对无关事件返回相同引用，并且不保存实时活动。Whole-value 事件只替换其所属 record；条件更新保持定义顺序。
 
-- [ ] **步骤 4：定义 Task service 接口**
+- [x] **步骤 4：定义 Task service 接口**
 
 `TaskService` 是位于 `ctx.tasks` 的抽象 Cordis service，不拥有 Session 实现。命令方法使用 `expectedSeq`，Provider 必须在追加一个经过验证的 whole-value 事件前立即将其与根 Session 的下一个序号比较。
 
@@ -203,7 +201,7 @@ abstract review(sessionId: SessionId, request: {
 
 Service Definition 导出 `TaskError` 和稳定错误码，但不解析 Session、不验证证据，也不追加事件。`TaskListSnapshot`、`TaskListChange` 和 `LiveTaskFact` 是 Provider、Host Consumer 与测试共享的分离 JSON 值。
 
-- [ ] **步骤 5：确认 GREEN**
+- [x] **步骤 5：确认 GREEN**
 
 运行：`pnpm exec vitest run packages/task/task/tests`
 
