@@ -75,6 +75,9 @@
       "path": "../../task/task"
     },
     {
+      "path": "../../task/task-worktree"
+    },
+    {
       "path": "../../skill/skill"
     },
     {

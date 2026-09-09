@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/superpowers/plans/2026-09-09-task-worktree-isolation.md
-2026-09-09-task-worktree-isolation.md: bb21c4bdd2b3ff6d83a20b62095ebd2c5e26928d
-2026-09-09-task-worktree-isolation.zh.md: 1115f138bd8b7d90fbcf55565171e947e503c322
+2026-09-09-task-worktree-isolation.md: 6b2df9e567dc0242d0ceb73052b2e896340f57ca
+2026-09-09-task-worktree-isolation.zh.md: c136461b57fecad47089e2af2a70efea6f053c04

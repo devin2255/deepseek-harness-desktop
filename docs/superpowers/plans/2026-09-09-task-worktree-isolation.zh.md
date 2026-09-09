@@ -235,24 +235,25 @@ git commit -m "feat(task): record isolated execution workspaces"
 **文件：**
 - 修改：`packages/host/apiproxy/src/api/sessions.ts`
 - 修改：`packages/host/apiproxy/src/api/sessions.schema.ts`
-- 修改：`packages/host/apiproxy/src/api/rpc-map.ts`
+- 修改：`packages/host/apiproxy/src/api/rpc.ts`
+- 修改：`packages/host/apiproxy/src/api/rpc.schema.ts`
 - 修改：`packages/host/apiproxy/src/api/tasks.schema.ts`
 - 修改：`packages/host/apiproxy/src/api-proxy.ts`
 - 修改：`packages/host/apiproxy/tests/api-proxy-workspace.spec.ts`
 - 修改：`packages/host/apiproxy/tests/tasks-api.spec.ts`
-- 修改：`packages/host/apiproxy/tests/api-schemas.spec.ts`
+- 修改：`packages/host/apiproxy/tests/rpc-schemas.spec.ts`
 
-- [ ] **步骤 1：编写失败的 Host 行为测试**
+- [x] **步骤 1：编写失败的 Host 行为测试**
 
 断言 `session.create({ workspaceId, isolation: 'worktree' })` 会在创建 Session 前调用 Worktree 服务，以隔离 cwd 创建 Session，记录分配并返回它，同时保持源 Workspace 不变。断言 `isolation: 'direct'` 保留当前附加行为。Worktree 服务缺失或预检失败时返回 `workspace-isolation-unavailable`，且绝不创建 Session；Host 绝不静默改变请求模式。
 
-- [ ] **步骤 2：运行 Host 测试并确认 RED**
+- [x] **步骤 2：运行 Host 测试并确认 RED**
 
-运行：`pnpm exec vitest run packages/host/apiproxy/tests/api-proxy-workspace.spec.ts packages/host/apiproxy/tests/tasks-api.spec.ts packages/host/apiproxy/tests/api-schemas.spec.ts`
+运行：`pnpm exec vitest run packages/host/apiproxy/tests/api-proxy-workspace.spec.ts packages/host/apiproxy/tests/tasks-api.spec.ts packages/host/apiproxy/tests/rpc-schemas.spec.ts`
 
 预期：失败，因为严格请求 schema 会拒绝 `isolation`。
 
-- [ ] **步骤 3：实现 Host 消费方**
+- [x] **步骤 3：实现 Host 消费方**
 
 扩展请求与响应：
 
@@ -272,13 +273,13 @@ create(request: RpcRequest<{
 
 `worktree` 要求 `workspaceId` 和 `ctx.taskWorktrees`；它先分配 Session id，再创建 Git Worktree，以 `assignment.path` 启动 Session，随后调用 `ctx.tasks.assignWorktree`。直接创建保留现有 Workspace 附加行为。Git 创建后的任何失败都在脱敏的结构化详情中报告保留路径，且绝不自动删除。
 
-- [ ] **步骤 4：运行 Host 测试并确认 GREEN**
+- [x] **步骤 4：运行 Host 测试并确认 GREEN**
 
 运行步骤 2 的命令。
 
 预期：通过。
 
-- [ ] **步骤 5：提交 Host 集成**
+- [x] **步骤 5：提交 Host 集成**
 
 ```powershell
 git add packages/host/apiproxy

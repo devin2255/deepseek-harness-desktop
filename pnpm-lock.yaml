@@ -4926,6 +4926,9 @@ importers:
       '@deepseek-ai/dsh-task':
         specifier: workspace:^
         version: link:../../task/task
+      '@deepseek-ai/dsh-task-worktree':
+        specifier: workspace:^
+        version: link:../../task/task-worktree
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../core/tools

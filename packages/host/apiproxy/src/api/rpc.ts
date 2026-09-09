@@ -10,6 +10,7 @@ type ZodIssue = zCore.core.$ZodIssue
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { TaskWorktreeErrorCode } from '@deepseek-ai/dsh-task-worktree/types'
 
 /**
  * Message correlation id: the initiator mints it on a request; a response
@@ -37,6 +38,12 @@ export interface RpcErrorDetailsMap {
   'session-conflict': { sessionId: SessionId; requestedCwd: string; existingCwd?: string }
   'invalid-time-zone': { value: string }
   'workspace-attach-failed': { sessionId: SessionId; workspaceId: string }
+  'workspace-isolation-unavailable': {
+    workspaceId?: string
+    sessionId?: SessionId
+    worktreeCode?: TaskWorktreeErrorCode
+    preservedPath?: string
+  }
   'workspace-not-found': { workspaceId: string }
   'workspace-invalid-path': { path: string }
   'workspace-name-conflict': { name: string }

@@ -235,24 +235,25 @@ git commit -m "feat(task): record isolated execution workspaces"
 **Files:**
 - Modify: `packages/host/apiproxy/src/api/sessions.ts`
 - Modify: `packages/host/apiproxy/src/api/sessions.schema.ts`
-- Modify: `packages/host/apiproxy/src/api/rpc-map.ts`
+- Modify: `packages/host/apiproxy/src/api/rpc.ts`
+- Modify: `packages/host/apiproxy/src/api/rpc.schema.ts`
 - Modify: `packages/host/apiproxy/src/api/tasks.schema.ts`
 - Modify: `packages/host/apiproxy/src/api-proxy.ts`
 - Modify: `packages/host/apiproxy/tests/api-proxy-workspace.spec.ts`
 - Modify: `packages/host/apiproxy/tests/tasks-api.spec.ts`
-- Modify: `packages/host/apiproxy/tests/api-schemas.spec.ts`
+- Modify: `packages/host/apiproxy/tests/rpc-schemas.spec.ts`
 
-- [ ] **Step 1: Write failing Host behavior tests**
+- [x] **Step 1: Write failing Host behavior tests**
 
 Assert that `session.create({ workspaceId, isolation: 'worktree' })` calls the worktree service before Session creation, creates the Session with the isolated cwd, records the assignment, returns it, and leaves the source Workspace untouched. Assert that `isolation: 'direct'` retains current attachment behavior. A missing worktree service or preflight failure returns `workspace-isolation-unavailable` and never creates a Session; the Host never silently changes the requested mode.
 
-- [ ] **Step 2: Run the Host tests and confirm RED**
+- [x] **Step 2: Run the Host tests and confirm RED**
 
-Run: `pnpm exec vitest run packages/host/apiproxy/tests/api-proxy-workspace.spec.ts packages/host/apiproxy/tests/tasks-api.spec.ts packages/host/apiproxy/tests/api-schemas.spec.ts`
+Run: `pnpm exec vitest run packages/host/apiproxy/tests/api-proxy-workspace.spec.ts packages/host/apiproxy/tests/tasks-api.spec.ts packages/host/apiproxy/tests/rpc-schemas.spec.ts`
 
 Expected: FAIL because `isolation` is rejected by the strict request schema.
 
-- [ ] **Step 3: Implement the Host consumer**
+- [x] **Step 3: Implement the Host consumer**
 
 Extend the request and response:
 
@@ -272,13 +273,13 @@ create(request: RpcRequest<{
 
 `worktree` requires `workspaceId` and `ctx.taskWorktrees`; it allocates the Session id first, creates the Git worktree, starts the Session at `assignment.path`, then calls `ctx.tasks.assignWorktree`. Direct creation keeps the existing Workspace attachment. Any failure after Git creation reports the preserved path in redacted structured details and never removes it automatically.
 
-- [ ] **Step 4: Run the Host tests and confirm GREEN**
+- [x] **Step 4: Run the Host tests and confirm GREEN**
 
 Run the command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Host integration**
+- [x] **Step 5: Commit Host integration**
 
 ```powershell
 git add packages/host/apiproxy

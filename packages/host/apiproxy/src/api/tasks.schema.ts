@@ -38,10 +38,26 @@ const attentionSchema = z.strictObject({
   actionable: z.boolean(),
 })
 
+/** Complete immutable assignment of one application-owned Git worktree. */
+export const taskWorktreeAssignmentSchema = z.strictObject({
+  kind: z.literal('git-worktree'),
+  taskId: identity,
+  workspaceId: identity,
+  sourcePath: nonBlank,
+  path: nonBlank,
+  branch: z.string().regex(/^dsh\/task-[0-9a-f]{24}$/),
+  baseCommit: z.string().regex(/^[0-9a-f]{40}$/),
+  sourceHead: z.string().regex(/^[0-9a-f]{40}$/),
+  sourceDirty: z.boolean(),
+  sourceStatusDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  createdAt: z.number().int().nonnegative(),
+}).refine(value => value.baseCommit === value.sourceHead, 'baseCommit must equal sourceHead')
+
 /** Detached whole-row task projection. */
 export const taskSnapshotSchema = z.strictObject({
   taskId: identity,
   workspaceId: identity.optional(),
+  executionWorkspace: taskWorktreeAssignmentSchema.optional(),
   definition: definitionSchema.optional(),
   descendantSessionIds: z.array(identity),
   status: z.enum(['needs-attention', 'failed', 'running', 'reviewing', 'ready', 'settled']),
@@ -51,7 +67,12 @@ export const taskSnapshotSchema = z.strictObject({
   reviewDecision: z.enum(['changes-requested', 'ready', 'committed', 'applied', 'archived', 'discarded']).optional(),
   updatedAt: z.number().int(),
   asOfSeq: sequence,
-}) as unknown as z.ZodType<Wire<TaskSnapshot>>
+}).refine(
+  value => value.executionWorkspace === undefined
+    || value.executionWorkspace.taskId === value.taskId
+      && value.executionWorkspace.workspaceId === value.workspaceId,
+  'executionWorkspace must match the Task and Workspace identities',
+) as unknown as z.ZodType<Wire<TaskSnapshot>>
 
 /** Complete task-list baseline. */
 export const taskListSnapshotSchema = z.strictObject({

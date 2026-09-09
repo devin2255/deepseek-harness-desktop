@@ -63,6 +63,8 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
 import type { LiveTaskFact, TaskErrorCode } from '@deepseek-ai/dsh-task'
+import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -2225,11 +2227,106 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
+        const isolation = request.payload.isolation ?? 'direct'
+        let executionWorkspace: TaskWorktreeAssignment | undefined
+        let recordExecutionWorkspace = false
+        if (isolation === 'worktree') {
+          const taskWorktrees = ctx.get('taskWorktrees')
+          const tasks = ctx.get('tasks')
+          if (workspace === undefined || taskWorktrees === undefined || tasks === undefined) {
+            return err(request, {
+              code: 'workspace-isolation-unavailable',
+              message: 'worktree isolation is not available in this Host composition',
+              details: {
+                sessionId,
+                ...workspace === undefined ? {} : { workspaceId: workspace.id },
+              },
+            })
+          }
+          const existingTask = tasks.snapshot().tasks.find(task => task.taskId === sessionId)
+          const existing = existingTask?.executionWorkspace
+          if (existing !== undefined) {
+            if (existing.workspaceId !== workspace.id || existing.sourcePath !== workspace.path) {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: 'the Session belongs to a different isolated Workspace',
+                details: { sessionId, workspaceId: workspace.id, preservedPath: existing.path },
+              })
+            }
+            try {
+              const availability = await taskWorktrees.inspect(existing)
+              if (availability !== 'available') {
+                return err(request, {
+                  code: 'workspace-isolation-unavailable',
+                  message: `the recorded execution worktree is ${availability}`,
+                  details: {
+                    sessionId,
+                    workspaceId: workspace.id,
+                    worktreeCode: 'WORKTREE_UNAVAILABLE',
+                    preservedPath: existing.path,
+                  },
+                })
+              }
+            } catch (error: unknown) {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: error instanceof TaskWorktreeError
+                  ? error.message
+                  : 'the recorded execution worktree could not be inspected',
+                details: {
+                  sessionId,
+                  workspaceId: workspace.id,
+                  worktreeCode: error instanceof TaskWorktreeError ? error.code : 'WORKTREE_UNAVAILABLE',
+                  preservedPath: existing.path,
+                },
+              })
+            }
+            executionWorkspace = existing
+          } else if (existingTask !== undefined || ctx.agents.get(sessionId) !== undefined) {
+            return err(request, {
+              code: 'workspace-isolation-unavailable',
+              message: 'the Session already exists without a recorded execution Worktree',
+              details: { sessionId, workspaceId: workspace.id },
+            })
+          } else {
+            try {
+              executionWorkspace = await taskWorktrees.create({
+                taskId: sessionId,
+                workspaceId: workspace.id,
+                workspacePath: workspace.path,
+              })
+              recordExecutionWorkspace = true
+            } catch (error: unknown) {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: error instanceof TaskWorktreeError
+                  ? error.message
+                  : 'worktree isolation failed before Session creation',
+                details: {
+                  sessionId,
+                  workspaceId: workspace.id,
+                  ...error instanceof TaskWorktreeError ? { worktreeCode: error.code } : {},
+                },
+              })
+            }
+          }
+        }
+        const cwd = executionWorkspace?.path ?? workspace?.path ?? request.payload.cwd ?? defaults.cwd
         const requestedPreset = request.payload.agentPreset
         try {
           await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
         } catch (error: unknown) {
+          if (executionWorkspace !== undefined) {
+            return err(request, {
+              code: 'workspace-isolation-unavailable',
+              message: 'the worktree was preserved because Session creation failed',
+              details: {
+                sessionId,
+                workspaceId: executionWorkspace.workspaceId,
+                preservedPath: executionWorkspace.path,
+              },
+            })
+          }
           if (error instanceof AgentPresetConflict) {
             return err(request, {
               code: 'agent-preset-conflict',
@@ -2263,7 +2360,27 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: {},
           })
         }
-        if (workspace !== undefined) {
+        if (executionWorkspace !== undefined) {
+          if (recordExecutionWorkspace) {
+            const tasks = ctx.get('tasks')
+            /* v8 ignore next -- availability was checked before worktree creation */
+            if (tasks === undefined) throw new Error('Task service disappeared during isolated Session creation')
+            const live = ctx.agents.get(sessionId)?.session
+            try {
+              await tasks.assignWorktree(sessionId, { assignment: executionWorkspace, expectedSeq: live?.seq ?? 0 })
+            } catch {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: 'the worktree was preserved because its assignment could not be recorded',
+                details: {
+                  sessionId,
+                  workspaceId: executionWorkspace.workspaceId,
+                  preservedPath: executionWorkspace.path,
+                },
+              })
+            }
+          }
+        } else if (workspace !== undefined) {
           try {
             await workspace.attachSession(sessionId)
           } catch (error: unknown) {
@@ -2284,7 +2401,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // allowed and the row `session.list` serves for the same session.
         const created = ctx.agents.get(sessionId)
         const createdPreset = created === undefined ? undefined : resolveSessionPreset(created.session)
-        return ok(request, { sessionId, ...createdPreset === undefined ? {} : { agentPreset: createdPreset } })
+        return ok(request, {
+          sessionId,
+          ...createdPreset === undefined ? {} : { agentPreset: createdPreset },
+          ...executionWorkspace === undefined ? {} : { executionWorkspace },
+        })
       },
 
       async history(request) {
