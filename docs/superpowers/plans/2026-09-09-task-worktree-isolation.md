@@ -22,7 +22,7 @@
 - Modify: `packages/task/README.md`
 - Modify: `packages/task/README.zh.md`
 
-- [ ] **Step 1: Write the failing Service Definition tests**
+- [x] **Step 1: Write the failing Service Definition tests**
 
 Define the wished-for public API in the test before the package exists:
 
@@ -44,13 +44,13 @@ expect(created).toMatchObject({
 
 Also assert the stable error codes `WORKTREE_NOT_GIT`, `WORKTREE_NESTED_REPOSITORY`, `WORKTREE_UNBORN_HEAD`, `WORKTREE_INSUFFICIENT_SPACE`, `WORKTREE_TARGET_OCCUPIED`, `WORKTREE_BRANCH_OCCUPIED`, `WORKTREE_GIT_FAILED`, and `WORKTREE_UNAVAILABLE`.
 
-- [ ] **Step 2: Run the tests and confirm RED**
+- [x] **Step 2: Run the tests and confirm RED**
 
 Run: `pnpm exec vitest run packages/task/task-worktree/tests`
 
 Expected: FAIL because `@deepseek-ai/dsh-task-worktree` does not exist.
 
-- [ ] **Step 3: Implement the Service Definition**
+- [x] **Step 3: Implement the Service Definition**
 
 Export these exact public values:
 
@@ -83,13 +83,13 @@ export abstract class TaskWorktreeService extends Service {
 
 `TaskWorktreeError` carries one stable code from the list above. The invariant asserts that `ctx.taskWorktrees` is mounted when the package is configured.
 
-- [ ] **Step 4: Run the tests and confirm GREEN**
+- [x] **Step 4: Run the tests and confirm GREEN**
 
 Run: `pnpm exec vitest run packages/task/task-worktree/tests`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the capability definition**
+- [x] **Step 5: Commit the capability definition**
 
 ```powershell
 git add packages/task/task-worktree packages/task/README.md packages/task/README.zh.md
