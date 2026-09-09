@@ -115,6 +115,38 @@
   overflow-wrap: anywhere;
 }
 
+.recovery {
+  margin: 16px 0;
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: 10px;
+  padding: 14px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.recovery p {
+  margin: 6px 0 12px;
+  color: var(--dsw-alias-state-error-primary);
+  white-space: pre-wrap;
+}
+
+.recovery .warning {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.recoveryActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.worktree {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  padding: 1px 7px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
 .section {
   margin-top: 28px;
 }

@@ -1,7 +1,7 @@
 /** Desktop task overview over framework-provided runtime metadata. */
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { SessionId, TaskListState, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import { SessionCreateError, type SessionId, type TaskListState, type WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { OverviewInjected } from './index.ts'
 import {
   selectSessionActivity, selectTasks, type SessionActivityRow, type TaskRow,
@@ -68,8 +68,21 @@ export function TaskOverview({
   )
   const [workspaceId, setWorkspaceId] = useState<WorkspaceId | undefined>()
   const [failure, setFailure] = useState<string>()
+  const [recovery, setRecovery] = useState<{ workspaceId: WorkspaceId; message: string }>()
+  const [starting, setStarting] = useState(false)
+  const startTrigger = useRef<HTMLButtonElement>(null)
+  const recoveryPanel = useRef<HTMLDivElement>(null)
+  const restoreStartFocus = useRef(false)
   const attempt = useRef(0)
-  useEffect(() => () => { attempt.current += 1 }, [])
+  const startAttempt = useRef(0)
+  useEffect(() => () => { attempt.current += 1; startAttempt.current += 1 }, [])
+  useEffect(() => { recoveryPanel.current?.focus() }, [recovery])
+  useEffect(() => {
+    if (!starting && recovery === undefined && restoreStartFocus.current) {
+      restoreStartFocus.current = false
+      startTrigger.current?.focus()
+    }
+  }, [recovery, starting])
   const run = (action: () => void | Promise<void>): void => {
     const current = ++attempt.current
     setFailure(undefined)
@@ -78,11 +91,36 @@ export function TaskOverview({
     })
   }
   const open = (id: SessionId): void => { run(() => openTask(id)) }
+  const start = (target: WorkspaceId | undefined, isolation: 'direct' | 'worktree'): void => {
+    const current = ++startAttempt.current
+    setFailure(undefined)
+    setRecovery(undefined)
+    setStarting(true)
+    void startTask(target, isolation).then(() => {
+      if (current !== startAttempt.current) return
+      restoreStartFocus.current = true
+      setStarting(false)
+    }).catch((error: unknown) => {
+      if (current !== startAttempt.current) return
+      setStarting(false)
+      if (target !== undefined && error instanceof SessionCreateError
+        && error.rpcError.code === 'workspace-isolation-unavailable') {
+        setRecovery({ workspaceId: target, message: error.rpcError.message })
+        return
+      }
+      setFailure(error instanceof Error ? error.message : String(error))
+    })
+  }
   const initial = sessions.phase === 'pending' || workspaces.phase === 'pending' || tasks?.phase === 'pending'
   const loading = sessions.state === 'loading' || workspaces.state === 'loading' || tasks?.state === 'loading'
   const failed = sessions.state === 'error' || workspaces.state === 'error' || tasks?.state === 'error'
   const synchronized = connected && !initial && !loading && !failed
-  const selectedWorkspace = workspaces.items.find(item => item.workspaceId === workspaceId)?.workspaceId
+  const currentSessionId = sessions.current
+  const currentWorkspaceId = currentSessionId === undefined
+    ? undefined
+    : workspaces.items.find(item => item.sessionIds.includes(currentSessionId))?.workspaceId
+  const selectedWorkspace = workspaces.items.find(item => item.workspaceId
+    === (workspaceId ?? currentWorkspaceId ?? workspaces.recentWorkspaceId))?.workspaceId
   const requestErrors = [sessions.error?.message, workspaces.error?.message, tasks?.error?.message]
     .filter(message => message !== undefined)
   const status = !connected ? t(initial ? 'loading' : 'disconnected')
@@ -101,23 +139,31 @@ export function TaskOverview({
         <div className={css.toolbar}>
           <label className={css.workspace}>
             {t('workspace')}
-            <select className={css.control} value={selectedWorkspace ?? ''} disabled={!connected || loading}
+            <select className={css.control} value={selectedWorkspace ?? ''} disabled={!connected || loading || starting}
               onChange={(event) => { setWorkspaceId(workspaces.items.find(item => item.workspaceId === event.target.value)?.workspaceId) }}>
               <option value="">{t('defaultWorkspace')}</option>
               {workspaces.items.map(item => <option key={item.workspaceId} value={item.workspaceId}>{item.title}</option>)}
             </select>
           </label>
-          <button type="button" className={css.action} disabled={!connected || loading}
-            onClick={() => {
-              setFailure(undefined)
-              try { startTask(selectedWorkspace) }
-              catch (error) { setFailure(error instanceof Error ? error.message : String(error)) }
-            }}>{t('newTask')}</button>
+          <button ref={startTrigger} type="button" className={css.action}
+            disabled={!connected || loading || starting}
+            onClick={() => { start(selectedWorkspace, 'worktree') }}>{t(starting ? 'startingTask' : 'newTask')}</button>
         </div>
         <p className={css.notice}>{t('notice')}</p>
         {tasks === undefined && <p className={css.status}>{t('sessionActivityOnly')}</p>}
         {status !== undefined && <p role="status" className={css.status}>{status}</p>}
-        {(failure !== undefined || requestErrors.length > 0) &&
+        {recovery !== undefined && <div ref={recoveryPanel} role="alert" tabIndex={-1} className={css.recovery}>
+          <strong>{t('isolationFailed')}</strong>
+          <p>{recovery.message}</p>
+          <p className={css.warning}>{t('useDirectWarning')}</p>
+          <div className={css.recoveryActions}>
+            <button type="button" className={css.action}
+              onClick={() => { start(recovery.workspaceId, 'worktree') }}>{t('retryIsolation')}</button>
+            <button type="button" className={css.action}
+              onClick={() => { start(recovery.workspaceId, 'direct') }}>{t('useDirect')}</button>
+          </div>
+        </div>}
+        {recovery === undefined && (failure !== undefined || requestErrors.length > 0) &&
           <div role="alert" className={css.error}>{[failure, ...requestErrors].filter(Boolean).join('\n')}</div>}
         {synchronized && rowCount === 0 && <p className={css.empty}>{t('empty')}</p>}
         {(['needs-you', 'running', 'other'] as const).map((group) => {
@@ -135,6 +181,8 @@ export function TaskOverview({
                       onClick={() => { open(row.task.taskId) }}>{row.goal}</button>
                     <div className={css.metadata}>
                       <span>{row.workspace?.title ?? t('unassigned')}</span>
+                      {row.task.executionWorkspace !== undefined &&
+                        <span className={css.worktree} title={row.task.executionWorkspace.path}>{t('worktree')}</span>}
                       <span>{t(`status.${row.task.status}`)}</span>
                       <span>{t('subagents', { n: row.activeDescendants })}</span>
                       <span>{t('criteria', row.criterionProgress)}</span>

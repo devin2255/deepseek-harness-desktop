@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type {
-  SessionListState, WorkspaceId, WorkspaceListState, WorkspaceView,
+  SessionListState, TaskListState, WorkspaceId, WorkspaceListState, WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
@@ -114,6 +114,32 @@ function chooseAdd(): void {
 }
 
 describe('WorkspacePicker', () => {
+  it('keeps the source Workspace title and labels the current task as a Worktree', () => {
+    const currentSessions: SessionListState = {
+      ...sessions, ids: ['task' as never], current: 'task' as never,
+      byId: { ['task' as never]: { id: 'task' as never, displayTitle: 'Task', running: false, blank: true, updatedAt: 1 } },
+    }
+    const tasks: TaskListState = {
+      ids: ['task' as never], phase: 'ready', state: 'idle', error: null, freshness: 'fresh', generation: 1,
+      byId: { ['task' as never]: {
+        taskId: 'task' as never, workspaceId: 'alpha' as never, descendantSessionIds: [], status: 'running',
+        freshness: 'live', attention: [], risks: [], updatedAt: 1, asOfSeq: 1,
+        executionWorkspace: {
+          kind: 'git-worktree', taskId: 'task' as never, workspaceId: 'alpha' as never,
+          sourcePath: 'D:\\project', path: 'D:\\worktrees\\task', branch: 'dsh/task-000000000000000000000000',
+          baseCommit: 'a'.repeat(40), sourceHead: 'a'.repeat(40), sourceDirty: false,
+          sourceStatusDigest: 'b'.repeat(64), createdAt: 1,
+        },
+      } },
+    }
+    const { renderSlot } = flowProbe()
+    render(<WorkspacePicker open anchorRef={anchor()} selectedId={wid('alpha')}
+      useSessions={hook(currentSessions)} useWorkspaces={hook(workspaceState([workspace('alpha', 'Project')]))}
+      useTasks={hook(tasks)} onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()}
+      useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} t={t} />)
+    expect(screen.getByRole('menuitem', { name: 'Project · 工作树' })).toBeTruthy()
+  })
+
   it('lists same-title Workspaces separately and forwards the selected id', () => {
     const b = mount([workspace('alpha', 'Shared'), workspace('beta', 'Shared')])
     const entries = screen.getAllByRole('menuitem', { name: 'Shared' })

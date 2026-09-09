@@ -341,36 +341,47 @@ git commit -m "feat(client): request isolated task sessions"
 ### Task 6: Add the desktop task-creation recovery flow
 
 **Files:**
+- Modify: `packages/client/ui-task-overview/README.md`
+- Modify: `packages/client/ui-task-overview/README.zh.md`
 - Modify: `packages/client/ui-task-overview/src/client/TaskOverview.tsx`
 - Modify: `packages/client/ui-task-overview/src/client/TaskOverview.module.css`
 - Modify: `packages/client/ui-task-overview/src/client/locales.ts`
 - Modify: `packages/client/ui-task-overview/tests/overview.client.spec.tsx`
 - Modify: `packages/client/ui-workspace/src/client/WorkspacePicker.tsx`
+- Modify: `packages/client/ui-workspace/README.md`
+- Modify: `packages/client/ui-workspace/README.zh.md`
 - Modify: `packages/client/ui-workspace/src/client/locales.ts`
 - Modify: `packages/client/ui-workspace/tests/workspace-picker.client.spec.tsx`
 - Modify: `packages/client/connection/src/client/fixture.ts`
+- Modify: `packages/client/connection/tests/fixture.client.spec.ts`
+- Modify: `packages/client/ui-conversation/README.md`
+- Modify: `packages/client/ui-conversation/README.zh.md`
+- Modify: `packages/client/ui-conversation/src/client/locales.ts`
+- Modify: `packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css`
+- Modify: `packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx`
+- Modify: `packages/client/ui-conversation/tests/skeleton.client.spec.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 The Tasks empty state and New Task action select a Workspace and request `worktree`. When Host returns `workspace-isolation-unavailable`, show the exact safe choices “Retry isolation” and “Use project directly”; do not retry as direct until the user selects it. The task card and header label an assigned path as `Worktree` and keep the original Workspace title.
 
-- [ ] **Step 2: Run the component tests and confirm RED**
+- [x] **Step 2: Run the component tests and confirm RED**
 
 Run: `pnpm exec vitest run packages/client/ui-task-overview/tests packages/client/ui-workspace/tests/workspace-picker.client.spec.tsx`
 
 Expected: FAIL because the isolation actions and recovery state are absent.
 
-- [ ] **Step 3: Implement the visible flow**
+- [x] **Step 3: Implement the visible flow**
 
 Keep Git diagnostics in Host-provided user-safe text. The UI sends only the Workspace id and explicit mode; it never receives a generic path or process API. Keyboard focus moves into the error panel and returns to the triggering action after a successful retry.
 
-- [ ] **Step 4: Run the component tests and confirm GREEN**
+- [x] **Step 4: Run the component tests and confirm GREEN**
 
-Run the command from Step 2.
+Run the command from Step 2, plus the conversation-header and fixture suites that own the Worktree badge and deterministic isolation failure.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the desktop flow**
+- [x] **Step 5: Commit the desktop flow**
 
 ```powershell
 git add packages/client/ui-task-overview packages/client/ui-workspace packages/client/connection

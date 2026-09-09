@@ -9,7 +9,7 @@ import {
   createSnapshotStore, EMPTY_CHAT_SNAPSHOT, EMPTY_CONVERSATION_VIEWS,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
-  ConversationSnapshot, SessionId, SessionListState, WorkspaceId, WorkspaceListState, WorkspaceView,
+  ConversationSnapshot, SessionId, SessionListState, TaskListState, WorkspaceId, WorkspaceListState, WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConversationRootProps } from '../src/client/skeleton/ConversationRoot.tsx'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
@@ -99,6 +99,8 @@ function mount(
     composerBlock?: { reason: string }
     /** Mutable view ledger used by registration-order regressions. */
     viewTabs?: ViewTab[]
+    /** Project the selected root as running in an application-owned worktree. */
+    taskWorktree?: boolean
   } = {},
 ) {
   const root = sid('root')
@@ -116,6 +118,20 @@ function mount(
     phase: 'ready', state: 'idle', error: null, subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
   })
   const workspaces = createSnapshotStore<WorkspaceListState>(workspaceState(workspaceRows))
+  const tasks = createSnapshotStore<TaskListState>({
+    ids: options.taskWorktree ? [SID] : [], byId: options.taskWorktree ? { [SID]: {
+      taskId: SID, workspaceId: wid('one'), descendantSessionIds: [], status: 'running', freshness: 'live',
+      attention: [], risks: [], updatedAt: 1, asOfSeq: 1,
+      executionWorkspace: {
+        kind: 'git-worktree', taskId: SID, workspaceId: wid('one'), sourcePath: 'D:\\project',
+        path: 'D:\\worktrees\\task', branch: 'dsh/task-000000000000000000000000',
+        baseCommit: 'a'.repeat(40), sourceHead: 'a'.repeat(40), sourceDirty: false,
+        sourceStatusDigest: 'b'.repeat(64), createdAt: 1,
+      },
+    } } : {},
+    phase: 'ready', state: 'idle', error: null, freshness: 'fresh', generation: 1,
+  })
+  const useTasks = bindSnapshotSelector(tasks)
   const session = createSnapshotStore<ConversationSnapshot>(snapshot)
   const useSession = bindSnapshotSelector(session)
   const chat = createChatStore().create()
@@ -152,6 +168,7 @@ function mount(
           useSession={useSession}
           useSessions={props.useSessions}
           useWorkspaces={props.useWorkspaces}
+          useTasks={useTasks}
           useProjection={(() => undefined)}
           useInput={useInput}
           inputActions={inputActions}
@@ -240,6 +257,7 @@ function mount(
     useSession,
     useSessions: bindSnapshotSelector(sessions),
     useWorkspaces: bindSnapshotSelector(workspaces),
+    useTasks,
     useProjection: (() => undefined),
     useComposerBlock: select => select(options.composerBlock),
     useInput,
@@ -337,6 +355,13 @@ describe('ConversationRoot resident composer', () => {
     expect(seat?.contains(textarea)).toBe(true)
     expect(b.slotCalls).toContain('conversation.session.header.actions')
     expect(b.slotCalls).toContain('conversation.session.header.utilities')
+  })
+
+  it('labels an isolated task Worktree in the header without replacing its task title', () => {
+    const b = mount(conversationSnapshot(), undefined, undefined, { taskWorktree: true })
+    const badge = b.view.getByTitle('D:\\worktrees\\task')
+    expect(badge.textContent).toBe('工作树')
+    expect(b.view.getByRole('button', { name: 'Child' })).toBeTruthy()
   })
 
   it('sticky composer seat wraps the whole overlay chain, not only the fallback stack', () => {

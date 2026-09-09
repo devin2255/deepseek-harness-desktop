@@ -9,18 +9,24 @@
  * occupant's own create-folder affordance already covers creating one.
  */
 import type { ReactNode, RefObject } from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import {
   Button, IconFolderClose16, IconPlusOutline16, Menu, Modal, type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
-  WorkspaceId, WorkspaceListState, WorkspaceView,
+  TaskListState, WorkspaceId, WorkspaceListState, WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
 import css from './WorkspacePicker.module.css'
 
 const ADD_WORKSPACE = '::add-workspace'
+const absentTasks = { getSnapshot: () => undefined, subscribe: () => () => {} }
+
+function useAbsentTasks<S>(_selector: (state: TaskListState) => S): S | undefined {
+  useSyncExternalStore(absentTasks.subscribe, absentTasks.getSnapshot, absentTasks.getSnapshot)
+  return undefined
+}
 
 /** Core flow props: the owner supplies popover control and pick semantics. */
 export interface WorkspacePickFlowProps {
@@ -48,6 +54,8 @@ export interface WorkspacePickFlowProps {
   side?: 'bottom' | 'top' | 'right'
   /** Currently active workspace (trailing check in the picker list). */
   selectedId?: WorkspaceId | undefined
+  /** Workspace whose current Task runs in an application-owned worktree. */
+  worktreeWorkspaceId?: WorkspaceId | undefined
 }
 
 /**
@@ -68,6 +76,7 @@ export function WorkspacePickFlow({
   addOnly = false,
   side = 'bottom',
   selectedId,
+  worktreeWorkspaceId,
 }: WorkspacePickFlowProps) {
   const workspaceSnapshot = useWorkspaces(state => state)
   const workspaces = workspaceSnapshot.items
@@ -107,7 +116,9 @@ export function WorkspacePickFlow({
   const items: MenuEntry[] = pinAdd
     ? workspaces.map(workspace => ({
       id: workspace.workspaceId,
-      label: workspace.title,
+      label: workspace.workspaceId === worktreeWorkspaceId
+        ? `${workspace.title} · ${t('worktree')}`
+        : workspace.title,
       icon: <IconFolderClose16 size={16} />,
       disabled: flowBusy,
     }))
@@ -226,6 +237,8 @@ export function WorkspacePicker({
   open,
   anchorRef,
   useWorkspaces,
+  useTasks,
+  useSessions,
   selectedId,
   onPick,
   onClose,
@@ -234,6 +247,11 @@ export function WorkspacePicker({
   renderSlot,
   t,
 }: WorkspacePickerProps) {
+  const currentSessionId = useSessions(state => state.current)
+  const useTaskProjection = useTasks ?? useAbsentTasks
+  const worktreeWorkspaceId = useTaskProjection(state => currentSessionId === undefined
+    ? undefined
+    : state.byId[currentSessionId]?.executionWorkspace?.workspaceId)
   return (
     <WorkspacePickFlow
       t={t}
@@ -244,6 +262,7 @@ export function WorkspacePicker({
       useDirectoryFlow={useDirectoryFlow}
       renderDirectoryFlow={owner => renderSlot('conversation.hero.workspace.directoryFlow', owner)}
       selectedId={selectedId}
+      worktreeWorkspaceId={worktreeWorkspaceId}
       onPick={onPick}
       onClose={onClose}
     />

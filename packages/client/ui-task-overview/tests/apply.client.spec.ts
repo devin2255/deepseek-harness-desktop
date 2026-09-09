@@ -10,7 +10,10 @@ async function bench() {
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
   const sessions = { refresh: vi.fn(async () => {}), open: vi.fn(), list: { getSnapshot: () => ({ state: 'idle', byId: { root: { id: 'root' }, child: { id: 'child', origin: 'subagent', parentId: 'root' } }, subagentsByParent: {} }) }, subagentAddress: vi.fn(), refreshSubagents: vi.fn(async () => {}), openSubagent: vi.fn() }
-  const workspaces = { refresh: vi.fn(async () => {}), startSession: vi.fn(), list: { getSnapshot: () => ({ state: 'idle' }) } }
+  const workspaces = {
+    refresh: vi.fn(async () => {}), startSession: vi.fn(), connectWorkspace: vi.fn(async () => 'isolated'),
+    list: { getSnapshot: () => ({ state: 'idle' }) },
+  }
   const tasks = { refresh: vi.fn(async () => {}), list: { getSnapshot: () => ({ state: 'idle' }) } }
   const layout = { showHome: vi.fn(), showConversation: vi.fn() }
   const hostDescription = { getSnapshot: () => ({}), subscribe: () => () => {} }
@@ -68,10 +71,13 @@ describe('overview composition', () => {
     const fiber = b.ctx.plugin({ inject, apply })
     await fiber.await()
     const face = b.face()
-    face.startTask('ws' as never)
-    face.startTask()
-    expect(b.workspaces.startSession.mock.calls).toEqual([['ws'], [undefined]])
-    expect(b.layout.showConversation).toHaveBeenCalledTimes(2)
+    await face.startTask('ws' as never, 'worktree')
+    await face.startTask('ws' as never, 'direct')
+    await face.startTask(undefined, 'worktree')
+    expect(b.workspaces.connectWorkspace.mock.calls).toEqual([['ws', 'worktree'], ['ws', 'direct']])
+    expect(b.sessions.open.mock.calls.slice(0, 2)).toEqual([['isolated'], ['isolated']])
+    expect(b.workspaces.startSession).toHaveBeenCalledWith()
+    expect(b.layout.showConversation).toHaveBeenCalledTimes(3)
     await face.refresh()
     expect(b.sessions.refresh).toHaveBeenCalledOnce()
     expect(b.workspaces.refresh).toHaveBeenCalledOnce()
@@ -83,6 +89,6 @@ describe('overview composition', () => {
     expect(b.layout.showHome).toHaveBeenCalledOnce()
     await fiber.dispose()
     await face.openTask('root' as never)
-    expect(b.sessions.open).toHaveBeenCalledOnce()
+    expect(b.sessions.open).toHaveBeenCalledTimes(3)
   })
 })

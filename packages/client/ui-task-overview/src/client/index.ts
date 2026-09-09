@@ -19,7 +19,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Private registration callbacks and transport description source. */
 export type OverviewInjected = {
   openTask(id: SessionId): Promise<void>
-  startTask(workspaceId?: WorkspaceId): void
+  startTask(workspaceId: WorkspaceId | undefined, isolation: 'direct' | 'worktree'): Promise<void>
   refresh(): Promise<void>
   hooks: { hostDescription: HostDescriptionSource }
 }
@@ -46,10 +46,17 @@ export function apply(ctx: ClientContext): void {
     && tasks?.list.getSnapshot().state !== 'loading'
   const injected = (): OverviewInjected => ({
     openTask: id => navigation.open(id),
-    startTask: (workspaceId) => {
+    startTask: async (workspaceId, isolation) => {
       if (!ready()) return
       navigation.cancel()
-      ctx.workspaces.startSession(workspaceId)
+      if (workspaceId === undefined) {
+        ctx.workspaces.startSession()
+        ctx.layout.showConversation()
+        return
+      }
+      const sessionId = await ctx.workspaces.connectWorkspace(workspaceId, isolation)
+      if (lifetime.signal.aborted) return
+      ctx.sessions.open(sessionId)
       ctx.layout.showConversation()
     },
     refresh: async () => {

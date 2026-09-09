@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import type {
   SessionId, SessionListState, TaskListState, TaskSnapshot, WorkspaceListState,
 } from '@deepseek-ai/dsh-client-runtime/client'
+import { SessionCreateError } from '@deepseek-ai/dsh-client-runtime/client'
 import { TaskOverview, type TaskOverviewProps } from '../src/client/TaskOverview.tsx'
 import { TasksAction } from '../src/client/TasksAction.tsx'
 import { en } from '../src/client/locales.ts'
@@ -20,9 +21,15 @@ function props(): TaskOverviewProps {
     ['child' as SessionId]: { id: 'child' as SessionId, displayTitle: 'Child task', blank: false, running: true, updatedAt: 1, origin: 'subagent', parentId: 'root' as SessionId, pendingInteraction: 'question' },
     ['grandchild' as SessionId]: { id: 'grandchild' as SessionId, displayTitle: 'Plan child', blank: false, running: false, updatedAt: 1, origin: 'subagent', parentId: 'child' as SessionId, pendingInteraction: 'plan-review' },
   }, phase: 'ready', state: 'idle', error: null, current: undefined, subagentsByParent: {}, currentAddress: undefined, jobsBySession: {} }
-  const workspaces: WorkspaceListState = { items: [{ workspaceId: 'ws' as never, title: 'Project', path: '/code', sessionIds: ['root' as never], createdAt: '0', updatedAt: '0' }], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null, baselinesReady: true, recentWorkspaceId: undefined }
+  const workspaces: WorkspaceListState = { items: [{ workspaceId: 'ws' as never, title: 'Project', path: '/code', sessionIds: ['root' as never], createdAt: '0', updatedAt: '0' }], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null, baselinesReady: true, recentWorkspaceId: 'ws' as never }
   const task: TaskSnapshot = {
     taskId: 'root' as SessionId, workspaceId: 'ws' as never,
+    executionWorkspace: {
+      kind: 'git-worktree', taskId: 'root' as SessionId, workspaceId: 'ws' as never,
+      sourcePath: 'D:\\code', path: 'D:\\app-data\\worktrees\\root', branch: 'dsh/task-000000000000000000000000',
+      baseCommit: 'a'.repeat(40), sourceHead: 'a'.repeat(40), sourceDirty: false,
+      sourceStatusDigest: 'b'.repeat(64), createdAt: 1,
+    },
     definition: { goal: 'Ship desktop', criteria: [
       { id: 'done' as never, text: 'Built', status: 'satisfied', evidence: [{ sessionId: 'root' as SessionId, seq: 1 }] },
       { id: 'next' as never, text: 'Packaged', status: 'pending', evidence: [] },
@@ -43,7 +50,7 @@ function props(): TaskOverviewProps {
     useSessions: selector => selector(list), useWorkspaces: selector => selector(workspaces),
     useTasks: selector => selector(tasks),
     useHostDescription: selector => selector({} as never),
-    openTask: vi.fn(async () => {}), startTask: vi.fn(), refresh: vi.fn(async () => {}), t,
+    openTask: vi.fn(async () => {}), startTask: vi.fn(async () => {}), refresh: vi.fn(async () => {}), t,
   }
 }
 
@@ -65,17 +72,44 @@ describe('TaskOverview', () => {
     await waitFor(() => { expect(p.openTask).toHaveBeenCalledWith('child') })
     expect(view.getByRole('button', { name: 'Root task — Approval: Allow command' })).toBeTruthy()
     expect(view.getByRole('button', { name: 'Plan child — Plan review: Review plan' })).toBeTruthy()
-    expect(view.getByText(/no automatic worktree isolation/i)).toBeTruthy()
+    expect(view.getAllByText('Worktree').length).toBeGreaterThan(0)
+    expect(view.getByTitle('D:\\app-data\\worktrees\\root').textContent).toBe('Worktree')
+    expect(view.getAllByText('Project').length).toBeGreaterThan(0)
   })
-  it('creates tasks with an explicit workspace or the existing setup flow', () => {
+  it('creates tasks with worktree isolation or opens the existing setup flow', async () => {
     const p = props()
     const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'New Task' }))
+    await waitFor(() => { expect(p.startTask).toHaveBeenCalledWith('ws', 'worktree') })
+    const initialWorkspaces = p.useWorkspaces(state => state)
+    p.useWorkspaces = selector => selector({ ...initialWorkspaces, items: [], recentWorkspaceId: undefined })
+    view.rerender(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'New Task' }))
+    await waitFor(() => { expect(p.startTask).toHaveBeenLastCalledWith(undefined, 'worktree') })
+  })
+  it('fails closed and offers explicit isolation recovery with focus management', async () => {
+    const p = props()
+    p.startTask = vi.fn(async (_workspaceId, isolation) => {
+      if (isolation === 'worktree') {
+        throw new SessionCreateError({
+          code: 'workspace-isolation-unavailable', message: 'Git is unavailable for this project.',
+          details: { workspaceId: 'ws', worktreeCode: 'WORKTREE_NOT_GIT' },
+        }, undefined)
+      }
+    })
+    const view = render(<TaskOverview {...p} />)
     fireEvent.change(view.getByLabelText('Workspace for new task'), { target: { value: 'ws' } })
-    fireEvent.click(view.getByRole('button', { name: 'New Task' }))
-    expect(p.startTask).toHaveBeenCalledWith('ws')
-    fireEvent.change(view.getByLabelText('Workspace for new task'), { target: { value: '' } })
-    fireEvent.click(view.getByRole('button', { name: 'New Task' }))
-    expect(p.startTask).toHaveBeenLastCalledWith(undefined)
+    const trigger = view.getByRole('button', { name: 'New Task' })
+    fireEvent.click(trigger)
+    const alert = await view.findByRole('alert')
+    expect(alert.textContent).toContain('Git is unavailable for this project.')
+    expect(alert.textContent).toContain('Direct mode lets the Agent modify files')
+    expect(document.activeElement).toBe(alert)
+    expect(p.startTask).toHaveBeenCalledTimes(1)
+    expect(view.getByRole('button', { name: 'Retry isolation' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Use project directly' }))
+    await waitFor(() => { expect(p.startTask).toHaveBeenLastCalledWith('ws', 'direct') })
+    expect(document.activeElement).toBe(trigger)
   })
   it('keeps failed navigation readable and the overview usable', async () => {
     const p = props()

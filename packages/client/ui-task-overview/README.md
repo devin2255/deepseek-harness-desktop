@@ -8,7 +8,7 @@ In the Desktop profile, the overview consumes the runtime's authoritative Task p
 
 Each attention item has a navigation action for its exact owner Session. Root Sessions use ordinary navigation; subagents use retained catalog addresses, refreshing only the known direct parent's catalog once when necessary. Missing or rejected addresses remain readable errors in the overview. A superseding navigation or plugin disposal prevents a pending lookup from opening a conversation. Navigation never answers a question, grants approval, marks a review ready, or clears an attention item.
 
-New Task accepts an explicit registered Workspace or uses the runtime's existing current/recent-Workspace and directory-setup flow. Tasks run directly in the selected directories, without automatic worktree isolation. Refresh requests the Task, Session, and Workspace mirrors. Initial loading, synchronized emptiness, refresh failures, stale retained rows, and transport disconnection have distinct messages; disconnected or loading data disables Refresh and New Task. Structured Task command errors remain readable.
+New Task accepts an explicit registered Workspace or uses the runtime's current/recent Workspace before entering the existing directory-setup flow. A resolved Workspace requests an application-owned Git worktree by default and opens the new Session only after Host acceptance. An isolation failure remains on the overview with the Host's user-safe diagnostic and the explicit choices **Retry isolation** and **Use project directly**; the client never silently retries in direct mode. Focus enters the recovery panel and returns to New Task after a successful retry. Task rows retain the registered Workspace title and label an assigned execution path as **Worktree**, with the exact path available as hover text. Refresh requests the Task, Session, and Workspace mirrors. Initial loading, synchronized emptiness, refresh failures, stale retained rows, and transport disconnection have distinct messages; disconnected or loading data disables Refresh and New Task. Structured Task command errors remain readable.
 
 ## Model Experience
 
@@ -21,4 +21,4 @@ None; this package neither assembles nor sends model requests.
 ## Known Limitations and Deferred Work
 
 - Active-descendant display uses already known Session summaries; the Task Provider owns descendant membership and attention aggregation.
-- Archived tasks have no overview or unarchive control, and this plugin does not manage isolated worktrees.
+- Archived tasks have no overview or unarchive control; merge, removal, and repair controls for completed worktrees remain deferred.

@@ -341,36 +341,47 @@ git commit -m "feat(client): request isolated task sessions"
 ### Task 6：添加桌面 Task 创建恢复流程
 
 **文件：**
+- 修改：`packages/client/ui-task-overview/README.md`
+- 修改：`packages/client/ui-task-overview/README.zh.md`
 - 修改：`packages/client/ui-task-overview/src/client/TaskOverview.tsx`
 - 修改：`packages/client/ui-task-overview/src/client/TaskOverview.module.css`
 - 修改：`packages/client/ui-task-overview/src/client/locales.ts`
 - 修改：`packages/client/ui-task-overview/tests/overview.client.spec.tsx`
 - 修改：`packages/client/ui-workspace/src/client/WorkspacePicker.tsx`
+- 修改：`packages/client/ui-workspace/README.md`
+- 修改：`packages/client/ui-workspace/README.zh.md`
 - 修改：`packages/client/ui-workspace/src/client/locales.ts`
 - 修改：`packages/client/ui-workspace/tests/workspace-picker.client.spec.tsx`
 - 修改：`packages/client/connection/src/client/fixture.ts`
+- 修改：`packages/client/connection/tests/fixture.client.spec.ts`
+- 修改：`packages/client/ui-conversation/README.md`
+- 修改：`packages/client/ui-conversation/README.zh.md`
+- 修改：`packages/client/ui-conversation/src/client/locales.ts`
+- 修改：`packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css`
+- 修改：`packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx`
+- 修改：`packages/client/ui-conversation/tests/skeleton.client.spec.tsx`
 
-- [ ] **步骤 1：编写失败的组件测试**
+- [x] **步骤 1：编写失败的组件测试**
 
 Tasks 空状态和 New Task 操作选择 Workspace 并请求 `worktree`。Host 返回 `workspace-isolation-unavailable` 时，显示准确安全选项“重试隔离”和“直接使用项目”；只有用户选择后者才以直接模式重试。Task 卡片和标题把分配路径标为 `Worktree`，并保留原 Workspace 标题。
 
-- [ ] **步骤 2：运行组件测试并确认 RED**
+- [x] **步骤 2：运行组件测试并确认 RED**
 
 运行：`pnpm exec vitest run packages/client/ui-task-overview/tests packages/client/ui-workspace/tests/workspace-picker.client.spec.tsx`
 
 预期：失败，因为隔离操作和恢复状态尚不存在。
 
-- [ ] **步骤 3：实现可见流程**
+- [x] **步骤 3：实现可见流程**
 
 Git 诊断只使用 Host 提供的用户安全文本。UI 只发送 Workspace id 和显式模式；绝不获得通用路径或进程 API。键盘焦点移入错误面板，并在成功重试后回到触发操作。
 
-- [ ] **步骤 4：运行组件测试并确认 GREEN**
+- [x] **步骤 4：运行组件测试并确认 GREEN**
 
-运行步骤 2 的命令。
+运行步骤 2 的命令，并加上持有 Worktree 徽标与确定性隔离失败的会话标题栏和 fixture 测试套件。
 
 预期：通过。
 
-- [ ] **步骤 5：提交桌面流程**
+- [x] **步骤 5：提交桌面流程**
 
 ```powershell
 git add packages/client/ui-task-overview packages/client/ui-workspace packages/client/connection

@@ -1153,7 +1153,22 @@ describe('FixtureApiClient (protocol-level fake carrier)', () => {
       && envelope.payload.sessionId === sid('fx-child-waiting'))).toBe(true)
   })
 
-  it('maps attach-failure and dropped-response query scenarios', async () => {
+  it('maps isolation, attach-failure, and dropped-response query scenarios', async () => {
+    vi.stubGlobal('location', { search: '?fixture&fixtureIsolation=fail' })
+    const isolated = new FixtureApiClient()
+    const isolationFailure = await isolated.sessions.create({
+      workspaceId: 'fx-ws-fixture' as WorkspaceId,
+      isolation: 'worktree',
+    })
+    expect(isolationFailure.result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'workspace-isolation-unavailable',
+        message: 'fixture could not create an isolated Git worktree',
+        details: { workspaceId: 'fx-ws-fixture', worktreeCode: 'WORKTREE_GIT_FAILED' },
+      },
+    })
+
     vi.stubGlobal('location', { search: '?fixture&fixtureAttach=fail' })
     const partial = new FixtureApiClient()
     const partialResult = await partial.sessions.create({

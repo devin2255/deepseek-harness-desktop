@@ -1436,6 +1436,8 @@ export interface FixtureOptions {
   rejectPrompt?: boolean
   /** Publish the Session but fail its Workspace account write. */
   failWorkspaceAttach?: boolean
+  /** Reject explicit worktree isolation before publishing a Session. */
+  failWorktreeIsolation?: boolean
   /** Publish and frame the Session, then throw instead of returning create. */
   dropSessionCreateResponse?: boolean
   /** Order of the two successful create frames. */
@@ -2238,6 +2240,16 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             code: 'workspace-not-found',
             message: `no workspace ${request.payload.workspaceId}`,
             details: { workspaceId: request.payload.workspaceId },
+          })
+        }
+        if (request.payload.isolation === 'worktree' && options.failWorktreeIsolation) {
+          return err(request, {
+            code: 'workspace-isolation-unavailable',
+            message: 'fixture could not create an isolated Git worktree',
+            details: {
+              ...(request.payload.workspaceId === undefined ? {} : { workspaceId: request.payload.workspaceId }),
+              worktreeCode: 'WORKTREE_GIT_FAILED',
+            },
           })
         }
         const cwd = workspace?.path ?? request.payload.cwd ?? '/tmp/fixture'
@@ -3254,6 +3266,7 @@ function fixtureOptionsFromLocation(): FixtureOptions {
     taskOverviewRoster: query.get('fixture') === 'task-overview',
     rejectPrompt: query.get('fixturePrompt') === 'reject',
     failWorkspaceAttach: query.get('fixtureAttach') === 'fail',
+    failWorktreeIsolation: query.get('fixtureIsolation') === 'fail',
     dropSessionCreateResponse: query.get('fixtureSessionCreate') === 'drop-response',
     createFrameOrder: query.get('fixtureFrames') === 'workspace-first' ? 'workspace-first' : 'session-first',
   }
