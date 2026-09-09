@@ -24,6 +24,9 @@
       "path": "../../subagent/subagent"
     },
     {
+      "path": "../../task/task"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

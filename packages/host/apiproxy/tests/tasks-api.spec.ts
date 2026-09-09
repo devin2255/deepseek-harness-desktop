@@ -1,15 +1,16 @@
 /** Host Task RPC forwarding, validation, error mapping, and change delivery. */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import {
   TaskCriterionId, TaskError, TaskRiskId, TaskService,
 } from '@deepseek-ai/dsh-task'
 import type {
-  DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListChange,
+  DefineTaskRequest, LiveTaskFact, RecordTaskRiskRequest, ReviewTaskRequest, TaskListChange,
   TaskListSnapshot, TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task'
 import { createApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
@@ -36,6 +37,8 @@ class FakeTasks extends TaskService {
   readonly listeners = new Set<(change: TaskListChange) => void>()
   nextError?: Error
   last?: readonly [string, SessionId, unknown]
+  live?: { generation: number; facts: readonly LiveTaskFact[] }
+  invalidated?: number
 
   snapshot(): TaskListSnapshot {
     return { generation: 4, tasks: [row] }
@@ -44,6 +47,14 @@ class FakeTasks extends TaskService {
   onChanged(listener: (change: TaskListChange) => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
+  }
+
+  replaceLiveGeneration(generation: number, facts: readonly LiveTaskFact[]): void {
+    this.live = { generation, facts }
+  }
+
+  invalidateLiveGeneration(generation: number): void {
+    this.invalidated = generation
   }
 
   emit(change: TaskListChange): void {
@@ -91,6 +102,35 @@ async function harness(): Promise<{ ctx: Context; tasks: FakeTasks; api: ReturnT
 }
 
 describe('Task RPC', () => {
+  it('publishes the host Agent registry as the complete live Task baseline', async () => {
+    const { ctx, tasks } = await harness()
+    let clock = 100
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock++)
+    const session = ctx.sessions.create(rootId)
+    const dispose = ctx.agents.register({ id: rootId, session, status: 'running', ctx } as Agent)
+
+    expect(tasks.live).toMatchObject({
+      generation: 4,
+      facts: [{
+        kind: 'activity',
+        taskId: rootId,
+        ownerSessionId: rootId,
+        sourceId: `agent:${rootId}`,
+        state: 'running',
+      }],
+    })
+    const fact = tasks.live?.facts[0]
+    expect(fact?.kind === 'activity' ? typeof fact.createdAt : undefined).toBe('number')
+    const createdAt = fact?.kind === 'activity' ? fact.createdAt : undefined
+
+    ctx.sessions.create(SessionId('unrelated'))
+    expect(tasks.live?.facts[0]).toMatchObject({ kind: 'activity', createdAt })
+
+    dispose()
+    expect(tasks.live).toEqual({ generation: 4, facts: [] })
+    now.mockRestore()
+  })
+
   it('returns the service baseline and forwards all normalized mutations', async () => {
     const { api, tasks } = await harness()
     await expect(api.tasks.list(request({}))).resolves.toMatchObject({ result: { ok: true, value: { generation: 4, tasks: [row] } } })

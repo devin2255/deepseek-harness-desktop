@@ -12,7 +12,7 @@ it('keeps a root draft while routing known descendant attention through the desk
   mountAssembledApp({ taskOverview: true })
   const overview = await screen.findByRole('main', { name: 'Tasks' }, { timeout: 10_000 })
   await within(overview).findByRole('button', { name: 'Fixture 历史会话' })
-  const childAttention = await within(overview).findByRole('button', { name: 'fixture — Question' })
+  const childAttention = await within(overview).findByRole('button', { name: /^fixture — Question:/ })
   expect(within(overview).getAllByRole('heading').map(node => node.textContent)).toEqual(['Tasks', 'Needs You', 'Running', 'Other'])
   expect(overview.textContent).toContain('no automatic worktree isolation')
   const projection = [...overview.querySelectorAll('section')].map(section => ({

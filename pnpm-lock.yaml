@@ -5951,6 +5951,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+      '@deepseek-ai/dsh-task':
+        specifier: workspace:^
+        version: link:../../task/task
 
   packages/sdk/protocol:
     devDependencies:
@@ -5969,6 +5972,9 @@ importers:
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:^
         version: link:../../subagent/subagent
+      '@deepseek-ai/dsh-task':
+        specifier: workspace:^
+        version: link:../../task/task
 
   packages/sdk/server:
     dependencies:
@@ -6012,6 +6018,9 @@ importers:
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:^
         version: link:../../subagent/subagent
+      '@deepseek-ai/dsh-task':
+        specifier: workspace:^
+        version: link:../../task/task
 
   packages/session-query/session-log-export:
     devDependencies:

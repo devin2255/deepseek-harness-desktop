@@ -21,6 +21,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../task/task"
+    },
+    {
       "path": "../protocol"
     },
     {

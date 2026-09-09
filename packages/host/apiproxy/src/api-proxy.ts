@@ -61,8 +61,8 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves the background-job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
-import { TaskError } from '@deepseek-ai/dsh-task'
-import type { TaskErrorCode } from '@deepseek-ai/dsh-task'
+import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
+import type { LiveTaskFact, TaskErrorCode } from '@deepseek-ai/dsh-task'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -676,6 +676,7 @@ function requestedFrame(pending: PendingApproval): RpcRequest<MuxFrame> {
 interface PendingQuestion {
   rpcId: RpcId
   sessionId: SessionId
+  createdAt: number
   questions: AskUserQuestionItem[]
   resolve: (answer: AskUserQuestionAnswer) => void
   reject: (error: UserQuestionError) => void
@@ -1103,6 +1104,82 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const muxQueues = new Set<FrameQueue<RpcRequest<MuxFrame>>>()
   const imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
 
+  const taskServiceAtBoot = ctx.get('tasks')
+  const taskLiveGeneration = taskServiceAtBoot?.snapshot().generation ?? 0
+  const taskActivityStartedAt = new Map<SessionId, number>()
+  if (taskServiceAtBoot !== undefined) {
+    for (const agent of ctx.get('agents')?.list() ?? []) {
+      if (agent.status === 'running') taskActivityStartedAt.set(agent.id, Date.now())
+    }
+  }
+
+  /** Publish one complete live baseline from the host-owned Agent and question registries. */
+  function publishTaskLiveFacts(): void {
+    const tasks = ctx.get('tasks')
+    if (tasks === undefined) return
+    const snapshot = tasks.snapshot()
+    const rootBySession = new Map<SessionId, SessionId>()
+    for (const task of snapshot.tasks) {
+      rootBySession.set(task.taskId, task.taskId)
+      for (const descendant of task.descendantSessionIds) rootBySession.set(descendant, task.taskId)
+    }
+    const facts: LiveTaskFact[] = []
+    for (const agent of ctx.get('agents')?.list() ?? []) {
+      if (agent.status !== 'running') continue
+      const taskId = rootBySession.get(agent.id)
+      if (taskId === undefined) continue
+      let createdAt = taskActivityStartedAt.get(agent.id)
+      if (createdAt === undefined) {
+        createdAt = Date.now()
+        taskActivityStartedAt.set(agent.id, createdAt)
+      }
+      facts.push({
+        kind: 'activity', taskId, ownerSessionId: agent.id,
+        sourceId: `agent:${agent.id}`, state: 'running', createdAt,
+      })
+    }
+    for (const pending of pendingQuestions.values()) {
+      const taskId = rootBySession.get(pending.sessionId)
+      if (taskId === undefined) continue
+      const sourceId = String(pending.rpcId)
+      facts.push({
+        kind: 'attention',
+        item: {
+          id: AttentionItemId(`${pending.sessionId}:question:${sourceId}`),
+          taskId,
+          ownerSessionId: pending.sessionId,
+          kind: 'question',
+          severity: 'warning',
+          summary: pending.questions.map(question => question.question).join(' · '),
+          createdAt: pending.createdAt,
+          sourceId,
+          actionable: true,
+        },
+      })
+    }
+    tasks.replaceLiveGeneration(taskLiveGeneration, facts)
+  }
+
+  ctx.on('agent/created', ({ agent }) => {
+    if (agent.status === 'running') taskActivityStartedAt.set(agent.id, Date.now())
+    publishTaskLiveFacts()
+  })
+  ctx.on('agent/disposed', ({ agent }) => {
+    taskActivityStartedAt.delete(agent.id)
+    publishTaskLiveFacts()
+  })
+  ctx.on('agent/status', ({ agent, status }) => {
+    if (status === 'running') {
+      if (!taskActivityStartedAt.has(agent.id)) taskActivityStartedAt.set(agent.id, Date.now())
+    } else {
+      taskActivityStartedAt.delete(agent.id)
+    }
+    publishTaskLiveFacts()
+  })
+  ctx.on('session/created', publishTaskLiveFacts)
+  ctx.on('session/disposed', publishTaskLiveFacts)
+  publishTaskLiveFacts()
+
   /** Serialize image admission with model selection for one agent. */
   function serializeImageAdmission<T>(agent: Agent, operation: () => Promise<T>): Promise<T> {
     const result = (imageAdmissionChains.get(agent) ?? Promise.resolve()).then(operation)
@@ -1335,6 +1412,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       type: 'question/resolved', sessionId: pending.sessionId,
       questionRpcId: pending.rpcId, outcome,
     })
+    publishTaskLiveFacts()
   }
 
   const disposeProvider = ctx.userQuestions.registerProvider({
@@ -1347,7 +1425,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       return new Promise<AskUserQuestionAnswer>((resolve, reject) => {
         const rpcId = RpcId(randomUUID())
         const pending: PendingQuestion = {
-          rpcId, sessionId, questions: request.questions, resolve, reject,
+          rpcId, sessionId, createdAt: Date.now(), questions: request.questions, resolve, reject,
           ...(request.signal === undefined ? {} : { signal: request.signal }),
         }
         const onAbort = (): void => {
@@ -1357,6 +1435,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
         pending.onAbort = onAbort
         pendingQuestions.set(rpcId, pending)
+        publishTaskLiveFacts()
         request.signal?.addEventListener('abort', onAbort, { once: true })
         const envelope: RpcRequest<MuxFrame> = {
           rpcId,

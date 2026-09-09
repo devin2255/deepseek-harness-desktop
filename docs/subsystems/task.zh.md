@@ -49,6 +49,19 @@ abstract snapshot(): TaskListSnapshot
 abstract onChanged(listener: (change: TaskListChange) => void): () => void
 
 /**
+ * Replace the complete process-local activity and attention baseline.
+ * @param generation - monotonically increasing live-source generation.
+ * @param facts - complete detached fact set for that generation.
+ */
+abstract replaceLiveGeneration(generation: number, facts: readonly LiveTaskFact[]): void
+
+/**
+ * Retain the last live baseline but mark it disconnected.
+ * @param generation - exact generation whose source disconnected.
+ */
+abstract invalidateLiveGeneration(generation: number): void
+
+/**
  * Define or replace one root Task.
  * @param sessionId - root Session identity.
  * @param request - normalized definition input and expected next sequence.
@@ -83,5 +96,5 @@ abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskS
 
 Types: [SessionId](core.md)
 
-Source: [`packages/task/task/src/service.ts:56`](../../packages/task/task/src/service.ts)
+Source: [`packages/task/task/src/service.ts:57`](../../packages/task/task/src/service.ts)
 <!-- END GENERATED cordis-surface -->

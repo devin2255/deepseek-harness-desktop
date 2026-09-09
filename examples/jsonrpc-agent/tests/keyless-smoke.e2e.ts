@@ -154,9 +154,39 @@ describe('jsonrpc-agent keyless smoke', () => {
         'write',
       ])
 
-      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'shutdown' })}\n`)
-      const shutdown = await waitForLine(lines, value => value.id === 3, () => stderr)
-      expect(shutdown).toMatchObject({ jsonrpc: '2.0', id: 3, result: {} })
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'task/list' })}\n`)
+      const baseline = await waitForLine(lines, value => value.id === 3, () => stderr)
+      expect(baseline).toMatchObject({
+        jsonrpc: '2.0',
+        id: 3,
+        result: { tasks: [{ taskId: 'main' }] },
+      })
+      const task = (baseline.result as { tasks: Array<{ asOfSeq: number }> }).tasks[0]
+      if (task === undefined) throw new Error('task/list omitted the prompted root Session')
+      child.stdin.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'task/define',
+        params: {
+          sessionId: 'main',
+          goal: 'Ship the desktop',
+          criteria: [{ id: 'installer', text: 'Installer works' }],
+          expectedSeq: task.asOfSeq,
+        },
+      })}\n`)
+      const defined = await waitForLine(lines, value => value.id === 4, () => stderr)
+      expect(defined).toMatchObject({
+        jsonrpc: '2.0',
+        id: 4,
+        result: {
+          taskId: 'main',
+          definition: { goal: 'Ship the desktop', criteria: [{ id: 'installer', status: 'pending' }] },
+        },
+      })
+
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'shutdown' })}\n`)
+      const shutdown = await waitForLine(lines, value => value.id === 5, () => stderr)
+      expect(shutdown).toMatchObject({ jsonrpc: '2.0', id: 5, result: {} })
       const exit = await child
       expect(exit.exitCode, `signal=${String(exit.signal)}; stderr=${stderr}`).toBe(0)
       const sessionsRoot = join(root, '.sessions')

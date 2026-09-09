@@ -32,7 +32,7 @@ English | [中文](2026-09-07-task-projection-attention.zh.md)
 - Modify: `tsconfig.base.json`
 - Modify: `tsconfig.host.json`
 
-- [ ] **Step 1: Write the failing type and event test**
+- [x] **Step 1: Write the failing type and event test**
 
 ```text
 import { describe, expect, expectTypeOf, it } from 'vitest'
@@ -49,13 +49,13 @@ describe('task public vocabulary', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run: `pnpm exec vitest run packages/task/task/tests/types.spec.ts`
 
 Expected: FAIL because `@deepseek-ai/dsh-task` does not exist.
 
-- [ ] **Step 3: Add the package and public values**
+- [x] **Step 3: Add the package and public values**
 
 `types.ts` must define and export the following complete discriminants and records. Every collection is readonly; every identifier uses `Branded<B>` and has the matching runtime constructor from `@deepseek-ai/dsh-brand`.
 
@@ -120,11 +120,11 @@ export interface TaskSnapshot {
 
 `index.ts` declares `task/defined`, `task/criterion-updated`, `task/risk-recorded`, and `task/review-decided` on `SessionEventMap`; each event carries the complete post-change domain record rather than a delta. `invariant.ts` registers the package's owned stream invariants.
 
-- [ ] **Step 4: Register the package in repository aggregates and documentation**
+- [x] **Step 4: Register the package in repository aggregates and documentation**
 
 Add the `task/` group to both package hierarchy tables and both source-resolution wildcard lists, add `packages/task/task` to `tsconfig.host.json`, and create matching package READMEs with the no-direct-model-effect statement and explicit deferred cross-session Provider limitation.
 
-- [ ] **Step 5: Verify GREEN and package constraints**
+- [x] **Step 5: Verify GREEN and package constraints**
 
 Run: `pnpm install && pnpm exec vitest run packages/task/task/tests/types.spec.ts && pnpm run constraints`
 
@@ -287,17 +287,17 @@ git commit -m "feat(task): aggregate task activity and attention"
 - Modify: `packages/host/apiproxy/src/api-proxy.ts`
 - Modify: `packages/host/apiproxy/package.json`
 
-- [ ] **Step 1: Write failing schema and dispatch tests**
+- [x] **Step 1: Write failing schema and dispatch tests**
 
 Cover `task.list`, `task.define`, `task.updateCriterion`, `task.recordRisk`, and `task.review`; malformed brands, missing roots, subagent targets, stale expected sequences, unavailable service, and whole-row change frames.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `pnpm exec vitest run packages/host/apiproxy/tests -t "task"`
 
 Expected: FAIL because Task RPC methods and schemas are absent.
 
-- [ ] **Step 3: Add typed RPC methods and schemas**
+- [x] **Step 3: Add typed RPC methods and schemas**
 
 Add these entries to `RpcMethodMap` and derive request/value types from the service methods:
 
@@ -311,17 +311,17 @@ Add these entries to `RpcMethodMap` and derive request/value types from the serv
 
 Schemas reject unknown fields, blank ids, negative generations, negative expected sequences, duplicate criterion ids, invalid evidence event sequences, and invalid discriminants. The API delegates root and evidence resolution to the Task service and maps `TaskError.code` to stable lowercase RPC codes.
 
-- [ ] **Step 4: Publish whole-row changes**
+- [x] **Step 4: Publish whole-row changes**
 
 The API proxy sends a `task/changed` downstream frame containing `{ generation, upserts, removed }`. Its provider subscription is an effect; disconnect removes it before the task service can publish another frame.
 
-- [ ] **Step 5: Verify GREEN and affected Host tests**
+- [x] **Step 5: Verify GREEN and affected Host tests**
 
 Run: `pnpm exec vitest run packages/host/apiproxy/tests -t "task|blank"`
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/host/apiproxy
@@ -338,7 +338,7 @@ git commit -m "feat(api): expose task state and commands"
 - Modify: `packages/client/runtime/README.md`
 - Modify: `packages/client/runtime/README.zh.md`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 Cover pending, loading, ready, refresh error with retained rows, disconnect staleness, stale success, stale failure, overlapping generations, whole-row upsert, removal, and successful recovery.
 
@@ -355,27 +355,27 @@ it('cannot publish an old baseline after reconnect', async () => {
 })
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `pnpm exec vitest run packages/client/runtime/tests -t "task"`
 
 Expected: FAIL because the Task manager and contract do not exist.
 
-- [ ] **Step 3: Implement the manager and public store**
+- [x] **Step 3: Implement the manager and public store**
 
 `TaskListState` contains `phase`, `state`, `error`, `freshness`, `generation`, `ids`, and `byId`. Every request captures the manager generation. Disconnect invalidates old ownership before publishing stale retained rows. Only the current request may change loading/error state in `then`, `catch`, or `finally`.
 
-- [ ] **Step 4: Wire downstream frames and commands**
+- [x] **Step 4: Wire downstream frames and commands**
 
 The shared client frame dispatcher passes `task/changed` to the manager only when its generation equals the current baseline. Public command methods call the typed API and refresh only after successful acknowledgment; errors remain structured.
 
-- [ ] **Step 5: Verify GREEN and client typecheck**
+- [x] **Step 5: Verify GREEN and client typecheck**
 
 Run: `pnpm exec vitest run packages/client/runtime/tests -t "task" && pnpm -s run typecheck:client`
 
 Expected: Task store tests and client typecheck pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/client/runtime
@@ -397,7 +397,7 @@ git commit -m "feat(client): project task list state"
 - Modify: `packages/bundle/desktop-app/cordis.patch.yml`
 - Modify: `packages/bundle/desktop-app/package.json`
 
-- [ ] **Step 1: Replace selector fixtures with Task snapshots and verify RED**
+- [x] **Step 1: Replace selector fixtures with Task snapshots and verify RED**
 
 Tests must prove all six statuses, criteria progress, risk count, every attention owner, stale/error/loading distinctions, task command failures, and ordinary Web fallback labeling.
 
@@ -405,25 +405,25 @@ Run: `pnpm exec vitest run packages/client/ui-task-overview/tests`
 
 Expected: FAIL because the component still consumes Session-derived rows.
 
-- [ ] **Step 2: Render the Task store**
+- [x] **Step 2: Render the Task store**
 
 The desktop profile requires `useTasks`; rows render the task goal, workspace, status, active descendants, criterion progress, unresolved risks, and attention actions. Navigation uses `ownerSessionId` plus the existing authoritative subagent-address resolver. The component never answers, approves, marks ready, or clears an item during navigation.
 
-- [ ] **Step 3: Preserve the explicit Web fallback**
+- [x] **Step 3: Preserve the explicit Web fallback**
 
 When `useTasks` is unavailable outside the desktop profile, continue to call the existing pure Session selector and show the localized capability label `Session activity only` / `仅显示会话活动`. Do not report criteria, risks, review readiness, or current freshness on fallback rows.
 
-- [ ] **Step 4: Require the Provider in the desktop bundle**
+- [x] **Step 4: Require the Provider in the desktop bundle**
 
 Add Task service and Provider dependencies to the bundle manifest and mount them before Host API and the task overview. Extend the bundle invariant to fail when either service or UI contribution is absent.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run: `pnpm exec vitest run packages/client/ui-task-overview/tests packages/bundle/desktop-app/tests && pnpm -s run typecheck:client`
 
 Expected: overview, bundle, and client typecheck pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/client/ui-task-overview packages/bundle/desktop-app pnpm-lock.yaml
@@ -450,11 +450,11 @@ git commit -m "feat(desktop): show durable task readiness and attention"
 - Modify: `docs/superpowers/plans/2026-09-07-task-projection-attention.md`
 - Modify: `docs/superpowers/plans/2026-09-07-task-projection-attention.zh.md`
 
-- [ ] **Step 1: Write failing SDK and assembled tests**
+- [x] **Step 1: Write failing SDK and assembled tests**
 
 The SDK tests assert Task list and command request/response projection. The keyless scenario exercises two roots, descendant attention, criterion update, failure, ready review, and disconnected retained rows. Electron acceptance reloads the Renderer and verifies unchanged Task and attention ids.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run the three commands separately:
 
@@ -466,19 +466,19 @@ DSH_SNAPSHOT=replay pnpm exec vitest run --config vitest.web.config.ts apps/web/
 
 Expected: FAIL at the first missing Task projection in each public loop.
 
-- [ ] **Step 3: Project the Task API through both SDKs**
+- [x] **Step 3: Project the Task API through both SDKs**
 
 Add typed Task methods without adding SDK-owned state. Python values preserve the wire discriminants and identifiers exactly; malformed responses fail through the existing protocol error path.
 
-- [ ] **Step 4: Complete keyless and Electron acceptance**
+- [x] **Step 4: Complete keyless and Electron acceptance**
 
 Use the real desktop composition and replace only the nondeterministic model provider. Assertions target visible status, criteria, risks, and action routing; they do not inspect CSS classes or private stores. The Electron test uses isolated app data and disposable workspaces.
 
-- [ ] **Step 5: Update decision state and plan checkboxes**
+- [x] **Step 5: Update decision state and plan checkboxes**
 
 Record the shipped Task projection and attention behavior in both Mission Control note languages while leaving worktrees, review workspace, tray, Studio, signing, and updates as follow-on slices. Mark every completed plan step `[x]` and re-record both bilingual pairs.
 
-- [ ] **Step 6: Run final relevant verification**
+- [x] **Step 6: Run final relevant verification**
 
 Run:
 
@@ -498,7 +498,7 @@ git diff --check
 
 Expected: every listed command passes; platform skips remain explicit and no new broad-suite failure is hidden.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```sh
 git add packages/sdk/client python/sdk apps/web examples apps/desktop .agents/notes/proposed/feature docs/superpowers/plans

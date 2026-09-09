@@ -9,7 +9,66 @@ from pathlib import Path
 
 import pytest
 
-from deepseek_harness import DeepSeekHarness, HarnessClient, HarnessConfig, Notification, SdkProtocolError
+from deepseek_harness import (
+    DeepSeekHarness,
+    DefineTaskCriterion,
+    HarnessClient,
+    HarnessConfig,
+    Notification,
+    SdkProtocolError,
+    TaskCriterion,
+    TaskRisk,
+)
+
+
+def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+    calls: list[tuple[str, object]] = []
+    row = {
+        "taskId": "root",
+        "descendantSessionIds": ["child"],
+        "status": "reviewing",
+        "freshness": "live",
+        "attention": [],
+        "risks": [],
+        "updatedAt": 1,
+        "asOfSeq": 0,
+    }
+
+    def request(method: str, params: dict[str, object], *, response_model: type, **_kwargs: object):
+        calls.append((method, params))
+        value = {"generation": 7, "tasks": [row]} if method == "task/list" else {
+            **row,
+            "definition": {"goal": "Ship", "criteria": []},
+            "risks": [params["risk"]] if method == "task/recordRisk" else [],
+            "reviewDecision": params["decision"] if method == "task/review" else None,
+        }
+        return response_model.model_validate(value)
+
+    monkeypatch.setattr(client, "request", request)
+    assert client.list_tasks().generation == 7
+    assert client.define_task(
+        "root", goal="Ship", criteria=[DefineTaskCriterion(text="Works")], expected_seq=0
+    ).definition.goal == "Ship"
+    criterion = TaskCriterion(id="criterion", text="Works", status="waived", evidence=[])
+    client.update_task_criterion("root", criterion=criterion, expected_seq=1)
+    risk = TaskRisk(id="risk", severity="high", summary="Signing")
+    assert client.record_task_risk("root", risk=risk, expected_seq=2).risks[0].summary == "Signing"
+    assert client.review_task("root", decision="ready", expected_seq=3).review_decision == "ready"
+    assert [method for method, _params in calls] == [
+        "task/list", "task/define", "task/updateCriterion", "task/recordRisk", "task/review"
+    ]
+
+
+def test_malformed_task_projection_uses_sdk_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": "bad", "tasks": [{}]})
+
+    monkeypatch.setattr(client, "request", request)
+    with pytest.raises(SdkProtocolError, match="malformed Task response"):
+        client.list_tasks()
 
 
 def test_high_level_sdk_runs_turn_and_collects_final_response(tmp_path: Path) -> None:
@@ -922,7 +981,7 @@ def _install_fake_bundled_runtime(
 
     Returns the fake bundled default config path.
     """
-    runtime = tmp_path / "dsh-jsonrpc-agent"
+    runtime = tmp_path / "dsh-jsonrpc-agent.py"
     runtime.write_text(
         """#!/usr/bin/env python3
 import json
@@ -947,7 +1006,7 @@ for line in sys.stdin:
     (module_dir / "__init__.py").write_text(
         f"""
 def resolve_bundled_launch_args(mode=None):
-    return ({str(runtime)!r},)
+    return ({sys.executable!r}, {str(runtime)!r})
 
 
 def bundled_default_config_path():

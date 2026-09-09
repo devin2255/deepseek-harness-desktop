@@ -2,19 +2,19 @@
   {
     "group": "Needs You",
     "tasks": [
-      "Fixture 历史会话fixtureNeeds You1 known running subagent(s)fixture — Question"
+      "Fixture 历史会话fixtureNeeds attention1 known running subagent(s)Criteria 0/00 unresolved risk(s)Livefixture — Question: 你现在更想招哪类 Agent/Harness 候选人？"
     ]
   },
   {
     "group": "Running",
     "tasks": [
-      "fixturefixtureRunning0 known running subagent(s)"
+      "fixturefixtureRunning0 known running subagent(s)Criteria 0/00 unresolved risk(s)Live"
     ]
   },
   {
     "group": "Other",
     "tasks": [
-      "fixturefixtureIdle0 known running subagent(s)"
+      "fixturefixtureSettled0 known running subagent(s)Criteria 0/00 unresolved risk(s)Live"
     ]
   }
 ]

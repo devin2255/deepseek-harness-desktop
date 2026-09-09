@@ -11,6 +11,19 @@ const SENSITIVE_ENVIRONMENT_KEY = /KEY|SECRET|TOKEN|PASSWORD/iu
 const DESCENDANT_PARENT_PROMPT = 'desktop descendant routing parent'
 const DESCENDANT_CHILD_PROMPT = 'desktop descendant routing child'
 const DESCENDANT_QUESTION = 'Should the desktop open this child Agent?'
+const DESCENDANT_QUESTION_NAME = /Should the desktop open this child Agent\?/u
+
+interface TaskIdentitySnapshot {
+  readonly tasks: readonly {
+    readonly taskId: string
+    readonly status: string
+    readonly attention: readonly {
+      readonly id: string
+      readonly ownerSessionId: string
+      readonly summary: string
+    }[]
+  }[]
+}
 
 let application: ElectronApplication | undefined
 let provider: Server | undefined
@@ -187,6 +200,16 @@ describe('desktop Electron acceptance', () => {
       pageRpc(page, 'session.prompt', { sessionId: firstSession.sessionId, mode: 'queue', content: [{ type: 'text', text: 'run task alpha' }] }),
       pageRpc(page, 'session.prompt', { sessionId: secondSession.sessionId, mode: 'queue', content: [{ type: 'text', text: 'run task beta' }] }),
     ])
+    await expect.poll(async () => {
+      const projection = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+      return projection.tasks
+        .filter(task => task.taskId === firstSession.sessionId || task.taskId === secondSession.sessionId)
+        .map(task => ({ taskId: task.taskId, status: task.status }))
+        .sort((left, right) => left.taskId.localeCompare(right.taskId))
+    }, { timeout: 15_000 }).toEqual([
+      { taskId: firstSession.sessionId, status: 'running' },
+      { taskId: secondSession.sessionId, status: 'running' },
+    ].sort((left, right) => left.taskId.localeCompare(right.taskId)))
     await expectBothWorkspacesRunning(overview)
     await overview.getByText('workspace-a').locator('xpath=ancestor::li').getByRole('button').first().click()
     await overview.waitFor({ state: 'hidden' })
@@ -231,10 +254,27 @@ describe('desktop Electron acceptance', () => {
     await expect.poll(() => observedChildPrompt, { timeout: 10_000 }).toBe(true)
     const needsYou = overview.getByRole('heading', { name: /^(Needs You|需要你处理)$/u }).locator('..')
     await expect.poll(() => needsYou.innerText(), { timeout: 20_000 }).toContain(DESCENDANT_CHILD_PROMPT)
-    const childQuestion = needsYou.getByText('workspace-c').locator('xpath=ancestor::li')
-      .getByRole('button', { name: /(Question|问题)$/u })
+    const childQuestion = needsYou.getByRole('button', { name: DESCENDANT_QUESTION_NAME })
     await childQuestion.waitFor({ state: 'visible', timeout: 20_000 })
-    await childQuestion.click()
+    const beforeReload = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+    const beforeTask = beforeReload.tasks.find(task => task.taskId === thirdSession.sessionId)
+    const beforeAttention = beforeTask?.attention.find(item => item.summary === DESCENDANT_QUESTION)
+    expect(beforeTask).toBeDefined()
+    expect(beforeAttention).toBeDefined()
+
+    await page.reload({ waitUntil: 'load' })
+    await overview.waitFor({ state: 'visible', timeout: 15_000 })
+    const afterReload = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+    const afterTask = afterReload.tasks.find(task => task.taskId === thirdSession.sessionId)
+    const afterAttention = afterTask?.attention.find(item => item.summary === DESCENDANT_QUESTION)
+    expect(afterTask?.taskId).toBe(beforeTask?.taskId)
+    expect(afterAttention?.id).toBe(beforeAttention?.id)
+    expect(afterAttention?.ownerSessionId).toBe(beforeAttention?.ownerSessionId)
+
+    const reloadedNeedsYou = overview.getByRole('heading', { name: /^(Needs You|需要你处理)$/u }).locator('..')
+    const reloadedChildQuestion = reloadedNeedsYou.getByRole('button', { name: DESCENDANT_QUESTION_NAME })
+    await reloadedChildQuestion.waitFor({ state: 'visible', timeout: 20_000 })
+    await reloadedChildQuestion.click()
     await overview.waitFor({ state: 'hidden' })
     await page.getByText(DESCENDANT_QUESTION, { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
 

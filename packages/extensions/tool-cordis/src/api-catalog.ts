@@ -1760,6 +1760,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a disposer that removes this exact subscription.',
       },
       {
+        signature: 'abstract replaceLiveGeneration(generation: number, facts: readonly LiveTaskFact[]): void',
+        description: 'Replace the complete process-local activity and attention baseline.',
+        parameters: [{ name: 'generation', description: 'monotonically increasing live-source generation.' }, { name: 'facts', description: 'complete detached fact set for that generation.' }],
+      },
+      {
+        signature: 'abstract invalidateLiveGeneration(generation: number): void',
+        description: 'Retain the last live baseline but mark it disconnected.',
+        parameters: [{ name: 'generation', description: 'exact generation whose source disconnected.' }],
+      },
+      {
         signature: 'abstract define(sessionId: SessionId, request: DefineTaskRequest): Promise<TaskSnapshot>',
         description: 'Define or replace one root Task.',
         parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'normalized definition input and expected next sequence.' }],
@@ -3343,6 +3353,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KvUnitDescriptor',
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n}',
+  },
+  {
+    name: 'LiveTaskActivity',
+    declaration: 'export interface LiveTaskActivity {\n    readonly kind: \'activity\';\n    readonly taskId: SessionId;\n    readonly ownerSessionId: SessionId;\n    readonly sourceId: string;\n    readonly state: \'running\' | \'failed\';\n    readonly createdAt: number;\n    readonly summary?: string;\n}',
+  },
+  {
+    name: 'LiveTaskAttention',
+    declaration: 'export interface LiveTaskAttention {\n    readonly kind: \'attention\';\n    readonly item: AttentionItem;\n}',
+  },
+  {
+    name: 'LiveTaskFact',
+    declaration: 'export type LiveTaskFact = LiveTaskFactMap[keyof LiveTaskFactMap];',
+  },
+  {
+    name: 'LiveTaskFactMap',
+    declaration: 'export interface LiveTaskFactMap {\n    activity: LiveTaskActivity;\n    attention: LiveTaskAttention;\n}',
   },
   {
     name: 'LlmAdapter',

@@ -13,6 +13,11 @@ import { carrierKeyOf, type Scoped } from '@deepseek-ai/dsh-scope'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-task'
+import type {
+  DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
+  TaskSnapshot, UpdateTaskCriterionRequest,
+} from '@deepseek-ai/dsh-task/types'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   InitializeParams,
@@ -143,6 +148,64 @@ export class HarnessSdkJsonRpcServer {
   }
 
   /**
+   * Read the current Task baseline.
+   * @returns the detached baseline.
+   */
+  listTasks(): TaskListSnapshot {
+    const tasks = this.ctx.get('tasks')
+    if (tasks === undefined) throw new Error('Task service is unavailable in this SDK runtime')
+    return tasks.snapshot()
+  }
+
+  /**
+   * Define a root Task.
+   * @param sessionId - root Session.
+   * @param request - definition command.
+   * @returns committed Task.
+   */
+  defineTask(sessionId: string, request: DefineTaskRequest): Promise<TaskSnapshot> {
+    const tasks = this.ctx.get('tasks')
+    if (tasks === undefined) throw new Error('Task service is unavailable in this SDK runtime')
+    return tasks.define(SessionId(sessionId), request)
+  }
+
+  /**
+   * Update one criterion.
+   * @param sessionId - root Session.
+   * @param request - criterion command.
+   * @returns committed Task.
+   */
+  updateTaskCriterion(sessionId: string, request: UpdateTaskCriterionRequest): Promise<TaskSnapshot> {
+    const tasks = this.ctx.get('tasks')
+    if (tasks === undefined) throw new Error('Task service is unavailable in this SDK runtime')
+    return tasks.updateCriterion(SessionId(sessionId), request)
+  }
+
+  /**
+   * Record one risk.
+   * @param sessionId - root Session.
+   * @param request - risk command.
+   * @returns committed Task.
+   */
+  recordTaskRisk(sessionId: string, request: RecordTaskRiskRequest): Promise<TaskSnapshot> {
+    const tasks = this.ctx.get('tasks')
+    if (tasks === undefined) throw new Error('Task service is unavailable in this SDK runtime')
+    return tasks.recordRisk(SessionId(sessionId), request)
+  }
+
+  /**
+   * Review one Task.
+   * @param sessionId - root Session.
+   * @param request - review command.
+   * @returns committed Task.
+   */
+  reviewTask(sessionId: string, request: ReviewTaskRequest): Promise<TaskSnapshot> {
+    const tasks = this.ctx.get('tasks')
+    if (tasks === undefined) throw new Error('Task service is unavailable in this SDK runtime')
+    return tasks.review(SessionId(sessionId), request)
+  }
+
+  /**
    * Dispose server-owned agents, adapter, and subscriptions to quiescence.
    * The surrounding context remains running.
    * @returns empty JSON-RPC result.
@@ -193,6 +256,24 @@ export class HarnessSdkJsonRpcServer {
         return this.initialize(params as unknown as InitializeParams)
       case 'session/prompt':
         return this.prompt(params as unknown as SessionPromptParams)
+      case 'task/list':
+        return this.listTasks()
+      case 'task/define': {
+        const { sessionId, ...request } = params as unknown as DefineTaskRequest & { sessionId: string }
+        return this.defineTask(sessionId, request)
+      }
+      case 'task/updateCriterion': {
+        const { sessionId, ...request } = params as unknown as UpdateTaskCriterionRequest & { sessionId: string }
+        return this.updateTaskCriterion(sessionId, request)
+      }
+      case 'task/recordRisk': {
+        const { sessionId, ...request } = params as unknown as RecordTaskRiskRequest & { sessionId: string }
+        return this.recordTaskRisk(sessionId, request)
+      }
+      case 'task/review': {
+        const { sessionId, ...request } = params as unknown as ReviewTaskRequest & { sessionId: string }
+        return this.reviewTask(sessionId, request)
+      }
       case 'shutdown':
         return this.shutdown()
       default:

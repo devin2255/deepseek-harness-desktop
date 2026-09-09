@@ -40,7 +40,7 @@ Independent of live requests: this Provider never assembles or mutates a request
 
 ## Known Limitations and Deferred Work
 
-- The Provider exposes the service in-process; Host RPC and client-store projection are separate follow-on Consumers.
+- Live activity and question attention depend on a Consumer publishing one complete generation through `replaceLiveGeneration`; the desktop Host owns that publication from its Agent and pending-question registries.
 - Persistent attention currently derives from approval audit pairs and terminal turn failures. Validation, merge, and review systems must publish their supported attention facts when their owning capabilities are integrated.
 - External persistence changes are observed at startup or when a live Session lifecycle crosses this process; cross-process log mutation does not yet have a watch feed.
 - Removing a live Session that never materialized in persistence removes its Task row because no durable source remains.

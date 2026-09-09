@@ -222,6 +222,47 @@ reader.on('line', (line) => {
       respond({ messageId })
       return
     }
+    case 'task/list':
+      if (env.FAKE_MALFORMED_TASK !== undefined) {
+        respond({ generation: 'wrong', tasks: [{}] })
+        return
+      }
+      respond({ generation: 4, tasks: [{
+        taskId: 'task-root', descendantSessionIds: [], status: 'running', freshness: 'live',
+        attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+      }] })
+      return
+    case 'task/define':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'reviewing', freshness: 'live',
+        definition: {
+          goal: frame.params?.goal,
+          criteria: [{ id: 'criterion', text: 'Works', status: 'pending', evidence: [] }],
+        },
+        attention: [], risks: [], updatedAt: 2, asOfSeq: 1,
+      })
+      return
+    case 'task/updateCriterion':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'reviewing', freshness: 'live',
+        definition: { goal: 'Ship SDK', criteria: [frame.params?.criterion] },
+        attention: [], risks: [], updatedAt: 3, asOfSeq: 2,
+      })
+      return
+    case 'task/recordRisk':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'reviewing', freshness: 'live',
+        definition: { goal: 'Ship SDK', criteria: [] },
+        attention: [], risks: [frame.params?.risk], updatedAt: 4, asOfSeq: 3,
+      })
+      return
+    case 'task/review':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'ready', freshness: 'live',
+        definition: { goal: 'Ship SDK', criteria: [] }, reviewDecision: frame.params?.decision,
+        attention: [], risks: [], updatedAt: 5, asOfSeq: 4,
+      })
+      return
     case 'shutdown':
       respond({})
       // An EOF-ignoring fake also refuses the protocol exit, so the client's

@@ -4,6 +4,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   DefineTaskRequest,
+  LiveTaskFact,
   RecordTaskRiskRequest,
   ReviewTaskRequest,
   TaskListChange,
@@ -70,6 +71,19 @@ export abstract class TaskService extends Service {
    * @returns a disposer that removes this exact subscription.
    */
   abstract onChanged(listener: (change: TaskListChange) => void): () => void
+
+  /**
+   * Replace the complete process-local activity and attention baseline.
+   * @param generation - monotonically increasing live-source generation.
+   * @param facts - complete detached fact set for that generation.
+   */
+  abstract replaceLiveGeneration(generation: number, facts: readonly LiveTaskFact[]): void
+
+  /**
+   * Retain the last live baseline but mark it disconnected.
+   * @param generation - exact generation whose source disconnected.
+   */
+  abstract invalidateLiveGeneration(generation: number): void
 
   /**
    * Define or replace one root Task.

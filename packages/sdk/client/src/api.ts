@@ -11,7 +11,11 @@ import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { HarnessClient, isRecord, SdkProtocolError } from './client.ts'
-import type { ContentBlock, DeepSeekHarnessOptions, HarnessClientOptions, HarnessNotification, RunResult } from './types.ts'
+import type {
+  ContentBlock, DeepSeekHarnessOptions, DefineTaskRequest, HarnessClientOptions, HarnessNotification,
+  RecordTaskRiskRequest, ReviewTaskRequest, RunResult, TaskListSnapshot, TaskSnapshot,
+  UpdateTaskCriterionRequest,
+} from './types.ts'
 
 /**
  * Reusable SDK for running DeepSeek Harness agent turns in a runtime
@@ -97,6 +101,59 @@ export class DeepSeekHarness implements AsyncDisposable {
    */
   run(input: string | ContentBlock[], options?: RunOptions): Promise<RunResult> {
     return this.session(options?.sessionId).run(input, options)
+  }
+
+  /**
+   * Read all root Tasks after starting the runtime.
+   * @returns the detached Task baseline.
+   */
+  async listTasks(): Promise<TaskListSnapshot> {
+    await this.start()
+    return this.client.listTasks()
+  }
+
+  /**
+   * Define a root Task.
+   * @param sessionId - root Session.
+   * @param request - definition command.
+   * @returns the committed Task.
+   */
+  async defineTask(sessionId: string, request: DefineTaskRequest): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.defineTask(sessionId, request)
+  }
+
+  /**
+   * Update one criterion.
+   * @param sessionId - root Session.
+   * @param request - criterion command.
+   * @returns the committed Task.
+   */
+  async updateTaskCriterion(sessionId: string, request: UpdateTaskCriterionRequest): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.updateTaskCriterion(sessionId, request)
+  }
+
+  /**
+   * Record one risk.
+   * @param sessionId - root Session.
+   * @param request - risk command.
+   * @returns the committed Task.
+   */
+  async recordTaskRisk(sessionId: string, request: RecordTaskRiskRequest): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.recordTaskRisk(sessionId, request)
+  }
+
+  /**
+   * Review one Task.
+   * @param sessionId - root Session.
+   * @param request - review command.
+   * @returns the committed Task.
+   */
+  async reviewTask(sessionId: string, request: ReviewTaskRequest): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.reviewTask(sessionId, request)
   }
 
   /**

@@ -1113,6 +1113,21 @@ describe('FixtureApiClient (protocol-level fake carrier)', () => {
         ],
       },
     })
+    const tasks = await client.tasks.list({})
+    expect(tasks.result).toMatchObject({
+      ok: true,
+      value: {
+        tasks: [
+          {
+            taskId: 'fx-alpha', status: 'needs-attention',
+            descendantSessionIds: ['fx-child-running', 'fx-child-waiting'],
+            attention: [{ ownerSessionId: 'fx-child-waiting', kind: 'question' }],
+          },
+          { taskId: 'fx-gamma', status: 'running' },
+          { taskId: 'fx-beta', status: 'settled' },
+        ],
+      },
+    })
     const abort = new AbortController()
     const questions: RpcRequest<MuxFrame>[] = []
     const consuming = (async () => {

@@ -109,6 +109,33 @@ async function settleSubagent(
 }
 
 describe('HarnessSdkJsonRpcServer', () => {
+  it('projects Task baselines and commands through the SDK request loop', async () => {
+    const row = {
+      taskId: SessionId('root'), descendantSessionIds: [], status: 'reviewing' as const,
+      freshness: 'live' as const, attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+    }
+    const tasks = {
+      snapshot: vi.fn(() => ({ generation: 2, tasks: [row] })),
+      define: vi.fn(async () => ({ ...row, definition: { goal: 'Ship', criteria: [] }, asOfSeq: 1 })),
+      updateCriterion: vi.fn(async () => ({ ...row, asOfSeq: 2 })),
+      recordRisk: vi.fn(async () => ({ ...row, asOfSeq: 3 })),
+      review: vi.fn(async () => ({ ...row, status: 'ready' as const, reviewDecision: 'ready' as const, asOfSeq: 4 })),
+    }
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      get: (name: string) => name === 'tasks' ? tasks : undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+
+    expect(await server.handleRequest('task/list', {})).toEqual({ generation: 2, tasks: [row] })
+    await server.handleRequest('task/define', { sessionId: 'root', goal: 'Ship', criteria: [], expectedSeq: 0 })
+    await server.handleRequest('task/updateCriterion', { sessionId: 'root', criterion: {}, expectedSeq: 1 })
+    await server.handleRequest('task/recordRisk', { sessionId: 'root', risk: {}, expectedSeq: 2 })
+    expect(await server.handleRequest('task/review', { sessionId: 'root', decision: 'ready', expectedSeq: 3 }))
+      .toMatchObject({ status: 'ready', reviewDecision: 'ready' })
+    expect(tasks.define).toHaveBeenCalledWith(SessionId('root'), { goal: 'Ship', criteria: [], expectedSeq: 0 })
+  })
+
   it('creates a harness agent and calls the configured OpenAI-compatible endpoint', { timeout: 15_000 }, async () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-'))
     const llmServer = await mockCompletionServer()

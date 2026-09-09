@@ -32,7 +32,7 @@
 - 修改：`tsconfig.base.json`
 - 修改：`tsconfig.host.json`
 
-- [ ] **步骤 1：编写失败的类型与事件测试**
+- [x] **步骤 1：编写失败的类型与事件测试**
 
 ```text
 import { describe, expect, expectTypeOf, it } from 'vitest'
@@ -49,13 +49,13 @@ describe('task public vocabulary', () => {
 })
 ```
 
-- [ ] **步骤 2：运行测试并确认 RED**
+- [x] **步骤 2：运行测试并确认 RED**
 
 运行：`pnpm exec vitest run packages/task/task/tests/types.spec.ts`
 
 预期：失败，因为 `@deepseek-ai/dsh-task` 尚不存在。
 
-- [ ] **步骤 3：添加包与公共值**
+- [x] **步骤 3：添加包与公共值**
 
 `types.ts` 必须定义并导出以下完整 discriminant 和 record。所有集合均为 readonly；每个标识使用 `Branded<B>`，并提供来自 `@deepseek-ai/dsh-brand` 的对应运行时构造器。
 
@@ -120,11 +120,11 @@ export interface TaskSnapshot {
 
 `index.ts` 在 `SessionEventMap` 上声明 `task/defined`、`task/criterion-updated`、`task/risk-recorded` 和 `task/review-decided`；每个事件携带变更后的完整领域 record，而不是 delta。`invariant.ts` 注册该包拥有的事件流 invariant。
 
-- [ ] **步骤 4：在仓库聚合与文档中注册包**
+- [x] **步骤 4：在仓库聚合与文档中注册包**
 
 在两个包层级表和两组源码解析通配列表中加入 `task/` 组，在 `tsconfig.host.json` 加入 `packages/task/task`，并创建配对的包 README，其中包含无直接模型影响说明和明确的跨 Session Provider 延后限制。
 
-- [ ] **步骤 5：确认 GREEN 和包约束**
+- [x] **步骤 5：确认 GREEN 和包约束**
 
 运行：`pnpm install && pnpm exec vitest run packages/task/task/tests/types.spec.ts && pnpm run constraints`
 
@@ -287,17 +287,17 @@ git commit -m "feat(task): aggregate task activity and attention"
 - 修改：`packages/host/apiproxy/src/api-proxy.ts`
 - 修改：`packages/host/apiproxy/package.json`
 
-- [ ] **步骤 1：编写失败的 schema 与分发测试**
+- [x] **步骤 1：编写失败的 schema 与分发测试**
 
 覆盖 `task.list`、`task.define`、`task.updateCriterion`、`task.recordRisk` 和 `task.review`；不合法 brand、根缺失、subagent 目标、过期预期序号、服务不可用和 whole-row change frame。
 
-- [ ] **步骤 2：确认 RED**
+- [x] **步骤 2：确认 RED**
 
 运行：`pnpm exec vitest run packages/host/apiproxy/tests -t "task"`
 
 预期：失败，因为 Task RPC 方法和 schema 缺失。
 
-- [ ] **步骤 3：添加类型化 RPC 方法与 schema**
+- [x] **步骤 3：添加类型化 RPC 方法与 schema**
 
 向 `RpcMethodMap` 添加以下条目，并从 service 方法派生 request/value 类型：
 
@@ -311,17 +311,17 @@ git commit -m "feat(task): aggregate task activity and attention"
 
 Schema 拒绝未知字段、空 id、负 generation、负 expected sequence、重复条件 id、不合法证据事件序号和无效 discriminant。API 将根与证据解析委托给 Task service，并将 `TaskError.code` 映射为稳定的小写 RPC code。
 
-- [ ] **步骤 4：发布 whole-row 变化**
+- [x] **步骤 4：发布 whole-row 变化**
 
 API proxy 发送包含 `{ generation, upserts, removed }` 的 `task/changed` downstream frame。Provider 订阅是 effect；断开会在 Task service 能发布另一 frame 前移除它。
 
-- [ ] **步骤 5：确认 GREEN 与受影响 Host 测试**
+- [x] **步骤 5：确认 GREEN 与受影响 Host 测试**
 
 运行：`pnpm exec vitest run packages/host/apiproxy/tests -t "task|blank"`
 
 预期：所有选定测试通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```sh
 git add packages/host/apiproxy
@@ -338,7 +338,7 @@ git commit -m "feat(api): expose task state and commands"
 - 修改：`packages/client/runtime/README.md`
 - 修改：`packages/client/runtime/README.zh.md`
 
-- [ ] **步骤 1：编写失败的 store 测试**
+- [x] **步骤 1：编写失败的 store 测试**
 
 覆盖 pending、loading、ready、保留旧行的刷新错误、断线过期、过期成功、过期失败、重叠 generation、whole-row upsert、删除和成功恢复。
 
@@ -355,27 +355,27 @@ it('cannot publish an old baseline after reconnect', async () => {
 })
 ```
 
-- [ ] **步骤 2：确认 RED**
+- [x] **步骤 2：确认 RED**
 
 运行：`pnpm exec vitest run packages/client/runtime/tests -t "task"`
 
 预期：失败，因为 Task manager 和 contract 尚不存在。
 
-- [ ] **步骤 3：实现 manager 与公共 store**
+- [x] **步骤 3：实现 manager 与公共 store**
 
 `TaskListState` 包含 `phase`、`state`、`error`、`freshness`、`generation`、`ids` 和 `byId`。每个请求捕获 manager generation。断线会在发布保留旧行前使旧所有权失效。只有当前请求可以在 `then`、`catch` 或 `finally` 中改变 loading/error 状态。
 
-- [ ] **步骤 4：连接 downstream frame 与命令**
+- [x] **步骤 4：连接 downstream frame 与命令**
 
 共享客户端 frame dispatcher 仅在 `task/changed` 的 generation 等于当前基线时将其传给 manager。公共命令方法调用类型化 API，并且只在 acknowledgment 成功后刷新；错误保持结构化。
 
-- [ ] **步骤 5：确认 GREEN 与客户端 typecheck**
+- [x] **步骤 5：确认 GREEN 与客户端 typecheck**
 
 运行：`pnpm exec vitest run packages/client/runtime/tests -t "task" && pnpm -s run typecheck:client`
 
 预期：Task store 测试和客户端 typecheck 通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```sh
 git add packages/client/runtime
@@ -397,7 +397,7 @@ git commit -m "feat(client): project task list state"
 - 修改：`packages/bundle/desktop-app/cordis.patch.yml`
 - 修改：`packages/bundle/desktop-app/package.json`
 
-- [ ] **步骤 1：用 Task 快照替换选择器 fixture 并确认 RED**
+- [x] **步骤 1：用 Task 快照替换选择器 fixture 并确认 RED**
 
 测试必须证明全部六种状态、条件进度、风险数量、每个注意事项所有者、过期/错误/加载差异、Task 命令失败和普通 Web fallback 标签。
 
@@ -405,25 +405,25 @@ git commit -m "feat(client): project task list state"
 
 预期：失败，因为组件仍消费 Session 派生行。
 
-- [ ] **步骤 2：渲染 Task store**
+- [x] **步骤 2：渲染 Task store**
 
 desktop profile 强制要求 `useTasks`；行展示任务目标、工作区、状态、活动后代、条件进度、未解决风险和注意事项操作。导航使用 `ownerSessionId` 加现有权威 subagent 地址解析器。组件绝不在导航期间回答、批准、标记就绪或清除事项。
 
-- [ ] **步骤 3：保留显式 Web fallback**
+- [x] **步骤 3：保留显式 Web fallback**
 
 当 desktop profile 之外无法使用 `useTasks` 时，继续调用现有纯 Session 选择器，并显示本地化能力标签 `Session activity only` / `仅显示会话活动`。Fallback 行不得报告条件、风险、审查就绪或当前新鲜度。
 
-- [ ] **步骤 4：在 desktop bundle 中强制要求 Provider**
+- [x] **步骤 4：在 desktop bundle 中强制要求 Provider**
 
 向 bundle manifest 添加 Task service 和 Provider 依赖，并在 Host API 与任务总览之前挂载它们。扩展 bundle invariant，在任一 service 或 UI contribution 缺失时失败。
 
-- [ ] **步骤 5：确认 GREEN**
+- [x] **步骤 5：确认 GREEN**
 
 运行：`pnpm exec vitest run packages/client/ui-task-overview/tests packages/bundle/desktop-app/tests && pnpm -s run typecheck:client`
 
 预期：总览、bundle 和客户端 typecheck 通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```sh
 git add packages/client/ui-task-overview packages/bundle/desktop-app pnpm-lock.yaml
@@ -450,11 +450,11 @@ git commit -m "feat(desktop): show durable task readiness and attention"
 - 修改：`docs/superpowers/plans/2026-09-07-task-projection-attention.md`
 - 修改：`docs/superpowers/plans/2026-09-07-task-projection-attention.zh.md`
 
-- [ ] **步骤 1：编写失败的 SDK 与组装测试**
+- [x] **步骤 1：编写失败的 SDK 与组装测试**
 
 SDK 测试断言 Task list 和 command 的请求/响应投影。无密钥场景执行两个根、后代注意事项、条件更新、失败、ready 审查和断线保留行。Electron 验收重载 Renderer，并验证 Task 与注意事项 id 不变。
 
-- [ ] **步骤 2：确认 RED**
+- [x] **步骤 2：确认 RED**
 
 分别运行以下三个命令：
 
@@ -466,19 +466,19 @@ DSH_SNAPSHOT=replay pnpm exec vitest run --config vitest.web.config.ts apps/web/
 
 预期：在每个公开循环中第一个缺失的 Task 投影处失败。
 
-- [ ] **步骤 3：通过两个 SDK 投影 Task API**
+- [x] **步骤 3：通过两个 SDK 投影 Task API**
 
 添加类型化 Task 方法，不增加 SDK 自有状态。Python 值准确保留 wire discriminant 和标识；不合法响应通过现有 protocol error 路径失败。
 
-- [ ] **步骤 4：完成无密钥与 Electron 验收**
+- [x] **步骤 4：完成无密钥与 Electron 验收**
 
 使用真实 desktop composition，只替换不确定模型 provider。断言面向用户的状态、条件、风险与操作路由；不检查 CSS class 或私有 store。Electron 测试使用隔离 app data 和可丢弃工作区。
 
-- [ ] **步骤 5：更新决策状态与计划 checkbox**
+- [x] **步骤 5：更新决策状态与计划 checkbox**
 
 在两种语言的 Mission Control Note 中记录已交付的 Task 投影与注意力行为，同时将 worktree、审查工作区、托盘、Studio、签名和更新保留为后续阶段。将所有已完成计划步骤标记为 `[x]`，并重新记录两组双语 pair。
 
-- [ ] **步骤 6：运行最终相关验证**
+- [x] **步骤 6：运行最终相关验证**
 
 运行：
 
@@ -498,7 +498,7 @@ git diff --check
 
 预期：所有列出的命令通过；平台 skip 保持明确，且不隐藏新的广泛测试失败。
 
-- [ ] **步骤 7：提交**
+- [x] **步骤 7：提交**
 
 ```sh
 git add packages/sdk/client python/sdk apps/web examples apps/desktop .agents/notes/proposed/feature docs/superpowers/plans

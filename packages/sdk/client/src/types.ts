@@ -72,3 +72,8 @@ export interface RunResult {
 
 /** Re-exported content-block alias so SDK callers need no extra import. */
 export type { ContentBlock }
+export type {
+  AttentionItem, DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest,
+  TaskCriterion, TaskDefinition, TaskListSnapshot, TaskReviewDecision, TaskRisk,
+  TaskSnapshot, TaskStatus, UpdateTaskCriterionRequest,
+} from '@deepseek-ai/dsh-task/types'

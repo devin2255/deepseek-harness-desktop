@@ -325,6 +325,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   ReviewTaskRequest: 'task.md',
   TaskListChange: 'task.md',
   TaskListSnapshot: 'task.md',
+  LiveTaskFact: 'task.md',
   TaskSnapshot: 'task.md',
   UpdateTaskCriterionRequest: 'task.md',
   CommandDefinition: 'commands.md',

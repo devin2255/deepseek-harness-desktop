@@ -11,6 +11,10 @@
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SubagentStopReason } from '@deepseek-ai/dsh-subagent'
+import type {
+  DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
+  TaskSnapshot, UpdateTaskCriterionRequest,
+} from '@deepseek-ai/dsh-task/types'
 
 /** Parameters for the process-wide SDK handshake. */
 export interface InitializeParams {
@@ -101,5 +105,10 @@ export interface HarnessSdkNotificationMap {
 export interface HarnessSdkRequestMap {
   'initialize': { params: InitializeParams; result: InitializeResult }
   'session/prompt': { params: SessionPromptParams; result: SessionPromptResult }
+  'task/list': { params: Record<string, never>; result: TaskListSnapshot }
+  'task/define': { params: DefineTaskRequest & { sessionId: string }; result: TaskSnapshot }
+  'task/updateCriterion': { params: UpdateTaskCriterionRequest & { sessionId: string }; result: TaskSnapshot }
+  'task/recordRisk': { params: RecordTaskRiskRequest & { sessionId: string }; result: TaskSnapshot }
+  'task/review': { params: ReviewTaskRequest & { sessionId: string }; result: TaskSnapshot }
   'shutdown': { params: undefined; result: Record<string, never> }
 }

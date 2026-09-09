@@ -31,6 +31,10 @@ class StubTaskService extends TaskService {
     return () => {}
   }
 
+  replaceLiveGeneration(_generation: number, _facts: readonly LiveTaskFact[]): void {}
+
+  invalidateLiveGeneration(_generation: number): void {}
+
   async define(_sessionId: SessionId, _request: DefineTaskRequest): Promise<TaskSnapshot> {
     throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
   }

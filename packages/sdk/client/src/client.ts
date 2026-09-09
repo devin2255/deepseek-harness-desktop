@@ -21,6 +21,10 @@ import {
   type SessionPromptParams,
 } from '@deepseek-ai/dsh-sdk-protocol'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
+  TaskSnapshot, UpdateTaskCriterionRequest,
+} from '@deepseek-ai/dsh-task/types'
 import { disposeRuntimeProcess } from './dispose.ts'
 import type { HarnessClientOptions, HarnessNotification, NotificationFilter } from './types.ts'
 
@@ -290,6 +294,58 @@ export class HarnessClient {
   }
 
   /**
+   * Read the complete detached Task baseline.
+   * @returns the validated Task list.
+   */
+  async listTasks(): Promise<TaskListSnapshot> {
+    const result = await this.request('task/list')
+    if (!isRecord(result) || !Number.isSafeInteger(result.generation) || !Array.isArray(result.tasks)) {
+      throw new SdkProtocolError(`task/list returned a malformed baseline: ${JSON.stringify(result)}`)
+    }
+    return { generation: result.generation as number, tasks: result.tasks.map(decodeTaskSnapshot) }
+  }
+
+  /**
+   * Define or replace a root Task.
+   * @param sessionId - root Session.
+   * @param request - Task definition command.
+   * @returns the committed Task.
+   */
+  async defineTask(sessionId: string, request: DefineTaskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/define', { sessionId, ...request }))
+  }
+
+  /**
+   * Replace one Task criterion.
+   * @param sessionId - root Session.
+   * @param request - criterion command.
+   * @returns the committed Task.
+   */
+  async updateTaskCriterion(sessionId: string, request: UpdateTaskCriterionRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/updateCriterion', { sessionId, ...request }))
+  }
+
+  /**
+   * Record or resolve one Task risk.
+   * @param sessionId - root Session.
+   * @param request - risk command.
+   * @returns the committed Task.
+   */
+  async recordTaskRisk(sessionId: string, request: RecordTaskRiskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/recordRisk', { sessionId, ...request }))
+  }
+
+  /**
+   * Record one Task review decision.
+   * @param sessionId - root Session.
+   * @param request - review command.
+   * @returns the committed Task.
+   */
+  async reviewTask(sessionId: string, request: ReviewTaskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/review', { sessionId, ...request }))
+  }
+
+  /**
    * Send one JSON-RPC request and await its result.
    * @param method - the wire method name.
    * @param params - the params object; omitted params send `{}`.
@@ -464,6 +520,23 @@ export class HarnessClient {
  */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Validate the required fields of one detached Task projection. */
+function decodeTaskSnapshot(value: unknown): TaskSnapshot {
+  if (!isRecord(value)
+    || typeof value.taskId !== 'string'
+    || !Array.isArray(value.descendantSessionIds)
+    || !value.descendantSessionIds.every(id => typeof id === 'string')
+    || !['needs-attention', 'failed', 'running', 'reviewing', 'ready', 'settled'].includes(String(value.status))
+    || !['live', 'disconnected', 'unavailable'].includes(String(value.freshness))
+    || !Array.isArray(value.attention)
+    || !Array.isArray(value.risks)
+    || typeof value.updatedAt !== 'number'
+    || !Number.isSafeInteger(value.asOfSeq)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  return value as unknown as TaskSnapshot
 }
 
 /** The message of a thrown value (the transport only throws `Error`s; `String` covers the rest). */

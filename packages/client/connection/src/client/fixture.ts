@@ -34,7 +34,7 @@ import { deriveEventMessage, foldSurface } from '@deepseek-ai/dsh-session/surfac
 import type {
   ApiProxy, ClientRequest, ClientResponse, HistoryEntry, HostFrame, MuxFrame, RpcReceipt,
   ModelProviderGroup, ModelSelection, RpcRequest, RpcResponse, RpcResult, ServerRequest, ServerResponse, SessionSummary,
-  ToolCallView, ToolEventView, ToolResultView, WorkspaceId, WorkspaceView,
+  TaskSnapshot, ToolCallView, ToolEventView, ToolResultView, WorkspaceId, WorkspaceView,
 } from './api.ts'
 import type { RequestPayload, ResponseValue, RpcMethodMap } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AbstractApiClient, RpcId, SESSION_SEARCH_RESULT_LIMIT } from './api.ts'
@@ -1644,6 +1644,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       ],
     },
   ]
+  const fixtureQuestionSummary = fixtureQuestions[0]?.question
+  if (fixtureQuestionSummary === undefined) throw new Error('task overview fixture requires its primary question')
 
   const muxConns = new Set<StreamConn<MuxFrame>>()
   const hostConns = new Set<StreamConn<HostFrame>>()
@@ -2847,7 +2849,33 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       ),
     },
     tasks: {
-      list: request => ok(request, { generation: 0, tasks: [] }),
+      list: request => ok(request, {
+        generation: 0,
+        tasks: options.taskOverviewRoster === true ? [
+          {
+            taskId: sid('fx-alpha'), workspaceId: wid('fx-ws-fixture'),
+            definition: { goal: 'Fixture 历史会话', criteria: [] },
+            descendantSessionIds: [sid('fx-child-running'), sid('fx-child-waiting')],
+            status: 'needs-attention', freshness: 'live', risks: [], updatedAt: 3, asOfSeq: 0,
+            attention: [{
+              id: 'fx-child-waiting:question:harness-profile' as never,
+              taskId: sid('fx-alpha'), ownerSessionId: sid('fx-child-waiting'),
+              kind: 'question', severity: 'warning', summary: fixtureQuestionSummary,
+              createdAt: 1, sourceId: 'harness-profile', actionable: true,
+            }],
+          },
+          {
+            taskId: sid('fx-gamma'), workspaceId: wid('fx-ws-fixture'),
+            definition: { goal: 'fixture', criteria: [] }, descendantSessionIds: [],
+            status: 'running', freshness: 'live', attention: [], risks: [], updatedAt: 2, asOfSeq: 0,
+          },
+          {
+            taskId: sid('fx-beta'), workspaceId: wid('fx-ws-fixture'),
+            definition: { goal: 'fixture', criteria: [] }, descendantSessionIds: [],
+            status: 'settled', freshness: 'live', attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+          },
+        ] satisfies TaskSnapshot[] : [],
+      }),
       define: request => err(request, {
         code: 'task-unavailable', message: 'fixture task mutations are not configured',
         details: { sessionId: request.payload.sessionId },

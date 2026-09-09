@@ -10,12 +10,23 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeAlias, TypeVar
+from typing import Callable, Literal, TypeAlias, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from .errors import JsonRpcError, TransportClosedError
-from .models import IncomingRequest, InitializeResponse, JsonObject, JsonValue, Notification
+from .errors import JsonRpcError, SdkProtocolError, TransportClosedError
+from .models import (
+    DefineTaskCriterion,
+    IncomingRequest,
+    InitializeResponse,
+    JsonObject,
+    JsonValue,
+    Notification,
+    TaskCriterion,
+    TaskListSnapshot,
+    TaskRisk,
+    TaskSnapshot,
+)
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 NotificationFilter: TypeAlias = Callable[[Notification], bool]
@@ -153,6 +164,68 @@ class HarnessClient:
             notification_subscription=notification_subscription,
         )
         return response.messageId
+
+    def list_tasks(self) -> TaskListSnapshot:
+        """Return the validated detached Task baseline."""
+        return self._task_request("task/list", {}, TaskListSnapshot)
+
+    def define_task(
+        self,
+        session_id: str,
+        *,
+        goal: str,
+        criteria: list[DefineTaskCriterion],
+        expected_seq: int,
+    ) -> TaskSnapshot:
+        """Define or replace one root Task."""
+        return self._task_request("task/define", {
+            "sessionId": session_id,
+            "goal": goal,
+            "criteria": [criterion.model_dump(by_alias=True, exclude_none=True) for criterion in criteria],
+            "expectedSeq": expected_seq,
+        }, TaskSnapshot)
+
+    def update_task_criterion(
+        self, session_id: str, *, criterion: TaskCriterion, expected_seq: int
+    ) -> TaskSnapshot:
+        """Replace one acceptance criterion."""
+        return self._task_request("task/updateCriterion", {
+            "sessionId": session_id,
+            "criterion": criterion.model_dump(by_alias=True, exclude_none=True),
+            "expectedSeq": expected_seq,
+        }, TaskSnapshot)
+
+    def record_task_risk(
+        self, session_id: str, *, risk: TaskRisk, expected_seq: int
+    ) -> TaskSnapshot:
+        """Record or resolve one Task risk."""
+        return self._task_request("task/recordRisk", {
+            "sessionId": session_id,
+            "risk": risk.model_dump(by_alias=True, exclude_none=True),
+            "expectedSeq": expected_seq,
+        }, TaskSnapshot)
+
+    def review_task(
+        self,
+        session_id: str,
+        *,
+        decision: Literal["changes-requested", "ready", "committed", "applied", "archived", "discarded"],
+        expected_seq: int,
+    ) -> TaskSnapshot:
+        """Record one review or delivery decision."""
+        return self._task_request("task/review", {
+            "sessionId": session_id,
+            "decision": decision,
+            "expectedSeq": expected_seq,
+        }, TaskSnapshot)
+
+    def _task_request(
+        self, method: str, params: JsonObject, response_model: type[ModelT]
+    ) -> ModelT:
+        try:
+            return self.request(method, params, response_model=response_model)
+        except ValidationError as exc:
+            raise SdkProtocolError(f"{method} returned a malformed Task response") from exc
 
     def request(
         self,

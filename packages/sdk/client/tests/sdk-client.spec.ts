@@ -243,6 +243,33 @@ describe('DeepSeekHarness', () => {
 })
 
 describe('HarnessClient', () => {
+  it('projects Task list and compare-and-set commands through typed methods', async () => {
+    const client = new HarnessClient(fakeLaunch())
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+
+    const listed = await client.listTasks()
+    expect(listed).toMatchObject({ generation: 4, tasks: [{ taskId: 'task-root', status: 'running' }] })
+    const defined = await client.defineTask('task-root', {
+      goal: 'Ship SDK', criteria: [{ text: 'Works' }], expectedSeq: 0,
+    })
+    expect(defined.definition?.goal).toBe('Ship SDK')
+    expect((await client.updateTaskCriterion('task-root', {
+      criterion: { id: 'criterion' as never, text: 'Works', status: 'waived', evidence: [] }, expectedSeq: 1,
+    })).asOfSeq).toBe(2)
+    expect((await client.recordTaskRisk('task-root', {
+      risk: { id: 'risk' as never, severity: 'high', summary: 'Signing' }, expectedSeq: 2,
+    })).risks[0]?.summary).toBe('Signing')
+    expect((await client.reviewTask('task-root', { decision: 'ready', expectedSeq: 3 })).reviewDecision).toBe('ready')
+  })
+
+  it('rejects malformed Task projections as protocol errors', async () => {
+    const client = new HarnessClient(fakeLaunch({ FAKE_MALFORMED_TASK: '1' }))
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+    await expect(client.listTasks()).rejects.toThrow(SdkProtocolError)
+  })
+
   it('times out a hung request at the per-call bound', async () => {
     const client = new HarnessClient(fakeLaunch({ FAKE_HANG_PROMPT: '1' }))
     cleanups.push(() => client.close())
