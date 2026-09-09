@@ -54,7 +54,7 @@ export class WorkspaceRuntime implements IWorkspaces {
   /** Workspace baseline and frame owner. */
   private readonly manager: WorkspaceManager
   /** In-flight blank-session creates keyed by workspace (connectWorkspace coalescing). */
-  private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
+  private readonly connecting = new Map<string, Promise<SessionId>>()
   /** Guards the runtime-owned one-shot initial-selection subscription. */
   private initialSelectionStarted = false
 
@@ -84,15 +84,17 @@ export class WorkspaceRuntime implements IWorkspaces {
    * store and `sessions.binding(id)` resolves synchronously — draft hand-off
    * may write the new scope's machine before opening.
    * @param workspaceId - chosen Workspace (must be in the workspace list).
+   * @param isolation - explicit execution mode; only direct mode may reuse an accounted blank Session.
    * @returns the reused or newly created session id.
    */
-  async connectWorkspace(workspaceId: WorkspaceId): Promise<SessionId> {
+  async connectWorkspace(workspaceId: WorkspaceId, isolation: 'direct' | 'worktree'): Promise<SessionId> {
     const workspace = this.list.getSnapshot().items.find(item => item.workspaceId === workspaceId)
     if (workspace === undefined) throw new Error(`workspaces.connectWorkspace: unknown workspace ${workspaceId}`)
     // Coalesce concurrent connects: a create's summary lands without cwd
     // until the host frame arrives, so a second call inside that window
     // would miss the reuse scan and mint another hidden blank session.
-    const inflight = this.connecting.get(workspaceId)
+    const connectionKey = `${workspaceId}\0${isolation}`
+    const inflight = this.connecting.get(connectionKey)
     if (inflight !== undefined) return inflight
     // Reuse requires workspace membership (id in sessionIds AND same
     // canonical cwd — the host's own membership rule), never cwd alone:
@@ -101,17 +103,19 @@ export class WorkspaceRuntime implements IWorkspaces {
     // would open a session no grouping surface shows under this workspace.
     // An archived blank is never reused either: reuse would open a session
     // no grouping surface can show, so New Session mints a fresh one instead.
-    const archived = this.list.getSnapshot().archivedSessionIds
-    const sessions = this.sessions.list.getSnapshot()
-    for (const id of sessions.ids) {
-      const summary = sessions.byId[id]
-      if (summary !== undefined && summary.blank && summary.cwd === workspace.path
-        && workspace.sessionIds.includes(summary.id)
-        && !archived.includes(summary.id)) return summary.id
+    if (isolation === 'direct') {
+      const archived = this.list.getSnapshot().archivedSessionIds
+      const sessions = this.sessions.list.getSnapshot()
+      for (const id of sessions.ids) {
+        const summary = sessions.byId[id]
+        if (summary !== undefined && summary.blank && summary.cwd === workspace.path
+          && workspace.sessionIds.includes(summary.id)
+          && !archived.includes(summary.id)) return summary.id
+      }
     }
-    const attempt = this.sessions.create({ workspaceId })
-      .finally(() => { this.connecting.delete(workspaceId) })
-    this.connecting.set(workspaceId, attempt)
+    const attempt = this.sessions.create({ workspaceId, isolation })
+      .finally(() => { this.connecting.delete(connectionKey) })
+    this.connecting.set(connectionKey, attempt)
     return attempt
   }
 
@@ -141,7 +145,7 @@ export class WorkspaceRuntime implements IWorkspaces {
         return
       }
       state = 'connecting'
-      void this.connectWorkspace(target).then(
+      void this.connectWorkspace(target, 'direct').then(
         (sessionId) => {
           if (disposed) return
           if (this.sessions.list.getSnapshot().current === undefined) {
@@ -185,7 +189,7 @@ export class WorkspaceRuntime implements IWorkspaces {
       this.sessions.clear()
       return
     }
-    void this.connectWorkspace(target).then(
+    void this.connectWorkspace(target, 'direct').then(
       (sessionId) => { this.sessions.open(sessionId) },
       (reason: unknown) => { console.warn('new session failed:', reason) },
     )

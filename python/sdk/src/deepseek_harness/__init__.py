@@ -15,6 +15,7 @@ from .models import (
     TaskListSnapshot,
     TaskRisk,
     TaskSnapshot,
+    TaskWorktreeAssignment,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "TaskListSnapshot",
     "TaskRisk",
     "TaskSnapshot",
+    "TaskWorktreeAssignment",
 ]

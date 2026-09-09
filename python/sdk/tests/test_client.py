@@ -26,6 +26,20 @@ def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.M
     calls: list[tuple[str, object]] = []
     row = {
         "taskId": "root",
+        "workspaceId": "workspace",
+        "executionWorkspace": {
+            "kind": "git-worktree",
+            "taskId": "root",
+            "workspaceId": "workspace",
+            "sourcePath": r"D:\source\project",
+            "path": r"D:\harness\worktrees\root",
+            "branch": "dsh/task-0123456789abcdef01234567",
+            "baseCommit": "0" * 40,
+            "sourceHead": "0" * 40,
+            "sourceDirty": False,
+            "sourceStatusDigest": "a" * 64,
+            "createdAt": 1,
+        },
         "descendantSessionIds": ["child"],
         "status": "reviewing",
         "freshness": "live",
@@ -46,7 +60,9 @@ def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.M
         return response_model.model_validate(value)
 
     monkeypatch.setattr(client, "request", request)
-    assert client.list_tasks().generation == 7
+    listed = client.list_tasks()
+    assert listed.generation == 7
+    assert listed.tasks[0].execution_workspace.path == r"D:\harness\worktrees\root"
     assert client.define_task(
         "root", goal="Ship", criteria=[DefineTaskCriterion(text="Works")], expected_seq=0
     ).definition.goal == "Ship"
@@ -65,6 +81,41 @@ def test_malformed_task_projection_uses_sdk_protocol_error(monkeypatch: pytest.M
 
     def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
         return response_model.model_validate({"generation": "bad", "tasks": [{}]})
+
+    monkeypatch.setattr(client, "request", request)
+    with pytest.raises(SdkProtocolError, match="malformed Task response"):
+        client.list_tasks()
+
+
+def test_mismatched_task_worktree_uses_sdk_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+    row = {
+        "taskId": "root",
+        "workspaceId": "workspace",
+        "executionWorkspace": {
+            "kind": "git-worktree",
+            "taskId": "different-task",
+            "workspaceId": "workspace",
+            "sourcePath": r"D:\source\project",
+            "path": r"D:\harness\worktrees\root",
+            "branch": "dsh/task-0123456789abcdef01234567",
+            "baseCommit": "0" * 40,
+            "sourceHead": "1" * 40,
+            "sourceDirty": False,
+            "sourceStatusDigest": "a" * 64,
+            "createdAt": 1,
+        },
+        "descendantSessionIds": [],
+        "status": "running",
+        "freshness": "live",
+        "attention": [],
+        "risks": [],
+        "updatedAt": 1,
+        "asOfSeq": 0,
+    }
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": 1, "tasks": [row]})
 
     monkeypatch.setattr(client, "request", request)
     with pytest.raises(SdkProtocolError, match="malformed Task response"):

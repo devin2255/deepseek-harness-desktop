@@ -289,42 +289,49 @@ git commit -m "feat(host): create sessions in task worktrees"
 ### Task 5: Expose isolation through both SDKs and the client runtime
 
 **Files:**
-- Modify: `packages/sdk/sdk/src/client.ts`
-- Modify: `packages/sdk/sdk/src/types.ts`
-- Modify: `packages/sdk/sdk/tests/client.spec.ts`
-- Modify: `packages/sdk/sdk/tests/expected-api.ts`
-- Modify: `python/deepseek_harness/client.py`
-- Modify: `python/deepseek_harness/types.py`
-- Modify: `python/tests/test_client.py`
-- Modify: `python/tests/expected_api.py`
+- Modify: `packages/sdk/client/package.json`
+- Modify: `packages/sdk/client/src/client.ts`
+- Modify: `packages/sdk/client/src/index.ts`
+- Modify: `packages/sdk/client/src/types.ts`
+- Modify: `packages/sdk/client/tests/fake-runtime.ts`
+- Modify: `packages/sdk/client/tests/sdk-client.spec.ts`
+- Modify: `packages/sdk/client/tsconfig.json`
+- Modify: `pnpm-lock.yaml`
+- Modify: `python/sdk/src/deepseek_harness/models.py`
+- Modify: `python/sdk/src/deepseek_harness/__init__.py`
+- Modify: `python/sdk/tests/test_client.py`
 - Modify: `packages/client/runtime/src/client/contract/workspaces.ts`
-- Modify: `packages/client/runtime/src/client/workspaces/manager.ts`
+- Modify: `packages/client/runtime/src/client/contract/sessions-port.ts`
+- Modify: `packages/client/runtime/src/client/sessions/manager.ts`
+- Modify: `packages/client/runtime/src/client/sessions/service.ts`
 - Modify: `packages/client/runtime/src/client/workspaces/service.ts`
 - Modify: `packages/client/runtime/tests/workspaces-service.client.spec.ts`
+- Modify: `packages/client/runtime/tests/client-apply.client.spec.ts`
+- Modify: `packages/client/ui-conversation/src/client/apply.ts`
 
-- [ ] **Step 1: Write failing SDK and client tests**
+- [x] **Step 1: Write failing SDK and client tests**
 
-Prove both SDKs serialize `isolation: 'worktree'`, parse the assignment, and expose it without path rewriting. Prove `WorkspaceRuntime.connectWorkspace(id, 'worktree')` never reuses a direct blank Session and `connectWorkspace(id, 'direct')` preserves current reuse.
+Prove both SDKs parse the Task assignment and expose it without path rewriting. Prove `WorkspaceRuntime.connectWorkspace(id, 'worktree')` serializes the explicit mode and never reuses a direct blank Session, while `connectWorkspace(id, 'direct')` preserves current reuse. The subprocess SDK protocol does not create Host Workspaces, so it projects the recorded assignment rather than inventing a second session-creation API.
 
-- [ ] **Step 2: Run the tests and confirm RED**
+- [x] **Step 2: Run the tests and confirm RED**
 
-Run: `pnpm exec vitest run packages/sdk/sdk/tests packages/client/runtime/tests/workspaces-service.client.spec.ts`
+Run: `pnpm exec vitest run packages/sdk/client/tests packages/client/runtime/tests/workspaces-service.client.spec.ts`
 
-Run: `python -m pytest python/tests/test_client.py`
+Run: `uv run --project python/sdk pytest python/sdk/tests/test_client.py -q`
 
 Expected: FAIL because the request and response types do not carry isolation.
 
-- [ ] **Step 3: Implement both SDK and runtime projections**
+- [x] **Step 3: Implement both SDK and runtime projections**
 
 Use the same discriminants and field names as Host. No client infers Git state. The client defaults only the desktop task-creation action to `worktree`; reusable APIs require an explicit mode so Web/automation callers do not change behavior accidentally.
 
-- [ ] **Step 4: Run both suites and confirm GREEN**
+- [x] **Step 4: Run both suites and confirm GREEN**
 
 Run the two commands from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the consumers**
+- [x] **Step 5: Commit the consumers**
 
 ```powershell
 git add packages/sdk python packages/client/runtime

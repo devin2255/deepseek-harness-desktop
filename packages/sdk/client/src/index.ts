@@ -37,5 +37,6 @@ export type {
   TaskRisk,
   TaskSnapshot,
   TaskStatus,
+  TaskWorktreeAssignment,
   UpdateTaskCriterionRequest,
 } from './types.ts'

@@ -36,6 +36,7 @@
     "@deepseek-ai/dsh-sdk-protocol": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-task": "workspace:^",
+    "@deepseek-ai/dsh-task-worktree": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
@@ -44,6 +45,7 @@
     "@deepseek-ai/dsh-sdk-protocol": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-task": "workspace:^",
+    "@deepseek-ai/dsh-task-worktree": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   }
 }

@@ -289,42 +289,49 @@ git commit -m "feat(host): create sessions in task worktrees"
 ### Task 5：通过两个 SDK 和客户端运行时公开隔离
 
 **文件：**
-- 修改：`packages/sdk/sdk/src/client.ts`
-- 修改：`packages/sdk/sdk/src/types.ts`
-- 修改：`packages/sdk/sdk/tests/client.spec.ts`
-- 修改：`packages/sdk/sdk/tests/expected-api.ts`
-- 修改：`python/deepseek_harness/client.py`
-- 修改：`python/deepseek_harness/types.py`
-- 修改：`python/tests/test_client.py`
-- 修改：`python/tests/expected_api.py`
+- 修改：`packages/sdk/client/package.json`
+- 修改：`packages/sdk/client/src/client.ts`
+- 修改：`packages/sdk/client/src/index.ts`
+- 修改：`packages/sdk/client/src/types.ts`
+- 修改：`packages/sdk/client/tests/fake-runtime.ts`
+- 修改：`packages/sdk/client/tests/sdk-client.spec.ts`
+- 修改：`packages/sdk/client/tsconfig.json`
+- 修改：`pnpm-lock.yaml`
+- 修改：`python/sdk/src/deepseek_harness/models.py`
+- 修改：`python/sdk/src/deepseek_harness/__init__.py`
+- 修改：`python/sdk/tests/test_client.py`
 - 修改：`packages/client/runtime/src/client/contract/workspaces.ts`
-- 修改：`packages/client/runtime/src/client/workspaces/manager.ts`
+- 修改：`packages/client/runtime/src/client/contract/sessions-port.ts`
+- 修改：`packages/client/runtime/src/client/sessions/manager.ts`
+- 修改：`packages/client/runtime/src/client/sessions/service.ts`
 - 修改：`packages/client/runtime/src/client/workspaces/service.ts`
 - 修改：`packages/client/runtime/tests/workspaces-service.client.spec.ts`
+- 修改：`packages/client/runtime/tests/client-apply.client.spec.ts`
+- 修改：`packages/client/ui-conversation/src/client/apply.ts`
 
-- [ ] **步骤 1：编写失败的 SDK 与客户端测试**
+- [x] **步骤 1：编写失败的 SDK 与客户端测试**
 
-证明两个 SDK 都会序列化 `isolation: 'worktree'`、解析分配并在不改写路径的情况下公开它。证明 `WorkspaceRuntime.connectWorkspace(id, 'worktree')` 绝不复用直接模式的空白 Session，而 `connectWorkspace(id, 'direct')` 保留当前复用行为。
+证明两个 SDK 都会解析 Task 分配，并在不改写路径的情况下公开它。证明 `WorkspaceRuntime.connectWorkspace(id, 'worktree')` 会序列化显式模式且绝不复用直接模式的空白 Session，而 `connectWorkspace(id, 'direct')` 保留当前复用行为。子进程 SDK 协议不创建 Host Workspace，因此它投影已记录的分配，而不会虚构第二套 Session 创建 API。
 
-- [ ] **步骤 2：运行测试并确认 RED**
+- [x] **步骤 2：运行测试并确认 RED**
 
-运行：`pnpm exec vitest run packages/sdk/sdk/tests packages/client/runtime/tests/workspaces-service.client.spec.ts`
+运行：`pnpm exec vitest run packages/sdk/client/tests packages/client/runtime/tests/workspaces-service.client.spec.ts`
 
-运行：`python -m pytest python/tests/test_client.py`
+运行：`uv run --project python/sdk pytest python/sdk/tests/test_client.py -q`
 
 预期：失败，因为请求与响应类型尚未携带隔离模式。
 
-- [ ] **步骤 3：实现两个 SDK 与运行时投影**
+- [x] **步骤 3：实现两个 SDK 与运行时投影**
 
 使用与 Host 相同的判别标签和字段名。客户端不推断 Git 状态。只有桌面 Task 创建操作默认使用 `worktree`；可复用 API 要求显式模式，避免 Web/自动化调用方行为意外变化。
 
-- [ ] **步骤 4：运行两个测试套件并确认 GREEN**
+- [x] **步骤 4：运行两个测试套件并确认 GREEN**
 
 运行步骤 2 的两条命令。
 
 预期：通过。
 
-- [ ] **步骤 5：提交消费方**
+- [x] **步骤 5：提交消费方**
 
 ```powershell
 git add packages/sdk python packages/client/runtime

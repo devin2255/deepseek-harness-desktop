@@ -19,6 +19,7 @@ import {
   SdkProtocolError,
   TransportClosedError,
   type HarnessNotification,
+  type TaskWorktreeAssignment,
 } from '../src/index.ts'
 import { finalResponse, normalizeInput } from '../src/api.ts'
 
@@ -250,6 +251,12 @@ describe('HarnessClient', () => {
 
     const listed = await client.listTasks()
     expect(listed).toMatchObject({ generation: 4, tasks: [{ taskId: 'task-root', status: 'running' }] })
+    const assignment: TaskWorktreeAssignment | undefined = listed.tasks[0]?.executionWorkspace
+    expect(assignment).toMatchObject({
+      sourcePath: 'D:\\source\\project',
+      path: 'D:\\harness\\worktrees\\task-root',
+      branch: 'dsh/task-0123456789abcdef01234567',
+    })
     const defined = await client.defineTask('task-root', {
       goal: 'Ship SDK', criteria: [{ text: 'Works' }], expectedSeq: 0,
     })
@@ -265,6 +272,13 @@ describe('HarnessClient', () => {
 
   it('rejects malformed Task projections as protocol errors', async () => {
     const client = new HarnessClient(fakeLaunch({ FAKE_MALFORMED_TASK: '1' }))
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+    await expect(client.listTasks()).rejects.toThrow(SdkProtocolError)
+  })
+
+  it('rejects malformed Task worktree assignments as protocol errors', async () => {
+    const client = new HarnessClient(fakeLaunch({ FAKE_MALFORMED_TASK_WORKTREE: '1' }))
     cleanups.push(() => client.close())
     await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
     await expect(client.listTasks()).rejects.toThrow(SdkProtocolError)

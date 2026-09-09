@@ -228,7 +228,16 @@ reader.on('line', (line) => {
         return
       }
       respond({ generation: 4, tasks: [{
-        taskId: 'task-root', descendantSessionIds: [], status: 'running', freshness: 'live',
+        taskId: 'task-root', workspaceId: 'workspace-root', descendantSessionIds: [], status: 'running', freshness: 'live',
+        executionWorkspace: env.FAKE_MALFORMED_TASK_WORKTREE !== undefined
+          ? { kind: 'git-worktree', path: 42 }
+          : {
+            kind: 'git-worktree', taskId: 'task-root', workspaceId: 'workspace-root',
+            sourcePath: 'D:\\source\\project', path: 'D:\\harness\\worktrees\\task-root',
+            branch: 'dsh/task-0123456789abcdef01234567', baseCommit: '0'.repeat(40),
+            sourceHead: '0'.repeat(40), sourceDirty: false,
+            sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+          },
         attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
       }] })
       return

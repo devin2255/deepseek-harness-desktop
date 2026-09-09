@@ -537,14 +537,26 @@ export class SessionManager {
    * Contract session.create; on success merge into summaries immediately (no
    * wait for the next refresh). A created session is blank by definition
    * (entity birth precedes the first message).
-   * @param opts - target workspace or working directory, plus an optional caller-owned id.
+   * @param opts - target workspace or working directory, plus an optional caller-owned id and isolation mode.
    * @returns the create result.
    */
   async create(
-    opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {},
-  ): Promise<RpcResult<{ sessionId: SessionId }>> {
+    opts: {
+      workspaceId?: WorkspaceId
+      cwd?: string
+      sessionId?: SessionId
+      isolation?: 'direct' | 'worktree'
+    } = {},
+  ): Promise<RpcResult<{
+    sessionId: SessionId
+    agentPreset?: string
+    executionWorkspace?: { path: string }
+  }>> {
     try {
-      const shared = opts.sessionId === undefined ? {} : { sessionId: opts.sessionId }
+      const shared = {
+        ...(opts.sessionId === undefined ? {} : { sessionId: opts.sessionId }),
+        ...(opts.isolation === undefined ? {} : { isolation: opts.isolation }),
+      }
       const payload = opts.workspaceId !== undefined
         ? { workspaceId: opts.workspaceId, ...shared }
         : { ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }), ...shared }
@@ -552,7 +564,9 @@ export class SessionManager {
       if (result.ok) {
         this.recordMutation({ kind: 'upsert', summary: {
           sessionId: result.value.sessionId, updatedAt: Date.now(), running: false, blank: true,
-          ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+          ...(result.value.executionWorkspace !== undefined
+            ? { cwd: result.value.executionWorkspace.path }
+            : opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
           ...(result.value.agentPreset !== undefined ? { agentPreset: result.value.agentPreset } : {}),
         } })
       } else {

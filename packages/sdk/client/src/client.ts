@@ -536,7 +536,32 @@ function decodeTaskSnapshot(value: unknown): TaskSnapshot {
     || !Number.isSafeInteger(value.asOfSeq)) {
     throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
   }
+  if (value.executionWorkspace !== undefined
+    && !isTaskWorktreeAssignment(value.executionWorkspace, value.taskId, value.workspaceId)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
   return value as unknown as TaskSnapshot
+}
+
+/** Validate an application-owned worktree assignment without rewriting its paths. */
+function isTaskWorktreeAssignment(
+  value: unknown,
+  taskId: string,
+  workspaceId: unknown,
+): value is NonNullable<TaskSnapshot['executionWorkspace']> {
+  return isRecord(value)
+    && value.kind === 'git-worktree'
+    && value.taskId === taskId
+    && typeof workspaceId === 'string'
+    && value.workspaceId === workspaceId
+    && typeof value.sourcePath === 'string' && value.sourcePath.length > 0
+    && typeof value.path === 'string' && value.path.length > 0
+    && typeof value.branch === 'string' && /^dsh\/task-[0-9a-f]{24}$/u.test(value.branch)
+    && typeof value.baseCommit === 'string' && /^[0-9a-f]{40}$/u.test(value.baseCommit)
+    && value.sourceHead === value.baseCommit
+    && typeof value.sourceDirty === 'boolean'
+    && typeof value.sourceStatusDigest === 'string' && /^[0-9a-f]{64}$/u.test(value.sourceStatusDigest)
+    && Number.isSafeInteger(value.createdAt) && Number(value.createdAt) >= 0
 }
 
 /** The message of a thrown value (the transport only throws `Error`s; `String` covers the rest). */

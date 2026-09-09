@@ -77,3 +77,4 @@ export type {
   TaskCriterion, TaskDefinition, TaskListSnapshot, TaskReviewDecision, TaskRisk,
   TaskSnapshot, TaskStatus, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
+export type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
