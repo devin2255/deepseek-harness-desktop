@@ -143,13 +143,13 @@ describe('local Task worktrees', () => {
 
     await expect(ctx.taskWorktrees.create({
       taskId: SessionId('plain'), workspaceId: WorkspaceId('workspace'), workspacePath: plain,
-    })).rejects.toMatchObject<Partial<TaskWorktreeError>>({ code: 'WORKTREE_NOT_GIT' })
+    })).rejects.toMatchObject({ code: 'WORKTREE_NOT_GIT' } satisfies Partial<TaskWorktreeError>)
     await expect(ctx.taskWorktrees.create({
       taskId: SessionId('unborn'), workspaceId: WorkspaceId('workspace'), workspacePath: unborn,
-    })).rejects.toMatchObject<Partial<TaskWorktreeError>>({ code: 'WORKTREE_UNBORN_HEAD' })
+    })).rejects.toMatchObject({ code: 'WORKTREE_UNBORN_HEAD' } satisfies Partial<TaskWorktreeError>)
     await expect(ctx.taskWorktrees.create({
       taskId: SessionId('nested'), workspaceId: WorkspaceId('workspace'), workspacePath: nested,
-    })).rejects.toMatchObject<Partial<TaskWorktreeError>>({ code: 'WORKTREE_NESTED_REPOSITORY' })
+    })).rejects.toMatchObject({ code: 'WORKTREE_NESTED_REPOSITORY' } satisfies Partial<TaskWorktreeError>)
 
     const constrained = new Context()
     const constrainedSubprocess = await constrained.plugin(LocalSubprocessRuntime)
@@ -159,7 +159,7 @@ describe('local Task worktrees', () => {
     )
     await expect(constrained.taskWorktrees.create({
       taskId: SessionId('no-space'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
-    })).rejects.toMatchObject<Partial<TaskWorktreeError>>({ code: 'WORKTREE_INSUFFICIENT_SPACE' })
+    })).rejects.toMatchObject({ code: 'WORKTREE_INSUFFICIENT_SPACE' } satisfies Partial<TaskWorktreeError>)
     expect(git(fixture.source, ['worktree', 'list', '--porcelain'])).not.toContain('dsh/task-')
     await test.dispose()
     await constrainedWorktrees.dispose()
@@ -174,16 +174,16 @@ describe('local Task worktrees', () => {
       taskId: SessionId('occupied'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
     }
     const assignment = await ctx.taskWorktrees.create(request)
-    await expect(ctx.taskWorktrees.create(request)).rejects.toMatchObject<Partial<TaskWorktreeError>>({
+    await expect(ctx.taskWorktrees.create(request)).rejects.toMatchObject({
       code: 'WORKTREE_TARGET_OCCUPIED',
-    })
+    } satisfies Partial<TaskWorktreeError>)
     expect(readFileSync(join(assignment.path, 'tracked.txt'), 'utf8').replaceAll('\r\n', '\n')).toBe('base\n')
 
     git(fixture.source, ['worktree', 'remove', '--force', assignment.path])
     expect(await ctx.taskWorktrees.inspect(assignment)).toBe('missing')
-    await expect(ctx.taskWorktrees.create(request)).rejects.toMatchObject<Partial<TaskWorktreeError>>({
+    await expect(ctx.taskWorktrees.create(request)).rejects.toMatchObject({
       code: 'WORKTREE_BRANCH_OCCUPIED',
-    })
+    } satisfies Partial<TaskWorktreeError>)
     mkdirSync(dirname(assignment.path), { recursive: true })
     mkdirSync(assignment.path)
     expect(await ctx.taskWorktrees.inspect(assignment)).toBe('diverged')
@@ -202,10 +202,10 @@ describe('local Task worktrees', () => {
 
     await expect(test.ctx.taskWorktrees.create({
       taskId: SessionId('hook-failure'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
-    })).rejects.toMatchObject<Partial<TaskWorktreeError>>({
+    })).rejects.toMatchObject({
       code: 'WORKTREE_GIT_FAILED',
       message: expect.stringContaining('preserved for recovery'),
-    })
+    } satisfies Partial<TaskWorktreeError>)
     const listing = git(fixture.source, ['worktree', 'list', '--porcelain'])
     expect(listing).toContain('branch refs/heads/dsh/task-')
     const createdPath = listing.split(/\r?\n/u)

@@ -7706,6 +7706,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+      '@deepseek-ai/dsh-task-worktree':
+        specifier: workspace:^
+        version: link:../task-worktree
       '@deepseek-ai/dsh-workspace':
         specifier: workspace:^
         version: link:../../workspace/workspace
@@ -7727,6 +7730,9 @@ importers:
       '@deepseek-ai/dsh-task':
         specifier: workspace:^
         version: link:../task
+      '@deepseek-ai/dsh-task-worktree':
+        specifier: workspace:^
+        version: link:../task-worktree
       '@deepseek-ai/dsh-user-approval':
         specifier: workspace:^
         version: link:../../interaction/user-approval

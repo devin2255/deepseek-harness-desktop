@@ -1770,6 +1770,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'generation', description: 'exact generation whose source disconnected.' }],
       },
       {
+        signature: 'abstract assignWorktree(sessionId: SessionId, request: AssignTaskWorktreeRequest): Promise<TaskSnapshot>',
+        description: 'Record the immutable execution worktree created for one root Task.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'complete assignment facts and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
         signature: 'abstract define(sessionId: SessionId, request: DefineTaskRequest): Promise<TaskSnapshot>',
         description: 'Define or replace one root Task.',
         parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'normalized definition input and expected next sequence.' }],
@@ -1792,6 +1798,25 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Record an explicit review or delivery decision.',
         parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'decision and expected next sequence.' }],
         returns: 'the committed task row.',
+      },
+    ],
+  },
+  {
+    key: 'taskWorktrees',
+    summary: 'Service Definition for Task-specific execution worktrees.',
+    description: 'Service Definition for Task-specific execution worktrees.',
+    methods: [
+      {
+        signature: 'abstract create( request: CreateTaskWorktreeRequest, signal?: AbortSignal, ): Promise<TaskWorktreeAssignment>',
+        description: 'Create one application-owned integration worktree without changing the source checkout.',
+        parameters: [{ name: 'request', description: 'Task identity and registered source Workspace.' }, { name: 'signal', description: 'Optional cancellation of inspection and Git execution.' }],
+        returns: 'Complete assignment facts suitable for durable Session logging.',
+      },
+      {
+        signature: 'abstract inspect( assignment: TaskWorktreeAssignment, signal?: AbortSignal, ): Promise<TaskWorktreeAvailability>',
+        description: 'Compare durable assignment facts with the current local Git registration.',
+        parameters: [{ name: 'assignment', description: 'Previously recorded worktree assignment.' }, { name: 'signal', description: 'Optional cancellation of Git inspection.' }],
+        returns: 'Whether the exact worktree remains available, is missing, or has diverged.',
       },
     ],
   },
@@ -2767,6 +2792,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AssembledSection {\n    name: string;\n    text: string;\n}',
   },
   {
+    name: 'AssignTaskWorktreeRequest',
+    declaration: 'export interface AssignTaskWorktreeRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedSeq: number;\n}',
+  },
+  {
     name: 'AssistantMessage',
     declaration: 'export interface AssistantMessage extends Message {\n    readonly role: \'assistant\';\n    readonly source: ModelMessageSource;\n}',
   },
@@ -2997,6 +3026,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CreateSessionOptions',
     declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n}',
+  },
+  {
+    name: 'CreateTaskWorktreeRequest',
+    declaration: 'export interface CreateTaskWorktreeRequest {\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly workspacePath: string;\n}',
   },
   {
     name: 'CredentialInfo',
@@ -4412,11 +4445,19 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskSnapshot',
-    declaration: 'export interface TaskSnapshot {\n    readonly taskId: SessionId;\n    readonly workspaceId?: WorkspaceId;\n    readonly definition?: TaskDefinition;\n    readonly descendantSessionIds: readonly SessionId[];\n    readonly status: TaskStatus;\n    readonly freshness: TaskFreshness;\n    readonly attention: readonly AttentionItem[];\n    readonly risks: readonly TaskRisk[];\n    readonly reviewDecision?: TaskReviewDecision;\n    readonly updatedAt: number;\n    readonly asOfSeq: number;\n}',
+    declaration: 'export interface TaskSnapshot {\n    readonly taskId: SessionId;\n    readonly workspaceId?: WorkspaceId;\n    readonly executionWorkspace?: TaskWorktreeAssignment;\n    readonly definition?: TaskDefinition;\n    readonly descendantSessionIds: readonly SessionId[];\n    readonly status: TaskStatus;\n    readonly freshness: TaskFreshness;\n    readonly attention: readonly AttentionItem[];\n    readonly risks: readonly TaskRisk[];\n    readonly reviewDecision?: TaskReviewDecision;\n    readonly updatedAt: number;\n    readonly asOfSeq: number;\n}',
   },
   {
     name: 'TaskStatus',
     declaration: 'export type TaskStatus = \'needs-attention\' | \'failed\' | \'running\' | \'reviewing\' | \'ready\' | \'settled\';',
+  },
+  {
+    name: 'TaskWorktreeAssignment',
+    declaration: 'export interface TaskWorktreeAssignment {\n    readonly kind: \'git-worktree\';\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly sourcePath: string;\n    readonly path: string;\n    readonly branch: string;\n    readonly baseCommit: string;\n    readonly sourceHead: string;\n    readonly sourceDirty: boolean;\n    readonly sourceStatusDigest: string;\n    readonly createdAt: number;\n}',
+  },
+  {
+    name: 'TaskWorktreeAvailability',
+    declaration: 'export type TaskWorktreeAvailability = \'available\' | \'missing\' | \'diverged\';',
   },
   {
     name: 'TerminalBackend',

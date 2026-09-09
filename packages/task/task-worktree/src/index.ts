@@ -1,19 +1,14 @@
 /** Task-owned execution worktree capability. @module @deepseek-ai/dsh-task-worktree */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type {
+  CreateTaskWorktreeRequest,
+  TaskWorktreeAssignment,
+  TaskWorktreeAvailability,
+  TaskWorktreeErrorCode,
+} from './types.ts'
 
-/** Stable business-failure taxonomy exposed by Task worktree Providers. */
-export type TaskWorktreeErrorCode =
-  | 'WORKTREE_NOT_GIT'
-  | 'WORKTREE_NESTED_REPOSITORY'
-  | 'WORKTREE_UNBORN_HEAD'
-  | 'WORKTREE_INSUFFICIENT_SPACE'
-  | 'WORKTREE_TARGET_OCCUPIED'
-  | 'WORKTREE_BRANCH_OCCUPIED'
-  | 'WORKTREE_GIT_FAILED'
-  | 'WORKTREE_UNAVAILABLE'
+export * from './types.ts'
 
 /** Machine-routable Task worktree failure. */
 export class TaskWorktreeError extends Error {
@@ -32,31 +27,6 @@ export class TaskWorktreeError extends Error {
     this.code = code
   }
 }
-
-/** Durable facts identifying one application-owned Git worktree. */
-export interface TaskWorktreeAssignment {
-  readonly kind: 'git-worktree'
-  readonly taskId: SessionId
-  readonly workspaceId: WorkspaceId
-  readonly sourcePath: string
-  readonly path: string
-  readonly branch: string
-  readonly baseCommit: string
-  readonly sourceHead: string
-  readonly sourceDirty: boolean
-  readonly sourceStatusDigest: string
-  readonly createdAt: number
-}
-
-/** Inputs required to create one Task's integration worktree. */
-export interface CreateTaskWorktreeRequest {
-  readonly taskId: SessionId
-  readonly workspaceId: WorkspaceId
-  readonly workspacePath: string
-}
-
-/** Live relationship between recorded assignment facts and the local Git repository. */
-export type TaskWorktreeAvailability = 'available' | 'missing' | 'diverged'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

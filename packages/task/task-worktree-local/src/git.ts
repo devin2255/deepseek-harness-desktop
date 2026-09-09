@@ -12,6 +12,7 @@ export interface GitResult {
 
 /** Internal Git failure retaining bounded diagnostics. */
 export class GitCommandError extends Error {
+  /** Non-success exit and bounded output returned by the managed process. */
   readonly result: GitResult
 
   /** @param result - Non-success exit and bounded output. */

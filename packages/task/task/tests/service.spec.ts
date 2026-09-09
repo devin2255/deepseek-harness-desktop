@@ -9,6 +9,7 @@ import {
   TaskService,
 } from '@deepseek-ai/dsh-task'
 import type {
+  AssignTaskWorktreeRequest,
   DefineTaskRequest,
   LiveTaskFact,
   RecordTaskRiskRequest,
@@ -34,6 +35,10 @@ class StubTaskService extends TaskService {
   replaceLiveGeneration(_generation: number, _facts: readonly LiveTaskFact[]): void {}
 
   invalidateLiveGeneration(_generation: number): void {}
+
+  async assignWorktree(_sessionId: SessionId, _request: AssignTaskWorktreeRequest): Promise<TaskSnapshot> {
+    throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
+  }
 
   async define(_sessionId: SessionId, _request: DefineTaskRequest): Promise<TaskSnapshot> {
     throw new TaskError('not implemented', 'TASK_UNAVAILABLE')

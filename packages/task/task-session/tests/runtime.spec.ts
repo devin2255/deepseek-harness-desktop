@@ -9,8 +9,17 @@ import {
   type LiveTaskFact,
 } from '@deepseek-ai/dsh-task'
 import TaskSessionProvider from '../src/index.ts'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 
 const sid = SessionId
+const assignment = (taskId = sid('root'), workspaceId = 'workspace' as TaskWorktreeAssignment['workspaceId']): TaskWorktreeAssignment => ({
+  kind: 'git-worktree', taskId, workspaceId,
+  sourcePath: 'D:\\repos\\source', path: 'D:\\harness\\worktrees\\root',
+  branch: 'dsh/task-0123456789abcdef01234567',
+  baseCommit: '0123456789abcdef0123456789abcdef01234567',
+  sourceHead: '0123456789abcdef0123456789abcdef01234567', sourceDirty: false,
+  sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+})
 function persistence(initial: readonly { header: SessionHeader; events: readonly SessionEvent[] }[] = []) {
   const logs = new Map(initial.map(item => [item.header.id, { meta: item.header, events: [...item.events] }]))
   const append = vi.fn(async (id: ReturnType<typeof sid>, events: readonly SessionEvent[]) => {
@@ -135,6 +144,51 @@ describe('TaskSessionProvider', () => {
     await expect(test.tasks.define(root.id, { goal: 'again', criteria: [{ text: 'x' }], expectedSeq: 0 }))
       .rejects.toMatchObject({ code: 'TASK_STALE_SEQUENCE' })
     expect(defined).toMatchObject({ asOfSeq: 1, definition: { goal: 'ship' } })
+  })
+
+  it('assigns one durable execution worktree and restores it through the Task projection', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const persisted = persistence()
+    ctx.provide('sessionPersistence', persisted.service as never)
+    ctx.provide('workspaceRegistry', {
+      get: (id: string) => id === 'workspace' ? { id, path: 'D:\\repos\\source', sessionIds: [sid('root')] } : undefined,
+      list: () => [{ id: 'workspace', path: 'D:\\repos\\source', sessionIds: [sid('root')] }],
+    } as never)
+    await ctx.plugin(TaskSessionProvider)
+    const root = ctx.sessions.create(sid('root'))
+
+    const result = await ctx.tasks.assignWorktree(root.id, { assignment: assignment(), expectedSeq: 0 })
+
+    expect(root.events).toMatchObject([{ type: 'task/worktree-assigned', data: { assignment: assignment() } }])
+    expect(result).toMatchObject({ workspaceId: 'workspace', executionWorkspace: assignment(), asOfSeq: 1 })
+    await expect(ctx.tasks.assignWorktree(root.id, { assignment: assignment(), expectedSeq: 1 }))
+      .rejects.toMatchObject({ code: 'TASK_WORKTREE_ASSIGNED' })
+  })
+
+  it('rejects invalid worktree ownership before appending', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const persisted = persistence()
+    ctx.provide('sessionPersistence', persisted.service as never)
+    ctx.provide('workspaceRegistry', {
+      get: (id: string) => id === 'workspace' ? { id, path: 'D:\\repos\\source', sessionIds: [sid('root')] } : undefined,
+      list: () => [{ id: 'workspace', path: 'D:\\repos\\source', sessionIds: [sid('root')] }],
+    } as never)
+    await ctx.plugin(TaskSessionProvider)
+    const root = ctx.sessions.create(sid('root'))
+    const child = ctx.sessions.create(sid('child'), { meta: { origin: 'subagent', parentSession: root.id } })
+
+    await expect(ctx.tasks.assignWorktree(root.id, { assignment: assignment(sid('other')), expectedSeq: 0 }))
+      .rejects.toMatchObject({ code: 'TASK_INVALID_WORKTREE' })
+    await expect(ctx.tasks.assignWorktree(root.id, { assignment: assignment(root.id, 'missing' as never), expectedSeq: 0 }))
+      .rejects.toMatchObject({ code: 'TASK_INVALID_WORKTREE' })
+    await expect(ctx.tasks.assignWorktree(root.id, {
+      assignment: { ...assignment(), sourcePath: 'D:\\repos\\other' }, expectedSeq: 0,
+    })).rejects.toMatchObject({ code: 'TASK_INVALID_WORKTREE' })
+    await expect(ctx.tasks.assignWorktree(child.id, { assignment: assignment(child.id), expectedSeq: 0 }))
+      .rejects.toMatchObject({ code: 'TASK_TARGET_NOT_ROOT' })
+    expect(root.events).toEqual([])
   })
 
   it('updates a cold root through persistence and rejects foreign or missing evidence', async () => {

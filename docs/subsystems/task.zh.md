@@ -2,23 +2,23 @@
 
 [English](task.md) | 中文
 
-Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个桌面工作项。持久验收条件、证据、风险和评审决策保留在根 Session 日志中；运行时活动与注意事项属于 generation 作用域输入，绝不会被重建为持久事实。
+Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个桌面工作项。应用所有的执行 Worktree、验收条件、证据、风险和评审决策保留在根 Session 日志中；运行时活动与注意事项属于 generation 作用域输入，绝不会被重建为持久事实。
 
 ## 持久事实
 
-四种全值 Session 事件定义持久记录：`task/defined`、`task/criterion-updated`、`task/risk-recorded` 和 `task/review-decided`。严格折叠会拒绝额外字段、未规范化的空文本、重复标识、非法证据序号、缺失条件、禁止的状态变化，以及跳过必需阶段的评审决策。[持久化目录](../persistence-catalog.md#taskdefined--log-only)记录其确切声明。
+五种全值 Session 事件定义持久记录：`task/worktree-assigned`、`task/defined`、`task/criterion-updated`、`task/risk-recorded` 和 `task/review-decided`。Worktree 事件只记录一次不可变的源 Workspace、基础提交、源状态摘要、应用分支和执行目录。严格折叠会拒绝重复分配、畸形 Git 标识、额外字段、未规范化的空文本、重复标识、非法证据序号、缺失条件、禁止的状态变化，以及跳过必需阶段的评审决策。[持久化目录](../persistence-catalog.md#taskdefined--log-only)记录其确切声明。
 
 证据指向一个确切的 `(sessionId, seq)` 事件。此包校验其序列化字段；Session Provider 在接受变更前校验该事件存在于同一根任务树中。
 
 ## 投影值
 
-`TaskSnapshot` 是 Provider、Host 与客户端共享的分离全行值，其中包括根 Session id、可选工作区 id、所属后代 id、持久任务事实、派生状态、注意事项、实时数据新鲜度、更新时间，以及用于比较并设置变更的根 Session 序号。`TaskListSnapshot` 建立一个运行时 generation 的有序基线；`TaskListChange` 携带同一 generation 的全行更新与移除项。
+`TaskSnapshot` 是 Provider、Host 与客户端共享的分离全行值，其中包括根 Session id、可选源 Workspace id、可选完整 `executionWorkspace`、所属后代 id、持久任务事实、派生状态、注意事项、实时数据新鲜度、更新时间，以及用于比较并设置变更的根 Session 序号。应用重启后即使瞬态成员关系不可用，持久 Worktree 分配仍决定投影的 Workspace 标识。`TaskListSnapshot` 建立一个运行时 generation 的有序基线；`TaskListChange` 携带同一 generation 的全行更新与移除项。
 
 当前状态优先级依次为 `needs-attention`、`failed`、`running`、`reviewing`、`ready` 和 `settled`。仅处于空闲状态绝不代表已经就绪。运行时断开或不可用会通过 `freshness` 明确表达，不会伪装成当前信息。
 
 ## 服务行为
 
-[`TaskService`](../../packages/task/task/src/service.ts) 是 Host API 使用、由 Session Provider 实现的服务定义。每个持久变更都携带 `expectedSeq`；Provider 在追加一个经过校验的事件前，立即将其与根 Session 的下一序号比较。Provider 必须向订阅者发送分离的全行变更，并隔离各订阅者的故障。
+[`TaskService`](../../packages/task/task/src/service.ts) 是 Host API 使用、由 Session Provider 实现的服务定义。`assignWorktree` 还会校验分配指向目标根 Task、源 Workspace 仍然存在且源路径与该 Workspace 一致。每个持久变更都携带 `expectedSeq`；Provider 在追加一个经过校验的事件前，立即将其与根 Session 的下一序号比较。Provider 必须向订阅者发送分离的全行变更，并隔离各订阅者的故障。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -62,6 +62,14 @@ abstract replaceLiveGeneration(generation: number, facts: readonly LiveTaskFact[
 abstract invalidateLiveGeneration(generation: number): void
 
 /**
+ * Record the immutable execution worktree created for one root Task.
+ * @param sessionId - root Session identity.
+ * @param request - complete assignment facts and expected next sequence.
+ * @returns the committed task row.
+ */
+abstract assignWorktree(sessionId: SessionId, request: AssignTaskWorktreeRequest): Promise<TaskSnapshot>
+
+/**
  * Define or replace one root Task.
  * @param sessionId - root Session identity.
  * @param request - normalized definition input and expected next sequence.
@@ -96,5 +104,31 @@ abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskS
 
 Types: [SessionId](core.md)
 
-Source: [`packages/task/task/src/service.ts:57`](../../packages/task/task/src/service.ts)
+Source: [`packages/task/task/src/service.ts:60`](../../packages/task/task/src/service.ts)
+
+<a id="ctxtaskworktrees--taskworktreeservice-abstract-seam"></a>
+
+### `ctx.taskWorktrees` — `TaskWorktreeService` (abstract seam)
+
+Service Definition for Task-specific execution worktrees.
+
+```ts cordis-catalog
+/**
+ * Create one application-owned integration worktree without changing the source checkout.
+ * @param request - Task identity and registered source Workspace.
+ * @param signal - Optional cancellation of inspection and Git execution.
+ * @returns Complete assignment facts suitable for durable Session logging.
+ */
+abstract create( request: CreateTaskWorktreeRequest, signal?: AbortSignal, ): Promise<TaskWorktreeAssignment>
+
+/**
+ * Compare durable assignment facts with the current local Git registration.
+ * @param assignment - Previously recorded worktree assignment.
+ * @param signal - Optional cancellation of Git inspection.
+ * @returns Whether the exact worktree remains available, is missing, or has diverged.
+ */
+abstract inspect( assignment: TaskWorktreeAssignment, signal?: AbortSignal, ): Promise<TaskWorktreeAvailability>
+```
+
+Source: [`packages/task/task-worktree/src/index.ts:38`](../../packages/task/task-worktree/src/index.ts)
 <!-- END GENERATED cordis-surface -->

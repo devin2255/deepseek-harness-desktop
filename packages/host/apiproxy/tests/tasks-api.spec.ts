@@ -10,7 +10,7 @@ import {
   TaskCriterionId, TaskError, TaskRiskId, TaskService,
 } from '@deepseek-ai/dsh-task'
 import type {
-  DefineTaskRequest, LiveTaskFact, RecordTaskRiskRequest, ReviewTaskRequest, TaskListChange,
+  AssignTaskWorktreeRequest, DefineTaskRequest, LiveTaskFact, RecordTaskRiskRequest, ReviewTaskRequest, TaskListChange,
   TaskListSnapshot, TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task'
 import { createApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
@@ -59,6 +59,10 @@ class FakeTasks extends TaskService {
 
   emit(change: TaskListChange): void {
     for (const listener of this.listeners) listener(change)
+  }
+
+  assignWorktree(sessionId: SessionId, request: AssignTaskWorktreeRequest): Promise<TaskSnapshot> {
+    return this.result('assignWorktree', sessionId, request)
   }
 
   private result(method: string, sessionId: SessionId, request: unknown): Promise<TaskSnapshot> {
@@ -158,6 +162,8 @@ describe('Task RPC', () => {
     ['TASK_INVALID_RISK', 'task-invalid-risk'],
     ['TASK_INVALID_REVIEW', 'task-invalid-review'],
     ['TASK_INVALID_EVIDENCE', 'task-invalid-evidence'],
+    ['TASK_INVALID_WORKTREE', 'task-invalid-worktree'],
+    ['TASK_WORKTREE_ASSIGNED', 'task-worktree-assigned'],
     ['TASK_ACTIVE', 'task-active'],
     ['TASK_UNAVAILABLE', 'task-unavailable'],
   ] as const)('maps %s to %s', async (domainCode, wireCode) => {

@@ -11,6 +11,7 @@ import {
   applyTaskEvent,
   foldTask,
   type DefineTaskRequest,
+  type AssignTaskWorktreeRequest,
   type LiveTaskFact,
   type RecordTaskRiskRequest,
   type ReviewTaskRequest,
@@ -25,9 +26,10 @@ import { aggregateTasks, type TaskSessionInput } from './aggregate.ts'
 
 export * from './aggregate.ts'
 
-type TaskEventType = 'task/defined' | 'task/criterion-updated' | 'task/risk-recorded' | 'task/review-decided'
+type TaskEventType = 'task/worktree-assigned' | 'task/defined' | 'task/criterion-updated' | 'task/risk-recorded' | 'task/review-decided'
 
 interface TaskEventDataMap {
+  readonly 'task/worktree-assigned': Extract<SessionEvent, { type: 'task/worktree-assigned' }>['data']
   readonly 'task/defined': Extract<SessionEvent, { type: 'task/defined' }>['data']
   readonly 'task/criterion-updated': Extract<SessionEvent, { type: 'task/criterion-updated' }>['data']
   readonly 'task/risk-recorded': Extract<SessionEvent, { type: 'task/risk-recorded' }>['data']
@@ -134,6 +136,30 @@ export class TaskSessionProvider extends TaskService {
     this.invalidated = true
     this.freshness = 'disconnected'
     this.rebuild(true)
+  }
+
+  /** @inheritdoc */
+  assignWorktree(sessionId: SessionId, request: AssignTaskWorktreeRequest): Promise<TaskSnapshot> {
+    return this.enqueueValue(async () => {
+      const input = this.requireRoot(sessionId)
+      if (request.assignment.taskId !== sessionId) {
+        throw new TaskError(`Worktree Task "${request.assignment.taskId}" does not match "${sessionId}"`, 'TASK_INVALID_WORKTREE')
+      }
+      if (foldTask(input.events ?? []).assignment !== undefined) {
+        throw new TaskError(`Task "${sessionId}" already has an execution worktree`, 'TASK_WORKTREE_ASSIGNED')
+      }
+      const registry = this.ctx.get('workspaceRegistry')
+      const workspace = registry?.get(request.assignment.workspaceId)
+      if (workspace === undefined) {
+        throw new TaskError(`Workspace "${request.assignment.workspaceId}" does not exist`, 'TASK_INVALID_WORKTREE')
+      }
+      if (workspace.path !== request.assignment.sourcePath) {
+        throw new TaskError(`Worktree source does not match Workspace "${request.assignment.workspaceId}"`, 'TASK_INVALID_WORKTREE')
+      }
+      return await this.commit(input, request.expectedSeq, 'TASK_INVALID_WORKTREE', 'task/worktree-assigned', {
+        assignment: request.assignment,
+      })
+    })
   }
 
   /** @inheritdoc */
@@ -285,6 +311,9 @@ export class TaskSessionProvider extends TaskService {
         throw new TaskError(`Task "${input.header.id}" changed before the update`, 'TASK_STALE_SEQUENCE')
       }
       switch (type) {
+        case 'task/worktree-assigned':
+          live.append('task/worktree-assigned', data as TaskEventDataMap['task/worktree-assigned'])
+          break
         case 'task/defined':
           live.append('task/defined', data as TaskEventDataMap['task/defined'])
           break

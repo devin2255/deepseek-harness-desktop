@@ -12,11 +12,14 @@
 - `onChanged(listener): () => void` 发布分离的全行 upsert 与移除项。单个监听器失败会被记录，且不会阻止后续监听器。
 - `replaceLiveGeneration(generation, facts): void` 原子替换当前或更新代次的活动与交互注意事项。旧代次或已失效代次的发布会被忽略。
 - `invalidateLiveGeneration(generation): void` 保留最近已知的实时事实，但将受影响行标为 `disconnected`，直到更新的基线到达。
+- `assignWorktree` 在校验根 Task 与已登记的源 Workspace 后记录一次不可变执行分配。重复分配、Task 标识不匹配、Workspace 不存在和源路径不匹配都会在追加前失败。
 - `define`、`updateCriterion`、`recordRisk` 和 `review` 串行执行比较并设置写入，验证根与同树证据，并且只追加一个全值事件。
 
 ## 投影规则
 
 即使普通 fork 的 header 指向父 Session，它仍是独立根 Task。子 Agent 链必须无环地抵达一个当前存在的非子 Agent 根；祖先关系畸形时，Provider 启动会失败，而不是把工作静默分配给错误 Task。已知 Session 的日志无法检查时，仍以 `unavailable` 行显示。
+
+投影 `workspaceId` 时，持久 Worktree 分配优先于瞬态 Workspace 成员关系，并通过 `executionWorkspace` 返回完整分配。冷态回放因此能同时恢复已登记的源项目和 Agent 的实际执行目录。
 
 状态优先级依次为：可执行注意事项、未解决失败、运行中活动、审查中、显式证明的就绪，最后是已安定。就绪必须有 `ready` 决定、所有条件均为满足或豁免，并且所有风险均已解决。空闲状态绝不代表完成。
 

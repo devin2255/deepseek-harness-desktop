@@ -18,6 +18,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../task-worktree"
+    },
+    {
       "path": "../../workspace/workspace"
     },
     {

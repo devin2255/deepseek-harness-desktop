@@ -12,11 +12,14 @@ Session-backed Provider for the durable Task service. It reconstructs one Task p
 - `onChanged(listener): () => void` publishes detached whole-row upserts and removals. One failing listener is logged and cannot starve later listeners.
 - `replaceLiveGeneration(generation, facts): void` atomically replaces activity and interactive attention for a current or newer generation. Publications from older or invalidated generations are ignored.
 - `invalidateLiveGeneration(generation): void` retains the last known live facts but marks affected rows `disconnected` until a newer baseline arrives.
+- `assignWorktree` records one immutable execution assignment after validating the root Task and registered source Workspace. Reassignment, mismatched Task identity, missing Workspace identity, and source-path mismatch fail before append.
 - `define`, `updateCriterion`, `recordRisk`, and `review` serialize compare-and-set writes, validate the root and same-tree evidence, and append exactly one whole-value event.
 
 ## Projection Rules
 
 Ordinary forks remain independent root Tasks even when their header names a parent. A subagent chain must reach one present non-subagent root without a cycle; malformed ancestry rejects Provider startup instead of silently assigning work to the wrong Task. A known Session whose log cannot be inspected remains visible through an `unavailable` row.
+
+A durable worktree assignment supersedes transient Workspace membership when projecting `workspaceId`, and the complete assignment is returned as `executionWorkspace`. Cold replay therefore preserves both the registered source project and the actual directory where the Agent ran.
 
 Status precedence is actionable attention, unresolved failure, running activity, review in progress, explicitly proven readiness, then settled. Readiness requires a `ready` decision, every criterion satisfied or waived, and every risk resolved. Idle state never implies completion.
 

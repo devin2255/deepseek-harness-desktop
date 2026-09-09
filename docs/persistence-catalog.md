@@ -720,7 +720,7 @@ Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent
 'task/criterion-updated': { readonly criterion: TaskCriterion }
 ```
 
-Source: [`packages/task/task/src/index.ts:25`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:31`](../packages/task/task/src/index.ts)
 
 <a id="taskdefined--log-only"></a>
 
@@ -734,7 +734,7 @@ Source: [`packages/task/task/src/index.ts:25`](../packages/task/task/src/index.t
 'task/defined': { readonly definition: TaskDefinition }
 ```
 
-Source: [`packages/task/task/src/index.ts:20`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:26`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-decided--log-only"></a>
 
@@ -748,7 +748,7 @@ Source: [`packages/task/task/src/index.ts:20`](../packages/task/task/src/index.t
 'task/review-decided': { readonly decision: TaskReviewDecision }
 ```
 
-Source: [`packages/task/task/src/index.ts:35`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:41`](../packages/task/task/src/index.ts)
 
 <a id="taskrisk-recorded--log-only"></a>
 
@@ -762,7 +762,21 @@ Source: [`packages/task/task/src/index.ts:35`](../packages/task/task/src/index.t
 'task/risk-recorded': { readonly risk: TaskRisk }
 ```
 
-Source: [`packages/task/task/src/index.ts:30`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:36`](../packages/task/task/src/index.ts)
+
+<a id="taskworktree-assigned--log-only"></a>
+
+#### `task/worktree-assigned` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the immutable application-owned execution worktree of one root Task.
+ * @param data - complete creation-time assignment facts.
+ */
+'task/worktree-assigned': { readonly assignment: TaskWorktreeAssignment }
+```
+
+Source: [`packages/task/task/src/index.ts:21`](../packages/task/task/src/index.ts)
 
 ### `todo/*`
 

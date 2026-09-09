@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Session, SessionId, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
 import { AttentionItemId, TaskCriterionId, type LiveTaskFact } from '@deepseek-ai/dsh-task'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 import { aggregateTasks, sortAttentionItems, TaskLineageError, type TaskSessionInput } from '../src/aggregate.ts'
 
 const sid = SessionId
@@ -11,6 +12,14 @@ const input = (id: string, options: Partial<SessionHeader> = {}, events: readonl
   header: header(id, options), events,
 })
 const event = (type: string, seq: number, time: number, data: unknown): SessionEvent => ({ type, seq, time, data } as SessionEvent)
+const assignment: TaskWorktreeAssignment = {
+  kind: 'git-worktree', taskId: sid('root'), workspaceId: 'workspace' as TaskWorktreeAssignment['workspaceId'],
+  sourcePath: 'D:\\repos\\source', path: 'D:\\harness\\worktrees\\root',
+  branch: 'dsh/task-0123456789abcdef01234567',
+  baseCommit: '0123456789abcdef0123456789abcdef01234567',
+  sourceHead: '0123456789abcdef0123456789abcdef01234567', sourceDirty: false,
+  sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+}
 const liveAttention = (taskId: string, owner: string, sourceId: string, severity: 'info' | 'warning' | 'error' | 'critical' = 'warning'): LiveTaskFact => ({
   kind: 'attention',
   item: {
@@ -28,6 +37,17 @@ describe('aggregateTasks', () => {
     ] })
     expect(result.tasks).toHaveLength(1)
     expect(result.tasks[0]?.descendantSessionIds).toEqual([sid('child'), sid('grandchild')])
+  })
+
+  it('projects the durable execution worktree and uses its Workspace identity', () => {
+    const result = aggregateTasks({
+      generation: 1,
+      sessions: [input('root', {}, [event('task/worktree-assigned', 0, 2, { assignment })])],
+      workspaceBySession: new Map([[sid('root'), 'stale-workspace' as never]]),
+    }).tasks[0]
+
+    expect(result).toMatchObject({ workspaceId: 'workspace', executionWorkspace: assignment, asOfSeq: 1 })
+    expect(result?.executionWorkspace).not.toBe(assignment)
   })
 
   it('keeps an ordinary fork as an independent root', () => {

@@ -1,5 +1,7 @@
 # Task Worktree Isolation Implementation Plan
 
+English | [中文](2026-09-09-task-worktree-isolation.zh.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make a workspace-backed writing task run in an application-owned Git worktree while preserving its source Workspace identity and recoverable Git facts in the root Session log.
@@ -185,7 +187,7 @@ git commit -m "feat(task): create local task worktrees"
 - Modify: `docs/subsystems/task.md`
 - Modify: `docs/subsystems/task.zh.md`
 
-- [ ] **Step 1: Write failing durable replay tests**
+- [x] **Step 1: Write failing durable replay tests**
 
 Append a complete assignment event and prove strict replay plus Workspace grouping:
 
@@ -197,13 +199,13 @@ expect(provider.snapshot().tasks[0]).toMatchObject({ workspaceId, executionWorks
 
 Malformed commit ids, digests, branch refs, timestamps, extra fields, duplicate assignment, and reassignment after execution must fail with the exact event sequence. Unknown merge-extensible events remain unchanged.
 
-- [ ] **Step 2: Run the Task tests and confirm RED**
+- [x] **Step 2: Run the Task tests and confirm RED**
 
 Run: `pnpm exec vitest run packages/task/task/tests packages/task/task-session/tests`
 
 Expected: FAIL because the event and projection field are absent.
 
-- [ ] **Step 3: Add the durable event and mutation**
+- [x] **Step 3: Add the durable event and mutation**
 
 Add `executionWorkspace?: TaskWorktreeAssignment` to `TaskSnapshot` and `assignment?: TaskWorktreeAssignment` to `TaskFoldState`. Declare the event through `SessionEventMap`:
 
@@ -215,13 +217,13 @@ Add `executionWorkspace?: TaskWorktreeAssignment` to `TaskSnapshot` and `assignm
 
 Add `TaskService.assignWorktree(sessionId, { assignment, expectedSeq })`. The Session Provider validates that the target is a root, the assignment Task id matches it, the referenced Workspace exists, the event is the first assignment, and `expectedSeq` matches before appending exactly one event. Aggregation uses the assignment's `workspaceId`; cwd-based Workspace membership remains the fallback for direct tasks.
 
-- [ ] **Step 4: Run focused tests and confirm GREEN**
+- [x] **Step 4: Run focused tests and confirm GREEN**
 
 Run: `pnpm exec vitest run packages/task/task/tests packages/task/task-session/tests`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit durable assignment projection**
+- [x] **Step 5: Commit durable assignment projection**
 
 ```powershell
 git add packages/task/task packages/task/task-session docs/subsystems/task.md docs/subsystems/task.zh.md

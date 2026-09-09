@@ -3,6 +3,7 @@
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 
 /** Opaque identity of one acceptance criterion. */
 export type TaskCriterionId = Branded<'TaskCriterionId'>
@@ -117,6 +118,7 @@ export interface AttentionItem {
 export interface TaskSnapshot {
   readonly taskId: SessionId
   readonly workspaceId?: WorkspaceId
+  readonly executionWorkspace?: TaskWorktreeAssignment
   readonly definition?: TaskDefinition
   readonly descendantSessionIds: readonly SessionId[]
   readonly status: TaskStatus
@@ -177,6 +179,12 @@ export interface DefineTaskCriterion {
 export interface DefineTaskRequest {
   readonly goal: string
   readonly criteria: readonly DefineTaskCriterion[]
+  readonly expectedSeq: number
+}
+
+/** Compare-and-set input for recording the Task's immutable execution worktree. */
+export interface AssignTaskWorktreeRequest {
+  readonly assignment: TaskWorktreeAssignment
   readonly expectedSeq: number
 }
 

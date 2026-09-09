@@ -3,6 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
+  AssignTaskWorktreeRequest,
   DefineTaskRequest,
   LiveTaskFact,
   RecordTaskRiskRequest,
@@ -23,6 +24,8 @@ export type TaskErrorCode =
   | 'TASK_INVALID_RISK'
   | 'TASK_INVALID_REVIEW'
   | 'TASK_INVALID_EVIDENCE'
+  | 'TASK_INVALID_WORKTREE'
+  | 'TASK_WORKTREE_ASSIGNED'
   | 'TASK_ACTIVE'
   | 'TASK_UNAVAILABLE'
 
@@ -84,6 +87,14 @@ export abstract class TaskService extends Service {
    * @param generation - exact generation whose source disconnected.
    */
   abstract invalidateLiveGeneration(generation: number): void
+
+  /**
+   * Record the immutable execution worktree created for one root Task.
+   * @param sessionId - root Session identity.
+   * @param request - complete assignment facts and expected next sequence.
+   * @returns the committed task row.
+   */
+  abstract assignWorktree(sessionId: SessionId, request: AssignTaskWorktreeRequest): Promise<TaskSnapshot>
 
   /**
    * Define or replace one root Task.

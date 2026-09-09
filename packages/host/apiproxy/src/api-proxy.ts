@@ -1867,6 +1867,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     TASK_INVALID_RISK: 'task-invalid-risk',
     TASK_INVALID_REVIEW: 'task-invalid-review',
     TASK_INVALID_EVIDENCE: 'task-invalid-evidence',
+    TASK_INVALID_WORKTREE: 'task-invalid-worktree',
+    TASK_WORKTREE_ASSIGNED: 'task-worktree-assigned',
     TASK_ACTIVE: 'task-active',
     TASK_UNAVAILABLE: 'task-unavailable',
   } as const satisfies Record<TaskErrorCode, RpcError['code']>

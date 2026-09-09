@@ -52,6 +52,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'task/defined',
   'task/review-decided',
   'task/risk-recorded',
+  'task/worktree-assigned',
   'todo/write',
   'tool-workflow/agent-end',
   'tool-workflow/agent-start',

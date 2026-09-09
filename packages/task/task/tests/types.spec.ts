@@ -7,6 +7,7 @@ import {
   type TaskDefinition,
   type TaskSnapshot,
 } from '@deepseek-ai/dsh-task'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 
 describe('task public vocabulary', () => {
   it('brands identities and exposes whole-value durable events', () => {
@@ -16,6 +17,10 @@ describe('task public vocabulary', () => {
 
     expectTypeOf<SessionEventMap['task/defined']>()
       .toEqualTypeOf<{ readonly definition: TaskDefinition }>()
+    expectTypeOf<SessionEventMap['task/worktree-assigned']>()
+      .toEqualTypeOf<{ readonly assignment: TaskWorktreeAssignment }>()
+    expectTypeOf<TaskSnapshot['executionWorkspace']>()
+      .toEqualTypeOf<TaskWorktreeAssignment | undefined>()
     expectTypeOf<TaskSnapshot['status']>()
       .toEqualTypeOf<'needs-attention' | 'failed' | 'running' | 'reviewing' | 'ready' | 'settled'>()
   })

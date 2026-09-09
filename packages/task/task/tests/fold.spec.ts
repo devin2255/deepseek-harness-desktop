@@ -9,6 +9,7 @@ import {
   foldTask,
 } from '@deepseek-ai/dsh-task'
 import type { TaskCriterion, TaskDefinition, TaskRisk } from '@deepseek-ai/dsh-task'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 
 const firstCriterion: TaskCriterion = {
   id: TaskCriterionId('installer'),
@@ -44,16 +45,65 @@ const riskRecorded = (risk: TaskRisk, seq = 2): SessionEvent =>
 const reviewed = (decision: string, seq = 3): SessionEvent =>
   event('task/review-decided', { decision }, seq)
 
+const assignment: TaskWorktreeAssignment = {
+  kind: 'git-worktree',
+  taskId: SessionId('root'),
+  workspaceId: 'workspace' as TaskWorktreeAssignment['workspaceId'],
+  sourcePath: 'D:\\repos\\source',
+  path: 'D:\\harness\\worktrees\\root',
+  branch: 'dsh/task-0123456789abcdef01234567',
+  baseCommit: '0123456789abcdef0123456789abcdef01234567',
+  sourceHead: '0123456789abcdef0123456789abcdef01234567',
+  sourceDirty: true,
+  sourceStatusDigest: 'a'.repeat(64),
+  createdAt: 1_700_000_000_000,
+}
+
+const worktreeAssigned = (value: unknown, seq = 0): SessionEvent =>
+  event('task/worktree-assigned', { assignment: value }, seq)
+
 describe('task replay fold', () => {
   it('starts empty and preserves identity for unrelated events', () => {
     const state = emptyTaskFoldState()
     expect(state).toEqual({
+      assignment: undefined,
       definition: undefined,
       risks: [],
       reviewDecision: undefined,
       updatedAt: undefined,
     })
     expect(applyTaskEvent(state, event('turn/start', { turn: 1 }, 0))).toBe(state)
+  })
+
+  it('replays one immutable worktree assignment as the task execution workspace', () => {
+    const state = foldTask([worktreeAssigned(assignment)])
+
+    expect(state.assignment).toEqual(assignment)
+    expect(state.assignment).not.toBe(assignment)
+    expect(state.updatedAt).toBe(1_700_000_000_000)
+  })
+
+  it.each([
+    ['kind', { ...assignment, kind: 'directory' }, 'worktree kind must be git-worktree'],
+    ['task id', { ...assignment, taskId: ' root ' }, 'worktree taskId must be non-empty and normalized'],
+    ['workspace id', { ...assignment, workspaceId: '' }, 'worktree workspaceId must be non-empty and normalized'],
+    ['source path', { ...assignment, sourcePath: ' source ' }, 'worktree sourcePath must be non-empty and normalized'],
+    ['path', { ...assignment, path: '' }, 'worktree path must be non-empty and normalized'],
+    ['branch', { ...assignment, branch: 'main' }, 'worktree branch is invalid'],
+    ['base commit', { ...assignment, baseCommit: 'HEAD' }, 'worktree baseCommit must be a lowercase forty-character Git object id'],
+    ['source head', { ...assignment, sourceHead: 'A'.repeat(40) }, 'worktree sourceHead must be a lowercase forty-character Git object id'],
+    ['different heads', { ...assignment, sourceHead: '1'.repeat(40) }, 'worktree baseCommit must equal sourceHead'],
+    ['dirty flag', { ...assignment, sourceDirty: 'yes' }, 'worktree sourceDirty must be boolean'],
+    ['status digest', { ...assignment, sourceStatusDigest: 'a' }, 'worktree sourceStatusDigest must be a lowercase SHA-256 digest'],
+    ['created time', { ...assignment, createdAt: -1 }, 'worktree createdAt must be a non-negative safe integer'],
+    ['extra field', { ...assignment, extra: true }, 'worktree assignment must have exactly'],
+  ])('rejects malformed persisted worktree data: %s', (_label, value, message) => {
+    expect(() => foldTask([worktreeAssigned(value)])).toThrow(message)
+  })
+
+  it('rejects replacing an existing worktree assignment', () => {
+    expect(() => foldTask([worktreeAssigned(assignment), worktreeAssigned(assignment, 1)]))
+      .toThrow(/worktree assignment already exists/)
   })
 
   it('replaces definitions and detaches their ordered criteria', () => {

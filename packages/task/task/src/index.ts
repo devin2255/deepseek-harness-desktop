@@ -6,6 +6,7 @@ import type {
   TaskReviewDecision,
   TaskRisk,
 } from './types.ts'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 
 export * from './types.ts'
 export * from './fold.ts'
@@ -13,6 +14,11 @@ export * from './service.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
+    /**
+     * Records the immutable application-owned execution worktree of one root Task.
+     * @param data - complete creation-time assignment facts.
+     */
+    'task/worktree-assigned': { readonly assignment: TaskWorktreeAssignment }
     /**
      * Replaces the complete user-authored definition of one root task.
      * @param data - complete post-change definition.

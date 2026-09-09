@@ -198,10 +198,12 @@ export function aggregateTasks(input: TaskAggregationInput): TaskListSnapshot {
             : ready ? 'ready'
               : 'settled'
     const orderedAttention = sortAttentionItems(attention, taskUpdatedAt)
-    const workspaceId = input.workspaceBySession?.get(root.header.id)
+    const executionWorkspace = fold?.assignment
+    const workspaceId = executionWorkspace?.workspaceId ?? input.workspaceBySession?.get(root.header.id)
     tasks.push({
       taskId: root.header.id,
       ...workspaceId === undefined ? {} : { workspaceId },
+      ...executionWorkspace === undefined ? {} : { executionWorkspace: clone(executionWorkspace) },
       ...fold?.definition === undefined ? {} : { definition: clone(fold.definition) },
       descendantSessionIds: children.map(child => child.header.id),
       status,

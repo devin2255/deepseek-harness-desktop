@@ -100,6 +100,8 @@ export interface RpcErrorDetailsMap {
   'task-invalid-risk': { sessionId: SessionId }
   'task-invalid-review': { sessionId: SessionId }
   'task-invalid-evidence': { sessionId: SessionId }
+  'task-invalid-worktree': { sessionId: SessionId }
+  'task-worktree-assigned': { sessionId: SessionId }
   'task-active': { sessionId: SessionId }
   'task-unavailable': { sessionId?: SessionId }
   'internal': {}
