@@ -1,0 +1,19 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cosmokit" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../util/home-paths" },
+    { "path": "../../util/timeout" },
+    { "path": "../../subprocess/subprocess" },
+    { "path": "../task-worktree" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

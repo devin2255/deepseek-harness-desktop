@@ -113,7 +113,7 @@ git commit -m "feat(task): define task worktree capability"
 - Modify: `packages/task/README.md`
 - Modify: `packages/task/README.zh.md`
 
-- [ ] **Step 1: Write real-Git failing tests**
+- [x] **Step 1: Write real-Git failing tests**
 
 Create disposable repositories and assert:
 
@@ -126,13 +126,13 @@ expect(await ctx.taskWorktrees.inspect(assignment)).toBe('available')
 
 Separate tests prove that two task ids produce separate branches and paths, uncommitted source changes are neither copied nor modified, nested repositories and unborn HEADs fail loudly, occupied deterministic targets are preserved, insufficient configured free space fails before Git mutation, and a failed Git add preserves diagnostics and any partial directory.
 
-- [ ] **Step 2: Run the Provider tests and confirm RED**
+- [x] **Step 2: Run the Provider tests and confirm RED**
 
 Run: `pnpm exec vitest run packages/task/task-worktree-local/tests`
 
 Expected: FAIL because the Provider is absent.
 
-- [ ] **Step 3: Implement fail-closed preflight and creation**
+- [x] **Step 3: Implement fail-closed preflight and creation**
 
 Resolve configuration before use:
 
@@ -156,13 +156,13 @@ const path = join(home, 'worktrees', 'v1', digest(sourcePath).slice(0, 24), dige
 
 Serialize create calls per canonical repository. Create only with `git worktree add -b <branch> <path> <baseCommit>`. Do not delete a partial path or branch after a failure. `inspect` parses `git worktree list --porcelain -z` and returns `available` only when path, branch, and HEAD all match the durable assignment.
 
-- [ ] **Step 4: Run focused tests and confirm GREEN**
+- [x] **Step 4: Run focused tests and confirm GREEN**
 
 Run: `pnpm exec vitest run packages/task/task-worktree-local/tests`
 
 Expected: PASS on Windows and POSIX; platform-specific permission probes may skip only with an explicit OS predicate.
 
-- [ ] **Step 5: Commit the Provider**
+- [x] **Step 5: Commit the Provider**
 
 ```powershell
 git add packages/task/task-worktree-local packages/task/README.md packages/task/README.zh.md

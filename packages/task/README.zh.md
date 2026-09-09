@@ -9,6 +9,7 @@
 | `task/` | 服务定义、带品牌的任务值与全值持久 Session 事件 | `tasks` |
 | `task-session/` | Session 持久化 Provider、子 Agent 树聚合、实时代次与注意事项投影 | `tasks` |
 | `task-worktree/` | Task 所有的隔离 Git worktree 服务定义 | `taskWorktrees` |
+| `task-worktree-local/` | 提供拒绝式预检和实时分配检查的本地 Git Provider | `taskWorktrees` |
 
 任务事实仅写入日志，不进入模型请求或模型可见的 Session 表面。Provider 启动时列出已持久化 Session，再以准确的实时 Session 日志覆盖，并且只把连续的 `origin: 'subagent'` 祖先链归入根 Task。普通 fork 仍是独立根任务。
 
