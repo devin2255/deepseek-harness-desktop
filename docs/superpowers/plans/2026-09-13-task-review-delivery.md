@@ -85,7 +85,7 @@ Commit: `feat(task): inspect isolated task changes`
 
 - Modify: `packages/task/task-review-local/src/git.ts`
 - Modify: `packages/task/task-review-local/src/index.ts`
-- Create: `packages/task/task-review-local/tests/delivery.spec.ts`
+- Create the delivery mutation test in the local Provider's `tests/` directory.
 - Modify: `packages/task/task-review-local/README.md`
 - Modify: `packages/task/task-review-local/README.zh.md`
 

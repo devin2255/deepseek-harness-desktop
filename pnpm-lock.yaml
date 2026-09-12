@@ -7743,6 +7743,43 @@ importers:
         specifier: workspace:^
         version: link:../../workspace/workspace
 
+  packages/task/task-review-local:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess-local
+      '@deepseek-ai/dsh-task-review':
+        specifier: workspace:^
+        version: link:../task-review
+      '@deepseek-ai/dsh-task-worktree':
+        specifier: workspace:^
+        version: link:../task-worktree
+      '@deepseek-ai/dsh-task-worktree-local':
+        specifier: workspace:^
+        version: link:../task-worktree-local
+      '@deepseek-ai/dsh-timeout':
+        specifier: workspace:^
+        version: link:../../util/timeout
+      '@deepseek-ai/dsh-workspace':
+        specifier: workspace:^
+        version: link:../../workspace/workspace
+
   packages/task/task-session:
     devDependencies:
       '@deepseek-ai/cordis':

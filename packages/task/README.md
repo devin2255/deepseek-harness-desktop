@@ -11,6 +11,7 @@ The durable task event vocabulary and its cross-session projection implementatio
 | `task-worktree/` | Service Definition for Task-owned isolated Git worktrees | `taskWorktrees` |
 | `task-worktree-local/` | Local Git Provider with fail-closed preflight and live assignment inspection | `taskWorktrees` |
 | `task-review/` | Service Definition and wire values for bounded review, Commit, Apply, and Discard | `taskReview` |
+| `task-review-local/` | Local Git Provider for exact-state review snapshots and bounded file diffs | `taskReview` |
 
 Task facts are log-only and do not enter model requests or the model-visible Session surface. The Provider lists persisted Sessions at startup, overlays exact live Session logs, and groups only uninterrupted `origin: 'subagent'` ancestry under a root Task. Ordinary forks remain independent roots.
 

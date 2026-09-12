@@ -85,7 +85,7 @@
 
 - 修改：`packages/task/task-review-local/src/git.ts`
 - 修改：`packages/task/task-review-local/src/index.ts`
-- 新建：`packages/task/task-review-local/tests/delivery.spec.ts`
+- 在本地 Provider 的 `tests/` 目录下新建交付变更测试。
 - 修改：`packages/task/task-review-local/README.md`
 - 修改：`packages/task/task-review-local/README.zh.md`
 

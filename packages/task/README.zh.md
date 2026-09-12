@@ -11,6 +11,7 @@
 | `task-worktree/` | Task 所有的隔离 Git worktree 服务定义 | `taskWorktrees` |
 | `task-worktree-local/` | 提供拒绝式预检和实时分配检查的本地 Git Provider | `taskWorktrees` |
 | `task-review/` | 有上限审查以及 Commit、Apply、Discard 的服务定义与传输值 | `taskReview` |
+| `task-review-local/` | 提供准确状态审查快照与有上限文件 Diff 的本地 Git Provider | `taskReview` |
 
 任务事实仅写入日志，不进入模型请求或模型可见的 Session 表面。Provider 启动时列出已持久化 Session，再以准确的实时 Session 日志覆盖，并且只把连续的 `origin: 'subagent'` 祖先链归入根 Task。普通 fork 仍是独立根任务。
 
