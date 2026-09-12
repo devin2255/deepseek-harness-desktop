@@ -171,6 +171,8 @@
     { "path": "./packages/task/task" },
     { "path": "./packages/task/task-worktree" },
     { "path": "./packages/task/task-worktree-local" },
+    { "path": "./packages/task/task-review" },
+    { "path": "./packages/task/task-review-local" },
     { "path": "./packages/task/task-session" },
     { "path": "./packages/goal/tool-goal" },
     { "path": "./packages/goal/goal-round-driver" },

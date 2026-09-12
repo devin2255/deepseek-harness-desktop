@@ -24,7 +24,8 @@ import type { ResolvedConfig } from './config.ts'
 import { GitCommandError, parseWorktreeList, runGit } from './git.ts'
 
 export * from './config.ts'
-export { parseWorktreeList } from './git.ts'
+export { parseWorktreeList, runGit } from './git.ts'
+export type { GitExecutionConfig, GitResult, GitWorktreeRecord } from './git.ts'
 
 /** User configuration accepted by the local Task worktree Provider. */
 export interface Config {

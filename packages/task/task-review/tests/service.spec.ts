@@ -54,6 +54,8 @@ const summary: TaskReviewSummary = {
   revision,
   baseCommit: assignment.baseCommit,
   headCommit: assignment.baseCommit,
+  sourceHead: assignment.sourceHead,
+  sourceDirty: false,
   branch: assignment.branch,
   dirty: true,
   truncated: false,
@@ -76,6 +78,7 @@ const commitReceipt: TaskCommitReceipt = {
   taskId,
   workspaceId,
   reviewRevision: revision,
+  committedRevision: TaskReviewRevision('review-committed'),
   branch: assignment.branch,
   commit: 'c'.repeat(40),
   committedAt: 20,
@@ -87,7 +90,8 @@ const applyReceipt: TaskApplyReceipt = {
   workspaceId,
   reviewRevision: revision,
   commit: commitReceipt.commit,
-  sourceHead: assignment.sourceHead,
+  sourceHeadBefore: assignment.sourceHead,
+  sourceHeadAfter: assignment.sourceHead,
   appliedAt: 30,
 }
 const discardReceipt: TaskDiscardReceipt = {
@@ -99,6 +103,7 @@ const discardReceipt: TaskDiscardReceipt = {
   branch: assignment.branch,
   branchPreserved: true,
   worktreeRemoved: true,
+  uncommittedChangesDiscarded: false,
   discardedAt: 40,
 }
 
@@ -119,7 +124,12 @@ class StubTaskReview extends TaskReviewService {
   }
 
   async apply(request: ApplyTaskReviewRequest): Promise<TaskApplyReceipt> {
-    expect(request).toEqual({ assignment, expectedRevision: revision, commit: commitReceipt.commit })
+    expect(request).toEqual({
+      assignment,
+      expectedRevision: revision,
+      expectedSourceHead: assignment.sourceHead,
+      commit: commitReceipt.commit,
+    })
     return applyReceipt
   }
 
@@ -143,6 +153,7 @@ describe('TaskReview Service Definition', () => {
     await expect(ctx.taskReview.apply({
       assignment,
       expectedRevision: revision,
+      expectedSourceHead: assignment.sourceHead,
       commit: commitReceipt.commit,
     })).resolves.toBe(applyReceipt)
     await expect(ctx.taskReview.discard({
@@ -163,6 +174,8 @@ describe('TaskReview Service Definition', () => {
       'REVIEW_INVALID_PATH',
       'REVIEW_FILE_NOT_FOUND',
       'REVIEW_EMPTY',
+      'REVIEW_INCOMPLETE',
+      'REVIEW_INVALID_MESSAGE',
       'REVIEW_IDENTITY_MISSING',
       'REVIEW_SOURCE_DIRTY',
       'REVIEW_SOURCE_MOVED',

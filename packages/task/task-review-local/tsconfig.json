@@ -14,6 +14,7 @@
     { "path": "../../subprocess/subprocess" },
     { "path": "../../util/timeout" },
     { "path": "../task-review" },
-    { "path": "../task-worktree" }
+    { "path": "../task-worktree" },
+    { "path": "../task-worktree-local" }
   ]
 }

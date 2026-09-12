@@ -6,6 +6,8 @@ Local Git Provider for `ctx.taskWorktrees`. It creates one root Task's integrati
 
 Preflight requires a repository-root Workspace, a committed HEAD, no superproject relationship, an unused managed path and branch, and the configured free-space reserve. Every Git invocation uses the managed subprocess service without a shell and has explicit output, deadline, and termination limits. Creation failures preserve partial directories and branches for inspection instead of force-deleting them.
 
+The package also exports the bounded `runGit` primitive and NUL-delimited worktree parser used by local Task providers. Batch stdin and explicit child environment additions stay opt-in at each call site; repository policy and failure mapping remain the consuming Provider's responsibility.
+
 `inspect` returns `available` only when Git's registered path, branch, and HEAD still match the recorded assignment. Missing or changed state is reported without repair.
 
 ## Configuration

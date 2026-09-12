@@ -1,7 +1,13 @@
 /** Bounded managed Git execution and porcelain parsing for Task worktrees. */
 
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import type { ResolvedConfig } from './config.ts'
+
+/** Limits required by one managed Git invocation. */
+export interface GitExecutionConfig {
+  readonly commandTimeoutMs: number
+  readonly terminateGraceMs: number
+  readonly maxOutputBytes: number
+}
 
 /** Settled bounded Git output. */
 export interface GitResult {
@@ -32,6 +38,8 @@ export class GitCommandError extends Error {
  * @param config - Output, deadline, and termination limits.
  * @param signal - Optional caller cancellation.
  * @param acceptedExitCodes - Exit codes returned instead of rejected.
+ * @param stdinData - Optional complete batch input written before stdin closes.
+ * @param env - Optional explicit child environment additions.
  * @returns Complete bounded output and exit code.
  */
 export async function runGit(
@@ -39,9 +47,11 @@ export async function runGit(
   executable: string,
   cwd: string,
   args: readonly string[],
-  config: ResolvedConfig,
+  config: GitExecutionConfig,
   signal?: AbortSignal,
   acceptedExitCodes: readonly number[] = [0],
+  stdinData?: string,
+  env?: NodeJS.ProcessEnv,
 ): Promise<GitResult> {
   signal?.throwIfAborted()
   const deadline = AbortSignal.timeout(config.commandTimeoutMs)
@@ -50,12 +60,13 @@ export async function runGit(
     argv: [executable, '-c', 'core.quotePath=false', ...args],
     cwd,
     stdio: {
-      stdin: 'ignore',
+      stdin: stdinData === undefined ? 'ignore' : { data: stdinData },
       stdout: { maxBytes: config.maxOutputBytes },
       stderr: { maxBytes: config.maxOutputBytes },
     },
     graceMs: config.terminateGraceMs,
     signal: processSignal,
+    env,
   })
   const outcome = await handle.done
   signal?.throwIfAborted()

@@ -4,9 +4,9 @@ English | [中文](README.zh.md)
 
 The Service Definition for reviewing and delivering changes from a Task-owned worktree. Providers expose bounded review summaries and file diffs, then return durable receipts for Commit, Apply, and Discard operations.
 
-Every file diff belongs to an exact `TaskReviewRevision`. Mutations require that same revision and fail when the worktree changes after the user reviewed it. Requests carry the complete recorded `TaskWorktreeAssignment`; consumers never supply an arbitrary repository path.
+Every file diff belongs to an exact `TaskReviewRevision`. Mutations require that same revision and fail when the worktree changes after the user reviewed it. A summary also carries the source checkout's live HEAD and dirty state; Apply requires the displayed source HEAD so a later move fails before mutation. Requests carry the complete recorded `TaskWorktreeAssignment`; consumers never supply an arbitrary repository path.
 
-This package contains no Git implementation and no presentation labels. A Provider owns repository inspection, mutation serialization, preflight checks, and operation identities. The Task consumer records successful receipts in the root Session log.
+This package contains no Git implementation and no presentation labels. A Provider owns repository inspection, mutation serialization, preflight checks, and operation identities. Commit receipts identify the resulting revision, Apply receipts preserve source HEAD facts from before and after the operation, and Discard receipts distinguish unrecoverable uncommitted loss from a preserved commit. The Task consumer records successful receipts in the root Session log.
 
 ## Model Experience
 

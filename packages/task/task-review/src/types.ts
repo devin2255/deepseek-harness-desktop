@@ -37,6 +37,8 @@ export type TaskReviewErrorCode =
   | 'REVIEW_INVALID_PATH'
   | 'REVIEW_FILE_NOT_FOUND'
   | 'REVIEW_EMPTY'
+  | 'REVIEW_INCOMPLETE'
+  | 'REVIEW_INVALID_MESSAGE'
   | 'REVIEW_IDENTITY_MISSING'
   | 'REVIEW_SOURCE_DIRTY'
   | 'REVIEW_SOURCE_MOVED'
@@ -72,6 +74,8 @@ export interface TaskReviewSummary {
   readonly revision: TaskReviewRevision
   readonly baseCommit: string
   readonly headCommit: string
+  readonly sourceHead: string
+  readonly sourceDirty: boolean
   readonly branch: string
   readonly dirty: boolean
   readonly truncated: boolean
@@ -118,6 +122,7 @@ export interface TaskCommitReceipt {
   readonly taskId: SessionId
   readonly workspaceId: WorkspaceId
   readonly reviewRevision: TaskReviewRevision
+  readonly committedRevision: TaskReviewRevision
   readonly branch: string
   readonly commit: string
   readonly committedAt: number
@@ -127,6 +132,7 @@ export interface TaskCommitReceipt {
 export interface ApplyTaskReviewRequest {
   readonly assignment: TaskWorktreeAssignment
   readonly expectedRevision: TaskReviewRevision
+  readonly expectedSourceHead: string
   readonly commit: string
 }
 
@@ -138,7 +144,8 @@ export interface TaskApplyReceipt {
   readonly workspaceId: WorkspaceId
   readonly reviewRevision: TaskReviewRevision
   readonly commit: string
-  readonly sourceHead: string
+  readonly sourceHeadBefore: string
+  readonly sourceHeadAfter: string
   readonly appliedAt: number
 }
 
@@ -159,5 +166,7 @@ export interface TaskDiscardReceipt {
   readonly branch: string
   readonly branchPreserved: boolean
   readonly worktreeRemoved: boolean
+  readonly uncommittedChangesDiscarded: boolean
+  readonly recoverableCommit?: string
   readonly discardedAt: number
 }
