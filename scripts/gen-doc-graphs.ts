@@ -97,6 +97,15 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'taskWorktrees',
+    pkg: 'task-worktree',
+    title: 'Application-owned Task worktrees',
+    mode: 'seam',
+    implementations: ['task-worktree-local'],
+    consumers: ['apiproxy'],
+    note: 'The Host requests isolated Git checkouts; the Provider returns immutable assignment facts for the Task log and inspects live registration without repair.',
+  },
+  {
     key: 'attachments',
     pkg: 'attachment',
     title: 'Durable binary attachment storage',

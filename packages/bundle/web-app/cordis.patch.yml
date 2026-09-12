@@ -94,6 +94,12 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Application-owned execution directories for concurrent root Tasks. The
+    # Provider injects the base layer's subprocess service; the API row below
+    # consumes taskWorktrees only when a caller explicitly requests isolation.
+    - id: task-worktree-local
+      name: '@deepseek-ai/dsh-task-worktree-local'
+
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
     - id: api-gateway

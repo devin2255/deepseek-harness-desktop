@@ -22,13 +22,13 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 当前基础没有感知任务的托盘生命周期：在 Windows 和 Linux 上关闭最后一个窗口会退出，macOS 则保留应用并在激活时重建窗口。Mission Control 将让活动工作继续驻留系统托盘或 macOS 菜单栏，在显式退出时报告活动任务数量，并提供继续运行、停止后退出或取消选项。其恢复流程将根据已记录的事实报告 interrupted、failed 或 settled 状态，不重放未经确认的工具调用。
 
-安全的桌面基础和持久 Task 总览已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。应用所有的 worktree、完整审查工作区、感知任务的托盘行为、更完整的 Mission Control UI、Harness Studio、签名和更新仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
+安全的桌面基础、持久 Task 总览和应用拥有的根任务 worktree 已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。[worktree 决策](../../implemented/feature/2026-09-09-application-owned-task-worktrees.md)记录默认隔离创建及其失败保证。完整审查工作区、子写入者整合、感知任务的托盘行为、更完整的 Mission Control UI、Harness Studio、签名和更新仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
 
 ## 产品结构
 
 [任务总览插件](../../../../packages/client/ui-task-overview/README.md)消费 Task 存储，而不是从对话行派生第二套领域模型。它对六种 Task 状态分组，展示条件进度、未解决风险、活动后代、新鲜度和每个注意事项所有者，并在隐藏时保持会话挂载，因此返回监督视图不会重置选择或草稿。客户端在接受新基线前使断连请求失效；传输健康状态仍由连接负责。纯投影、导航、组件、无密钥组装和真实 Electron 验收覆盖独立一次性工作区中的并发根任务、传输重连期间保留任务行、Renderer 重载后 Task 与注意事项标识保持稳定，以及进入拥有待回答问题的权威子会话。
 
-[并行任务总览规格](../../../../docs/superpowers/specs/2026-09-04-parallel-task-overview-design.md)界定任务监督的第一阶段。它复用会话活动和交互事实，不把非活动状态或未读提醒解释为成功交付；worktree 隔离和审查仍是独立的验收目标。
+[并行任务总览规格](../../../../docs/superpowers/specs/2026-09-04-parallel-task-overview-design.md)界定任务监督的第一阶段。它复用会话活动和交互事实，不把非活动状态或未读提醒解释为成功交付；审查工作区仍是独立的验收目标。
 
 默认任务总览按需要人工介入、正在执行和最近完成分组，而不是按对话时间排序。任务工作区呈现 Agent 依赖图、计划、终端、文件、预览、对话、工件和右侧检查器。审查是独立模式，组合成功条件、Diff、验证证据、未解决风险和 worktree 操作。Harness Studio 渐进展示选中任务的 Preset、插件图、模型路由、工具、权限、工作流和事件流。
 

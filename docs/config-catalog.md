@@ -2246,6 +2246,32 @@ export interface Config {
 
 Source: [`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
 
+<a id="deepseek-aidsh-task-worktree-local"></a>
+
+## `@deepseek-ai/dsh-task-worktree-local`
+
+Requires: `subprocess`
+
+```ts config-catalog
+/** User configuration accepted by the local Task worktree Provider. */
+export interface Config {
+  /** Explicit Harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
+  dshHome?: string
+  /** Minimum free bytes required on the Harness-home volume. */
+  minFreeBytes?: number
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+}
+```
+
+Source: [`packages/task/task-worktree-local/src/index.ts:30`](../packages/task/task-worktree-local/src/index.ts)
+
 <a id="deepseek-aidsh-terminal-bash"></a>
 
 ## `@deepseek-ai/dsh-terminal-bash`
@@ -3114,6 +3140,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-shell` — abstract `ShellExecutor` ([`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts))
 - `@deepseek-ai/dsh-spill` — abstract `SpillStore` ([`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts))
 - `@deepseek-ai/dsh-subprocess` — abstract `SubprocessRuntime` ([`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts))
+- `@deepseek-ai/dsh-task-worktree` — abstract `TaskWorktreeService` ([`packages/task/task-worktree/src/index.ts`](../packages/task/task-worktree/src/index.ts))
 - `@deepseek-ai/dsh-workflow` — abstract `WorkflowEngine` ([`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts))
 
 ## Library packages (no plugin entry)

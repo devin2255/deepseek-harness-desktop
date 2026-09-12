@@ -28,7 +28,7 @@ English | [中文](2026-09-09-task-worktree-isolation.zh.md)
 
 Define the wished-for public API in the test before the package exists:
 
-```ts
+```ts ignore-check
 const request = {
   taskId: SessionId('task-1'),
   workspaceId: WorkspaceId('workspace-1'),
@@ -57,6 +57,10 @@ Expected: FAIL because `@deepseek-ai/dsh-task-worktree` does not exist.
 Export these exact public values:
 
 ```ts
+import { Service } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+
 export interface TaskWorktreeAssignment {
   readonly kind: 'git-worktree'
   readonly taskId: SessionId
@@ -119,7 +123,7 @@ git commit -m "feat(task): define task worktree capability"
 
 Create disposable repositories and assert:
 
-```ts
+```ts ignore-check
 const assignment = await ctx.taskWorktrees.create({ taskId, workspaceId, workspacePath: repository })
 expect(await readFile(join(assignment.path, 'tracked.txt'), 'utf8')).toBe('base\n')
 expect(git(repository, ['status', '--porcelain=v1'])).toBe('')
@@ -152,6 +156,13 @@ export interface Config {
 Defaults are `resolveDshHome()`, 512 MiB, `git`, 30 seconds, 2 seconds, and 1 MiB. Use `ctx.subprocess.resolveExecutable` and `ctx.subprocess.spawn`; never invoke a shell. Before `git worktree add`, require the selected Workspace path to equal `git rev-parse --show-toplevel`, reject a non-empty `--show-superproject-working-tree`, require a forty-hex `HEAD`, hash `git status --porcelain=v1 -z` with SHA-256, and check `statfs.availableBlocks * blockSize`. Derive the branch and path from SHA-256 hashes of the canonical repository and Task id:
 
 ```ts
+import { join } from 'node:path'
+
+declare const home: string
+declare const sourcePath: string
+declare const taskId: string
+declare function digest(value: string): string
+
 const branch = `dsh/task-${digest(taskId).slice(0, 24)}`
 const path = join(home, 'worktrees', 'v1', digest(sourcePath).slice(0, 24), digest(taskId).slice(0, 24))
 ```
@@ -191,7 +202,7 @@ git commit -m "feat(task): create local task worktrees"
 
 Append a complete assignment event and prove strict replay plus Workspace grouping:
 
-```ts
+```ts ignore-check
 session.append({ type: 'task/worktree-assigned', data: { assignment } })
 expect(applyTaskEvent(emptyTaskFoldState(), session.events.at(-1)!)).toMatchObject({ assignment })
 expect(provider.snapshot().tasks[0]).toMatchObject({ workspaceId, executionWorkspace: assignment })
@@ -210,8 +221,12 @@ Expected: FAIL because the event and projection field are absent.
 Add `executionWorkspace?: TaskWorktreeAssignment` to `TaskSnapshot` and `assignment?: TaskWorktreeAssignment` to `TaskFoldState`. Declare the event through `SessionEventMap`:
 
 ```ts
-'task/worktree-assigned': {
-  assignment: TaskWorktreeAssignment
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
+
+interface SessionEventMap {
+  'task/worktree-assigned': {
+    assignment: TaskWorktreeAssignment
+  }
 }
 ```
 
@@ -258,17 +273,24 @@ Expected: FAIL because `isolation` is rejected by the strict request schema.
 Extend the request and response:
 
 ```ts
-create(request: RpcRequest<{
-  workspaceId?: WorkspaceId
-  cwd?: string
-  sessionId?: SessionId
-  agentPreset?: string
-  isolation?: 'direct' | 'worktree'
-}>): Promise<RpcResponse<{
-  sessionId: SessionId
-  agentPreset?: string
-  executionWorkspace?: TaskWorktreeAssignment
-}>>
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
+
+interface SessionApi {
+  create(request: RpcRequest<{
+    workspaceId?: WorkspaceId
+    cwd?: string
+    sessionId?: SessionId
+    agentPreset?: string
+    isolation?: 'direct' | 'worktree'
+  }>): Promise<RpcResponse<{
+    sessionId: SessionId
+    agentPreset?: string
+    executionWorkspace?: TaskWorktreeAssignment
+  }>>
+}
 ```
 
 `worktree` requires `workspaceId` and `ctx.taskWorktrees`; it allocates the Session id first, creates the Git worktree, starts the Session at `assignment.path`, then calls `ctx.tasks.assignWorktree`. Direct creation keeps the existing Workspace attachment. Any failure after Git creation reports the preserved path in redacted structured details and never removes it automatically.
@@ -393,6 +415,9 @@ git commit -m "feat(desktop): create isolated tasks by default"
 **Files:**
 - Modify: `packages/bundle/web-app/cordis.patch.yml`
 - Modify: `packages/bundle/web-app/package.json`
+- Modify: `packages/bundle/desktop-app/tests/desktop-app.spec.ts`
+- Modify: `packages/client/connection/src/client/fixture.ts`
+- Modify: `packages/client/connection/tests/fixture.client.spec.ts`
 - Modify: `apps/web/tests/task-overview.snapshot.ts`
 - Modify: `apps/web/tests/snapshots/task-overview/groups.expected.json`
 - Modify: `apps/desktop/tests/desktop.e2e.ts`
@@ -403,11 +428,11 @@ git commit -m "feat(desktop): create isolated tasks by default"
 - Create: `.agents/notes/implemented/feature/2026-09-09-application-owned-task-worktrees.md`
 - Create: `.agents/notes/implemented/feature/2026-09-09-application-owned-task-worktrees.zh.md`
 
-- [ ] **Step 1: Write failing assembled acceptance**
+- [x] **Step 1: Write failing assembled acceptance**
 
 The keyless scenario creates two isolated task sessions from one disposable Git Workspace and records each Task row's original Workspace id, distinct path, branch, clean base, and unchanged source checkout. Electron acceptance reloads the Renderer and confirms both rows and worktree identities survive.
 
-- [ ] **Step 2: Run assembled tests and confirm RED**
+- [x] **Step 2: Run assembled tests and confirm RED**
 
 Run: `pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/task-overview.snapshot.ts`
 
@@ -415,11 +440,11 @@ Run: `pnpm --filter @deepseek-ai/dsh-desktop test:e2e`
 
 Expected: FAIL because the bundle does not mount the local Provider and fixtures cannot create isolated sessions.
 
-- [ ] **Step 3: Mount and document the complete capability**
+- [x] **Step 3: Mount and document the complete capability**
 
 Mount `task-worktree-local` on the Host plane after `subprocess-local` and before `host-apiproxy`. Update architecture and desktop limitations to state that application-owned root-task worktrees are available while child-writer integration, Apply, Commit, and Discard remain owned by the review slice. Add the implemented Agent Note with alternatives, failure preservation, source-checkout guarantees, and exact test tiers.
 
-- [ ] **Step 4: Regenerate owned artifacts**
+- [x] **Step 4: Regenerate owned artifacts**
 
 Run:
 
@@ -433,14 +458,15 @@ pnpm run gen-persistence-catalog
 
 Expected: generated sources include both worktree packages and `task/worktree-assigned`.
 
-- [ ] **Step 5: Run release-proportional verification**
+- [x] **Step 5: Run release-proportional verification**
 
 Run:
 
 ```powershell
-pnpm exec vitest run packages/task/task-worktree/tests packages/task/task-worktree-local/tests packages/task/task/tests packages/task/task-session/tests packages/host/apiproxy/tests packages/client/runtime/tests packages/client/ui-task-overview/tests packages/client/ui-workspace/tests packages/sdk/sdk/tests
-python -m pytest python/tests
-pnpm run test:snapshot -- -t "task worktree"
+pnpm exec vitest run packages/task/task-worktree/tests packages/task/task-worktree-local/tests packages/task/task/tests packages/task/task-session/tests packages/host/apiproxy/tests packages/client/runtime/tests packages/client/ui-task-overview/tests packages/client/ui-workspace/tests packages/sdk/client/tests
+python -m pytest python/sdk/tests
+pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/task-overview.snapshot.ts
+pnpm --filter @deepseek-ai/dsh-desktop test:e2e
 pnpm run build
 pnpm run typecheck
 pnpm run doc-sync
@@ -449,7 +475,7 @@ git diff --check
 
 Expected: every command passes; any environment-only memory failure is reported separately and does not support a passing claim.
 
-- [ ] **Step 6: Commit the assembled public loop**
+- [x] **Step 6: Commit the assembled public loop**
 
 ```powershell
 git add packages/bundle apps docs .agents/notes packages/task packages/host packages/client packages/sdk python

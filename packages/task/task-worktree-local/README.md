@@ -19,7 +19,11 @@ Preflight requires a repository-root Workspace, a committed HEAD, no superprojec
 
 ## Model Experience
 
-None. The Provider runs Host-owned Git operations and adds no model-visible text.
+None, as this Provider runs Host-owned Git operations and contributes no prompt, tool, or model-visible session event.
+
+#### KV Cache effect
+
+None; the Provider neither assembles nor changes a model request.
 
 ## Known Limitations and Deferred Work
 

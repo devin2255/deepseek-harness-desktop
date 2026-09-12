@@ -200,12 +200,13 @@ describe('local Task worktrees', () => {
     git(fixture.source, ['config', 'core.hooksPath', hooks])
     const test = await mount(fixture.home)
 
-    await expect(test.ctx.taskWorktrees.create({
+    const failure = await test.ctx.taskWorktrees.create({
       taskId: SessionId('hook-failure'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
-    })).rejects.toMatchObject({
-      code: 'WORKTREE_GIT_FAILED',
-      message: expect.stringContaining('preserved for recovery'),
-    } satisfies Partial<TaskWorktreeError>)
+    }).then(() => undefined, (error: unknown) => error)
+    expect(failure).toBeInstanceOf(TaskWorktreeError)
+    if (!(failure instanceof TaskWorktreeError)) throw new Error('expected TaskWorktreeError')
+    expect(failure.code).toBe('WORKTREE_GIT_FAILED')
+    expect(failure.message).toContain('preserved for recovery')
     const listing = git(fixture.source, ['worktree', 'list', '--porcelain'])
     expect(listing).toContain('branch refs/heads/dsh/task-')
     const createdPath = listing.split(/\r?\n/u)

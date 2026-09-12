@@ -19,7 +19,11 @@
 
 ## 模型体验
 
-无。Provider 执行 Host 所有的 Git 操作，不添加模型可见文本。
+无，因为此 Provider 执行 Host 所有的 Git 操作，不提供提示词、工具或模型可见的 Session 事件。
+
+#### KV Cache 影响
+
+无；此 Provider 既不组装也不改变模型请求。
 
 ## 已知限制与后续工作
 

@@ -40,6 +40,12 @@ A Harness startup error, readiness timeout, or initial-window failure keeps the 
 
 The Electron application adds no model-visible content. The desktop profile's [`@deepseek-ai/dsh-desktop-app`](../../packages/bundle/desktop-app/README.md) overlay disables the Web-surface prompt section and owns the loopback authorization guard.
 
+## Parallel task workspaces
+
+The Tasks screen creates a root Session in an application-owned Git worktree by default. The selected Workspace remains the project identity shown in the UI, while the Task projection records the exact source path, execution path, branch, base commit, source HEAD, and source-dirty digest in the Session log. Two tasks created from one repository receive different worktree paths and branches from the same committed base; creating them does not copy uncommitted source changes or modify the source checkout.
+
+Isolation requires an accessible Git repository root with a committed `HEAD`, a supported non-nested layout, Git on `PATH`, and sufficient free space under the Harness home. Preflight and creation failures stop Session creation. The recovery panel offers an isolation retry and an explicit direct-project choice with a write-risk warning; it never changes to direct mode silently. A recorded worktree is verified against Git's live registry before reuse, and a missing or diverged path fails closed.
+
 ## Windows installer development
 
 `pnpm run desktop:package` builds the per-user x64 assisted installer, with a selectable directory and independent desktop, Start-menu, and login-startup choices. Packaging verifies the generated [PowerShell commands](../../scripts/desktop/generate-installer-powershell.ts) and [uninstall file operations](../../scripts/desktop/generate-installer-file-operations.ts) before building. The latter retain electron-builder's relocation and rollback algorithm with extended-length Windows paths; an upstream template change requires review before regeneration with `pnpm run desktop:generate-installer-file-operations`. See the [installer decision](../../.agents/notes/implemented/feature/2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md) for ownership and cleanup rules.
@@ -70,6 +76,6 @@ The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) 
 
 - **Installer qualification** — Windows lifecycle qualification is required before distribution; unsigned local builds can trigger SmartScreen. Automatic updates are not implemented.
 - **Foreground window lifecycle** — there is no tray persistence or task-aware background policy; closing the last window exits on Windows and Linux.
-- **Foundation UI** — the renderer is the existing Web client, not the planned Mission Control task overview, review mode, or Harness Studio.
+- **Task integration** — the task overview and root-task worktree isolation are available. Child-writer worktrees, conflict integration, Apply, Commit, Archive, Discard, the complete review workspace, and Harness Studio are not implemented.
 - **Native integration** — deep links, native notifications, external-link handling, and persisted window placement are not implemented.
 - **Crash recovery** — Main reports startup and shutdown failures but does not yet present task-aware recovery or restart the Harness after an abnormal runtime exit.

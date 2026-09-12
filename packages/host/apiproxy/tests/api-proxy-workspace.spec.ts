@@ -14,7 +14,7 @@ import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import type { DirectoryPickerCapability } from '@deepseek-ai/dsh-host-directory-picker'
 import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
-import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
+import type { CreateTaskWorktreeRequest, TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 import type { HostFrame, WorkspaceId } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
@@ -430,7 +430,7 @@ describe('session creation and Workspace membership', () => {
   it('creates and records an isolated worktree without attaching the source Workspace', async () => {
     const assignments: TaskWorktreeAssignment[] = []
     let recorded: TaskWorktreeAssignment | undefined
-    const create = vi.fn(async ({ taskId, workspaceId, workspacePath }) => {
+    const create = vi.fn(async ({ taskId, workspaceId, workspacePath }: CreateTaskWorktreeRequest) => {
       const value: TaskWorktreeAssignment = {
         kind: 'git-worktree', taskId, workspaceId, sourcePath: workspacePath,
         path: join(workspacePath, '.isolated', String(taskId)), branch: 'dsh/task-0123456789abcdef01234567',

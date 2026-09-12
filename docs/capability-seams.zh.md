@@ -9,6 +9,10 @@
 
 ```mermaid
 flowchart LR
+  pkg_task_worktree["task-worktree"]
+  svc_taskWorktrees["ctx.taskWorktrees<br/>Application-owned Task worktrees"]
+  pkg_task_worktree_local["task-worktree-local"]
+  pkg_apiproxy["apiproxy"]
   pkg_attachment["attachment"]
   svc_attachments["ctx.attachments<br/>Durable binary attachment storage"]
   pkg_attachment_local["attachment-local"]
@@ -49,7 +53,6 @@ flowchart LR
   pkg_settings["settings"]
   svc_settings["ctx.settings<br/>User-settings seam"]
   pkg_settings_file["settings-file"]
-  pkg_apiproxy["apiproxy"]
   pkg_credentials["credentials"]
   svc_credentials["ctx.credentials<br/>Credential seam"]
   pkg_credentials_local["credentials-local"]
@@ -286,6 +289,8 @@ flowchart LR
   pkg_system_prompt --> svc_systemPrompt
   pkg_task --> svc_tasks
   pkg_task_session --> svc_tasks
+  pkg_task_worktree --> svc_taskWorktrees
+  pkg_task_worktree_local --> svc_taskWorktrees
   pkg_terminal --> svc_terminals
   pkg_terminal_bash --> svc_terminals
   pkg_token_meter --> svc_tokenMeter
@@ -390,6 +395,7 @@ flowchart LR
   svc_systemPrompt --> pkg_tool_terminal
   svc_systemPrompt --> pkg_tool_web
   svc_systemPrompt --> pkg_tools
+  svc_taskWorktrees --> pkg_apiproxy
   svc_tasks --> pkg_apiproxy
   svc_terminals --> pkg_tool_terminal
   svc_tokenMeter --> pkg_compaction_basic
@@ -419,6 +425,7 @@ flowchart LR
 
 | ctx 键 | 角色 | 所属包 | 实现 | 直接消费方 | 配套插件 | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.taskWorktrees` | `seam` | [`task-worktree`](../packages/task/task-worktree) | [`task-worktree-local`](../packages/task/task-worktree-local) | `apiproxy` | - | Host 请求隔离 Git 检出；Provider 返回不可变的分配事实以写入 Task 日志，并在不修复的前提下检查实时注册状态。 |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | `host-runtime`, [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | 宿主会在会话事件之前提交已接受的图片；提供方适配器将已授权的持久引用解析为提供方原生内容。 |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | 适配器注册提供方实现；agent loop（智能体循环）与压缩功能调用提供方无关的流服务。 |
 | `ctx.tokenMeter` | `core` | [`token-meter`](../packages/llm/token-meter) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | 拥有按会话隔离的回放折叠区；压力消费方共享不可变且带修订版本的测量结果。 |

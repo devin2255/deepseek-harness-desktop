@@ -4,19 +4,73 @@ import { createHash } from 'node:crypto'
 import { lstat, mkdir, realpath, stat, statfs } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TaskWorktreeError, TaskWorktreeService } from '@deepseek-ai/dsh-task-worktree'
+import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type {
   CreateTaskWorktreeRequest,
   TaskWorktreeAssignment,
   TaskWorktreeAvailability,
   TaskWorktreeErrorCode,
 } from '@deepseek-ai/dsh-task-worktree'
-import { ConfigSchema, resolveConfig } from './config.ts'
-import type { Config, ResolvedConfig } from './config.ts'
+import {
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  DEFAULT_MAX_OUTPUT_BYTES,
+  DEFAULT_MIN_FREE_BYTES,
+  DEFAULT_TERMINATE_GRACE_MS,
+} from './config.ts'
+import type { ResolvedConfig } from './config.ts'
 import { GitCommandError, parseWorktreeList, runGit } from './git.ts'
 
 export * from './config.ts'
 export { parseWorktreeList } from './git.ts'
+
+/** User configuration accepted by the local Task worktree Provider. */
+export interface Config {
+  /** Explicit Harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
+  dshHome?: string
+  /** Minimum free bytes required on the Harness-home volume. */
+  minFreeBytes?: number
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+}
+
+/** Schemastery declaration used by Cordis configuration loading. */
+export const Config: z<Config> = z.object({
+  dshHome: z.string(),
+  minFreeBytes: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MIN_FREE_BYTES),
+  gitCommand: z.string().default('git'),
+  commandTimeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_COMMAND_TIMEOUT_MS),
+  terminateGraceMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_TERMINATE_GRACE_MS),
+  maxOutputBytes: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_OUTPUT_BYTES),
+})
+
+/**
+ * Resolve all deployment choices once at Provider construction.
+ * @param config - User configuration after Cordis schema defaults.
+ * @returns Absolute roots and validated numeric limits.
+ */
+export function resolveConfig(config: Config): ResolvedConfig {
+  const gitCommand = config.gitCommand ?? 'git'
+  if (gitCommand.trim().length === 0 || gitCommand !== gitCommand.trim()) {
+    throw new Error('task-worktree-local: gitCommand must be non-empty and normalized')
+  }
+  return Object.freeze({
+    home: resolve(resolveDshHome(config.dshHome)),
+    minFreeBytes: config.minFreeBytes ?? DEFAULT_MIN_FREE_BYTES,
+    gitCommand,
+    commandTimeoutMs: config.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+    terminateGraceMs: config.terminateGraceMs ?? DEFAULT_TERMINATE_GRACE_MS,
+    maxOutputBytes: config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+  })
+}
 
 const COMMIT = /^[0-9a-f]{40}$/u
 
@@ -41,7 +95,7 @@ function failure(message: string, code: TaskWorktreeErrorCode, cause?: unknown):
 /** Local Provider using Git's own worktree registry as the live authority. */
 export class LocalTaskWorktrees extends TaskWorktreeService {
   static inject = ['subprocess']
-  static Config = ConfigSchema
+  static Config = Config
 
   private readonly config: ResolvedConfig
   private readonly chains = new Map<string, Promise<void>>()
@@ -49,9 +103,6 @@ export class LocalTaskWorktrees extends TaskWorktreeService {
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
-    if ((ctx as Context & { subprocess?: unknown }).subprocess === undefined) {
-      throw new Error('task-worktree-local requires ctx.subprocess')
-    }
     this.config = resolveConfig(config)
   }
 

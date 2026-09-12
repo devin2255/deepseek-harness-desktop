@@ -14,7 +14,7 @@ it('keeps a root draft while routing known descendant attention through the desk
   await within(overview).findByRole('button', { name: 'Fixture 历史会话' })
   const childAttention = await within(overview).findByRole('button', { name: /^fixture — Question:/ })
   expect(within(overview).getAllByRole('heading').map(node => node.textContent)).toEqual(['Tasks', 'Needs You', 'Running', 'Other'])
-  expect(overview.textContent).toContain('no automatic worktree isolation')
+  expect(overview.textContent).toContain('New tasks run in isolated Git worktrees by default')
   const projection = [...overview.querySelectorAll('section')].map(section => ({
     group: section.querySelector('h2')?.textContent,
     tasks: [...section.querySelectorAll(':scope > ul > li')].map(row => row.textContent),
@@ -52,4 +52,21 @@ it('leaves ordinary Web composition without a Tasks navigation entry', async () 
   await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
   expect(screen.queryByRole('button', { name: 'Tasks' })).toBeNull()
   expect(screen.queryByRole('main', { name: 'Tasks' })).toBeNull()
+})
+
+it('creates an isolated task through the assembled desktop roster', async () => {
+  mountAssembledApp({ taskOverview: true })
+  const overview = await screen.findByRole('main', { name: 'Tasks' }, { timeout: 10_000 })
+  expect(overview.textContent).toContain('New tasks run in isolated Git worktrees by default')
+  fireEvent.click(within(overview).getByRole('button', { name: 'New Task' }))
+  await waitFor(() => { expect(screen.queryByRole('main', { name: 'Tasks' })).toBeNull() })
+  fireEvent.click(await screen.findByRole('button', { name: 'Tasks' }))
+  const returned = await screen.findByRole('main', { name: 'Tasks' })
+  fireEvent.click(within(returned).getByRole('button', { name: 'Refresh' }))
+  const created = await within(returned).findByRole('button', { name: 'Fixture isolated task 1' })
+  const row = created.closest('li')
+  if (row === null) throw new Error('isolated fixture Task row has no list item')
+  expect(row.textContent).toContain('fixture')
+  expect(row.textContent).toContain('Worktree')
+  expect(within(row).getByTitle(/^\/tmp\/fixture-worktrees\/fx-\d+$/u).textContent).toBe('Worktree')
 })

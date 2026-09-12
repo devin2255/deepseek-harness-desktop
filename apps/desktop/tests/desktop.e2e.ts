@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -17,6 +19,20 @@ interface TaskIdentitySnapshot {
   readonly tasks: readonly {
     readonly taskId: string
     readonly status: string
+    readonly workspaceId?: string
+    readonly executionWorkspace?: {
+      readonly kind: 'git-worktree'
+      readonly taskId: string
+      readonly workspaceId: string
+      readonly sourcePath: string
+      readonly path: string
+      readonly branch: string
+      readonly baseCommit: string
+      readonly sourceHead: string
+      readonly sourceDirty: boolean
+      readonly sourceStatusDigest: string
+      readonly createdAt: number
+    }
     readonly attention: readonly {
       readonly id: string
       readonly ownerSessionId: string
@@ -211,6 +227,81 @@ describe('desktop Electron acceptance', () => {
       { taskId: secondSession.sessionId, status: 'running' },
     ].sort((left, right) => left.taskId.localeCompare(right.taskId)))
     await expectBothWorkspacesRunning(overview)
+
+    const isolatedSource = join(temporaryRoot, 'isolated-source')
+    await mkdir(isolatedSource)
+    git(isolatedSource, ['init'])
+    git(isolatedSource, ['config', 'user.name', 'DeepSeek Harness Test'])
+    git(isolatedSource, ['config', 'user.email', 'test@localhost'])
+    await writeFile(join(isolatedSource, 'tracked.txt'), 'clean base\n')
+    git(isolatedSource, ['add', 'tracked.txt'])
+    git(isolatedSource, ['commit', '-m', 'clean base'])
+    const isolatedWorkspace = await pageRpc<{ workspace: { workspaceId: string } }>(
+      page,
+      'workspace.create',
+      { path: isolatedSource },
+    )
+    const [isolatedFirst, isolatedSecond] = await Promise.all([
+      pageRpc<{ sessionId: string; executionWorkspace: NonNullable<TaskIdentitySnapshot['tasks'][number]['executionWorkspace']> }>(
+        page,
+        'session.create',
+        { workspaceId: isolatedWorkspace.workspace.workspaceId, isolation: 'worktree' },
+      ),
+      pageRpc<{ sessionId: string; executionWorkspace: NonNullable<TaskIdentitySnapshot['tasks'][number]['executionWorkspace']> }>(
+        page,
+        'session.create',
+        { workspaceId: isolatedWorkspace.workspace.workspaceId, isolation: 'worktree' },
+      ),
+    ])
+    expect(isolatedFirst.executionWorkspace).toMatchObject({
+      kind: 'git-worktree',
+      taskId: isolatedFirst.sessionId,
+      workspaceId: isolatedWorkspace.workspace.workspaceId,
+      sourcePath: isolatedSource,
+      sourceDirty: false,
+    })
+    expect(isolatedSecond.executionWorkspace).toMatchObject({
+      kind: 'git-worktree',
+      taskId: isolatedSecond.sessionId,
+      workspaceId: isolatedWorkspace.workspace.workspaceId,
+      sourcePath: isolatedSource,
+      sourceDirty: false,
+    })
+    expect(isolatedFirst.executionWorkspace.path).not.toBe(isolatedSecond.executionWorkspace.path)
+    expect(isolatedFirst.executionWorkspace.branch).not.toBe(isolatedSecond.executionWorkspace.branch)
+    expect(isolatedFirst.executionWorkspace.baseCommit).toBe(isolatedSecond.executionWorkspace.baseCommit)
+    expect(isolatedFirst.executionWorkspace.sourceHead).toBe(isolatedFirst.executionWorkspace.baseCommit)
+    expect(existsSync(join(isolatedFirst.executionWorkspace.path, 'tracked.txt'))).toBe(true)
+    expect(existsSync(join(isolatedSecond.executionWorkspace.path, 'tracked.txt'))).toBe(true)
+    expect(git(isolatedSource, ['status', '--porcelain=v1'])).toBe('')
+
+    await Promise.all([
+      pageRpc(page, 'session.prompt', {
+        sessionId: isolatedFirst.sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text: 'run isolated task alpha' }],
+      }),
+      pageRpc(page, 'session.prompt', {
+        sessionId: isolatedSecond.sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text: 'run isolated task beta' }],
+      }),
+    ])
+    await expect.poll(async () => {
+      const projection = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+      return projection.tasks
+        .filter(task => task.taskId === isolatedFirst.sessionId || task.taskId === isolatedSecond.sessionId)
+        .map(task => task.executionWorkspace?.path)
+        .sort()
+    }, { timeout: 15_000 }).toEqual([
+      isolatedFirst.executionWorkspace.path,
+      isolatedSecond.executionWorkspace.path,
+    ].sort())
+    const isolatedRows = overview.getByRole('heading', { name: /^(Running|进行中)$/u }).locator('..')
+      .getByRole('listitem').filter({ hasText: 'isolated-source' })
+    await expect.poll(() => isolatedRows.count(), { timeout: 15_000 }).toBe(2)
+    await expect.poll(async () => (await isolatedRows.allTextContents())
+      .every(row => /(Worktree|工作树)/u.test(row)), { timeout: 15_000 }).toBe(true)
     await overview.getByText('workspace-a').locator('xpath=ancestor::li').getByRole('button').first().click()
     await overview.waitFor({ state: 'hidden' })
     await page.getByRole('button', { name: /^(Tasks|任务)$/u }).click()
@@ -270,6 +361,11 @@ describe('desktop Electron acceptance', () => {
     expect(afterTask?.taskId).toBe(beforeTask?.taskId)
     expect(afterAttention?.id).toBe(beforeAttention?.id)
     expect(afterAttention?.ownerSessionId).toBe(beforeAttention?.ownerSessionId)
+    for (const created of [isolatedFirst, isolatedSecond]) {
+      const restored = afterReload.tasks.find(task => task.taskId === created.sessionId)
+      expect(restored?.workspaceId).toBe(isolatedWorkspace.workspace.workspaceId)
+      expect(restored?.executionWorkspace).toEqual(created.executionWorkspace)
+    }
 
     const reloadedNeedsYou = overview.getByRole('heading', { name: /^(Needs You|需要你处理)$/u }).locator('..')
     const reloadedChildQuestion = reloadedNeedsYou.getByRole('button', { name: DESCENDANT_QUESTION_NAME })
@@ -319,6 +415,14 @@ describe('desktop Electron acceptance', () => {
     application = undefined
   }, 120_000)
 })
+
+function git(cwd: string, args: readonly string[]): string {
+  return execFileSync('git', ['-c', 'core.autocrlf=false', ...args], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+}
 
 async function readProviderRequest(request: IncomingMessage): Promise<unknown> {
   let body = ''

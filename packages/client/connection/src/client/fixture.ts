@@ -1555,6 +1555,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   let nextSession = 1
   let nextRpc = 1
   let attachedSessions = options.empty ? 0 : 1
+  const taskWorktreeAssignments = new Map<SessionId, NonNullable<TaskSnapshot['executionWorkspace']>>()
   // Workspace entities mirroring the host registry: the fixture sessions all
   // live under one workspace, whose account carries them in attach order.
   const wid = (raw: string): WorkspaceId => raw as WorkspaceId
@@ -2252,8 +2253,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             },
           })
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? '/tmp/fixture'
         const requestedId = request.payload.sessionId
+        const existingAssignment = requestedId === undefined ? undefined : taskWorktreeAssignments.get(requestedId)
+        const requestedCwd = existingAssignment?.path ?? workspace?.path ?? request.payload.cwd ?? '/tmp/fixture'
         const attachWorkspace = (sessionId: SessionId): void => {
           /* v8 ignore next -- callers enter only when a target Workspace exists. */
           if (workspace === undefined || workspace.sessionIds.includes(sessionId)) return
@@ -2272,24 +2274,45 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         if (requestedId !== undefined) {
           const existing = summaryOf(requestedId)
           if (existing !== undefined) {
-            if (existing.cwd !== cwd) {
+            if (existing.cwd !== requestedCwd) {
               return err(request, {
                 code: 'session-conflict',
                 message: `session ${requestedId} already uses ${existing.cwd ?? 'no cwd'}`,
-                details: { sessionId: requestedId, requestedCwd: cwd, ...existing.cwd === undefined ? {} : { existingCwd: existing.cwd } },
+                details: { sessionId: requestedId, requestedCwd, ...existing.cwd === undefined ? {} : { existingCwd: existing.cwd } },
               })
             }
-            if (workspace !== undefined && !workspace.sessionIds.includes(requestedId)) {
+            if (workspace !== undefined && existingAssignment === undefined && !workspace.sessionIds.includes(requestedId)) {
               if (options.failWorkspaceAttach) return attachFailure(requestedId, workspace.workspaceId)
               attachWorkspace(requestedId)
             }
-            return ok(request, { sessionId: requestedId })
+            return ok(request, {
+              sessionId: requestedId,
+              ...existingAssignment === undefined ? {} : { executionWorkspace: existingAssignment },
+            })
           }
         }
+        const createdId = requestedId ?? sid(`fx-${nextSession++}`)
+        const executionWorkspace = request.payload.isolation === 'worktree' && workspace !== undefined
+          ? {
+            kind: 'git-worktree' as const,
+            taskId: createdId,
+            workspaceId: workspace.workspaceId,
+            sourcePath: workspace.path,
+            path: `/tmp/fixture-worktrees/${createdId}`,
+            branch: `dsh/task-${(taskWorktreeAssignments.size + 1).toString(16).padStart(24, '0')}`,
+            baseCommit: 'a'.repeat(40),
+            sourceHead: 'a'.repeat(40),
+            sourceDirty: false,
+            sourceStatusDigest: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            createdAt: Date.now(),
+          }
+          : undefined
+        const cwd = executionWorkspace?.path ?? requestedCwd
         const created: SessionSummary = {
-          sessionId: requestedId ?? sid(`fx-${nextSession++}`), updatedAt: Date.now(), running: false, blank: true, cwd,
+          sessionId: createdId, updatedAt: Date.now(), running: false, blank: true, cwd,
         }
         sessions.push(created)
+        if (executionWorkspace !== undefined) taskWorktreeAssignments.set(created.sessionId, executionWorkspace)
         modelSelections.set(created.sessionId, { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
         attachedSessions += 1
         const emitSession = (): void => {
@@ -2300,15 +2323,18 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           emitSession()
           return attachFailure(created.sessionId, workspace.workspaceId)
         }
-        if (workspace !== undefined && options.createFrameOrder === 'workspace-first') {
+        if (workspace !== undefined && executionWorkspace === undefined && options.createFrameOrder === 'workspace-first') {
           attachWorkspace(created.sessionId)
           emitSession()
         } else {
           emitSession()
-          if (workspace !== undefined) attachWorkspace(created.sessionId)
+          if (workspace !== undefined && executionWorkspace === undefined) attachWorkspace(created.sessionId)
         }
         if (options.dropSessionCreateResponse) throw new Error('fixture: dropped session.create response after publication')
-        return ok(request, { sessionId: created.sessionId })
+        return ok(request, {
+          sessionId: created.sessionId,
+          ...executionWorkspace === undefined ? {} : { executionWorkspace },
+        })
       },
       rename: (request) => {
         const missing = requireSession(request)
@@ -2862,7 +2888,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     },
     tasks: {
       list: request => ok(request, {
-        generation: 0,
+        generation: taskWorktreeAssignments.size,
         tasks: options.taskOverviewRoster === true ? [
           {
             taskId: sid('fx-alpha'), workspaceId: wid('fx-ws-fixture'),
@@ -2886,6 +2912,15 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             definition: { goal: 'fixture', criteria: [] }, descendantSessionIds: [],
             status: 'settled', freshness: 'live', attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
           },
+          ...[...taskWorktreeAssignments.values()].map((assignment, index): TaskSnapshot => ({
+            taskId: assignment.taskId,
+            workspaceId: assignment.workspaceId,
+            executionWorkspace: assignment,
+            definition: { goal: `Fixture isolated task ${String(index + 1)}`, criteria: [] },
+            descendantSessionIds: [],
+            status: summaryOf(assignment.taskId)?.running === true ? 'running' : 'settled',
+            freshness: 'live', attention: [], risks: [], updatedAt: 4 + index, asOfSeq: 0,
+          })),
         ] satisfies TaskSnapshot[] : [],
       }),
       define: request => err(request, {

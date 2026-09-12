@@ -8,7 +8,11 @@ Creation never permits an implicit direct-workspace fallback. The consuming Host
 
 ## Model Experience
 
-None. This package declares a Host capability and adds no tool or model-visible text.
+None, as this Host capability contributes no prompt, tool, or model-visible session event.
+
+#### KV Cache effect
+
+None; this package neither assembles nor changes a model request.
 
 ## Known Limitations and Deferred Work
 

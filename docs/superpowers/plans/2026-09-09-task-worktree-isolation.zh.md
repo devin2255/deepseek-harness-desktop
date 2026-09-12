@@ -28,7 +28,7 @@
 
 在包存在之前，先在测试中定义期望的公开 API：
 
-```ts
+```ts ignore-check
 const request = {
   taskId: SessionId('task-1'),
   workspaceId: WorkspaceId('workspace-1'),
@@ -57,6 +57,10 @@ expect(created).toMatchObject({
 导出以下准确公开值：
 
 ```ts
+import { Service } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+
 export interface TaskWorktreeAssignment {
   readonly kind: 'git-worktree'
   readonly taskId: SessionId
@@ -119,7 +123,7 @@ git commit -m "feat(task): define task worktree capability"
 
 创建一次性仓库并断言：
 
-```ts
+```ts ignore-check
 const assignment = await ctx.taskWorktrees.create({ taskId, workspaceId, workspacePath: repository })
 expect(await readFile(join(assignment.path, 'tracked.txt'), 'utf8')).toBe('base\n')
 expect(git(repository, ['status', '--porcelain=v1'])).toBe('')
@@ -152,6 +156,13 @@ export interface Config {
 默认值依次是 `resolveDshHome()`、512 MiB、`git`、30 秒、2 秒和 1 MiB。使用 `ctx.subprocess.resolveExecutable` 与 `ctx.subprocess.spawn`，绝不调用 shell。在 `git worktree add` 之前，要求所选 Workspace 路径等于 `git rev-parse --show-toplevel`，拒绝非空的 `--show-superproject-working-tree`，要求四十位十六进制 `HEAD`，以 SHA-256 哈希 `git status --porcelain=v1 -z`，并检查 `statfs.availableBlocks * blockSize`。根据规范仓库路径和 Task id 的 SHA-256 哈希推导分支和路径：
 
 ```ts
+import { join } from 'node:path'
+
+declare const home: string
+declare const sourcePath: string
+declare const taskId: string
+declare function digest(value: string): string
+
 const branch = `dsh/task-${digest(taskId).slice(0, 24)}`
 const path = join(home, 'worktrees', 'v1', digest(sourcePath).slice(0, 24), digest(taskId).slice(0, 24))
 ```
@@ -191,7 +202,7 @@ git commit -m "feat(task): create local task worktrees"
 
 追加一个完整分配事件，并证明严格回放与 Workspace 分组：
 
-```ts
+```ts ignore-check
 session.append({ type: 'task/worktree-assigned', data: { assignment } })
 expect(applyTaskEvent(emptyTaskFoldState(), session.events.at(-1)!)).toMatchObject({ assignment })
 expect(provider.snapshot().tasks[0]).toMatchObject({ workspaceId, executionWorkspace: assignment })
@@ -210,8 +221,12 @@ expect(provider.snapshot().tasks[0]).toMatchObject({ workspaceId, executionWorks
 向 `TaskSnapshot` 添加 `executionWorkspace?: TaskWorktreeAssignment`，向 `TaskFoldState` 添加 `assignment?: TaskWorktreeAssignment`。通过 `SessionEventMap` 声明事件：
 
 ```ts
-'task/worktree-assigned': {
-  assignment: TaskWorktreeAssignment
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
+
+interface SessionEventMap {
+  'task/worktree-assigned': {
+    assignment: TaskWorktreeAssignment
+  }
 }
 ```
 
@@ -258,17 +273,24 @@ git commit -m "feat(task): record isolated execution workspaces"
 扩展请求与响应：
 
 ```ts
-create(request: RpcRequest<{
-  workspaceId?: WorkspaceId
-  cwd?: string
-  sessionId?: SessionId
-  agentPreset?: string
-  isolation?: 'direct' | 'worktree'
-}>): Promise<RpcResponse<{
-  sessionId: SessionId
-  agentPreset?: string
-  executionWorkspace?: TaskWorktreeAssignment
-}>>
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
+
+interface SessionApi {
+  create(request: RpcRequest<{
+    workspaceId?: WorkspaceId
+    cwd?: string
+    sessionId?: SessionId
+    agentPreset?: string
+    isolation?: 'direct' | 'worktree'
+  }>): Promise<RpcResponse<{
+    sessionId: SessionId
+    agentPreset?: string
+    executionWorkspace?: TaskWorktreeAssignment
+  }>>
+}
 ```
 
 `worktree` 要求 `workspaceId` 和 `ctx.taskWorktrees`；它先分配 Session id，再创建 Git Worktree，以 `assignment.path` 启动 Session，随后调用 `ctx.tasks.assignWorktree`。直接创建保留现有 Workspace 附加行为。Git 创建后的任何失败都在脱敏的结构化详情中报告保留路径，且绝不自动删除。
@@ -393,6 +415,9 @@ git commit -m "feat(desktop): create isolated tasks by default"
 **文件：**
 - 修改：`packages/bundle/web-app/cordis.patch.yml`
 - 修改：`packages/bundle/web-app/package.json`
+- 修改：`packages/bundle/desktop-app/tests/desktop-app.spec.ts`
+- 修改：`packages/client/connection/src/client/fixture.ts`
+- 修改：`packages/client/connection/tests/fixture.client.spec.ts`
 - 修改：`apps/web/tests/task-overview.snapshot.ts`
 - 修改：`apps/web/tests/snapshots/task-overview/groups.expected.json`
 - 修改：`apps/desktop/tests/desktop.e2e.ts`
@@ -403,11 +428,11 @@ git commit -m "feat(desktop): create isolated tasks by default"
 - 新建：`.agents/notes/implemented/feature/2026-09-09-application-owned-task-worktrees.md`
 - 新建：`.agents/notes/implemented/feature/2026-09-09-application-owned-task-worktrees.zh.md`
 
-- [ ] **步骤 1：编写失败的装配验收**
+- [x] **步骤 1：编写失败的装配验收**
 
 无密钥场景从一个一次性 Git Workspace 创建两个隔离 Task Session，并记录每个 Task 行的原 Workspace id、不同路径、分支、干净基础和未改变的源检出。Electron 验收重新加载 Renderer，确认两个行和 Worktree 标识仍然存在。
 
-- [ ] **步骤 2：运行装配测试并确认 RED**
+- [x] **步骤 2：运行装配测试并确认 RED**
 
 运行：`pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/task-overview.snapshot.ts`
 
@@ -415,11 +440,11 @@ git commit -m "feat(desktop): create isolated tasks by default"
 
 预期：失败，因为 bundle 尚未挂载本地 Provider，fixture 也无法创建隔离 Session。
 
-- [ ] **步骤 3：挂载并记录完整能力**
+- [x] **步骤 3：挂载并记录完整能力**
 
 在 Host 平面中，将 `task-worktree-local` 挂载于 `subprocess-local` 之后、`host-apiproxy` 之前。更新架构和桌面限制：应用所有的根 Task Worktree 已可用，子写入者集成、Apply、Commit 和 Discard 仍由评审阶段负责。添加 implemented Agent Note，记录替代方案、失败保留策略、源检出保证和准确测试层级。
 
-- [ ] **步骤 4：重新生成归属产物**
+- [x] **步骤 4：重新生成归属产物**
 
 运行：
 
@@ -433,14 +458,15 @@ pnpm run gen-persistence-catalog
 
 预期：生成源包含两个 Worktree 包和 `task/worktree-assigned`。
 
-- [ ] **步骤 5：运行与发布风险相称的验证**
+- [x] **步骤 5：运行与发布风险相称的验证**
 
 运行：
 
 ```powershell
-pnpm exec vitest run packages/task/task-worktree/tests packages/task/task-worktree-local/tests packages/task/task/tests packages/task/task-session/tests packages/host/apiproxy/tests packages/client/runtime/tests packages/client/ui-task-overview/tests packages/client/ui-workspace/tests packages/sdk/sdk/tests
-python -m pytest python/tests
-pnpm run test:snapshot -- -t "task worktree"
+pnpm exec vitest run packages/task/task-worktree/tests packages/task/task-worktree-local/tests packages/task/task/tests packages/task/task-session/tests packages/host/apiproxy/tests packages/client/runtime/tests packages/client/ui-task-overview/tests packages/client/ui-workspace/tests packages/sdk/client/tests
+python -m pytest python/sdk/tests
+pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/task-overview.snapshot.ts
+pnpm --filter @deepseek-ai/dsh-desktop test:e2e
 pnpm run build
 pnpm run typecheck
 pnpm run doc-sync
@@ -449,7 +475,7 @@ git diff --check
 
 预期：所有命令通过；任何仅限环境的内存失败均单独报告，不能作为通过声明的依据。
 
-- [ ] **步骤 6：提交已装配的公开闭环**
+- [x] **步骤 6：提交已装配的公开闭环**
 
 ```powershell
 git add packages/bundle apps docs .agents/notes packages/task packages/host packages/client packages/sdk python

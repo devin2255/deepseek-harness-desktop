@@ -1154,6 +1154,40 @@ describe('FixtureApiClient (protocol-level fake carrier)', () => {
   })
 
   it('maps isolation, attach-failure, and dropped-response query scenarios', async () => {
+    vi.stubGlobal('location', { search: '?fixture=task-overview' })
+    const successful = new FixtureApiClient()
+    const isolatedResult = await successful.sessions.create({
+      workspaceId: 'fx-ws-fixture' as WorkspaceId,
+      isolation: 'worktree',
+    })
+    expect(isolatedResult.result).toMatchObject({
+      ok: true,
+      value: {
+        executionWorkspace: {
+          kind: 'git-worktree',
+          workspaceId: 'fx-ws-fixture',
+          sourcePath: '/tmp/fixture',
+          sourceDirty: false,
+        },
+      },
+    })
+    if (!isolatedResult.result.ok) throw new Error('isolated fixture create failed')
+    const isolatedSessionId = isolatedResult.result.value.sessionId
+    const isolatedExecutionWorkspace = isolatedResult.result.value.executionWorkspace
+    const isolatedTask = await successful.tasks.list({})
+    expect(isolatedTask.result.ok).toBe(true)
+    if (!isolatedTask.result.ok) throw new Error('isolated fixture task projection failed')
+    expect(isolatedTask.result.value.generation).toBe(1)
+    expect(isolatedTask.result.value.tasks.find(task => task.taskId === isolatedSessionId)).toMatchObject({
+      taskId: isolatedSessionId,
+      workspaceId: 'fx-ws-fixture',
+      executionWorkspace: isolatedExecutionWorkspace,
+    })
+    const isolatedWorkspaces = await successful.workspace.list({})
+    expect(isolatedWorkspaces.result.ok).toBe(true)
+    if (!isolatedWorkspaces.result.ok) throw new Error('isolated fixture Workspace projection failed')
+    expect(isolatedWorkspaces.result.value.items[0]?.sessionIds).not.toContain(isolatedSessionId)
+
     vi.stubGlobal('location', { search: '?fixture&fixtureIsolation=fail' })
     const isolated = new FixtureApiClient()
     const isolationFailure = await isolated.sessions.create({
