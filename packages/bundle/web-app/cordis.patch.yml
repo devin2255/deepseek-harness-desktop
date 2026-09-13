@@ -100,6 +100,12 @@
     - id: task-worktree-local
       name: '@deepseek-ai/dsh-task-worktree-local'
 
+    # Inspect, commit, apply, and discard isolated Task worktrees. Keeping the
+    # provider before the gateway makes the complete Task review capability
+    # available when the transport starts serving browser requests.
+    - id: task-review-local
+      name: '@deepseek-ai/dsh-task-review-local'
+
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
     - id: api-gateway

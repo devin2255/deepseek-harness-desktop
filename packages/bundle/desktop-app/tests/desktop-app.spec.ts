@@ -279,13 +279,23 @@ describe('desktop launch capability', () => {
     expect(entries.find(entry => entry.id === 'task-worktree-local')).toMatchObject({
       name: '@deepseek-ai/dsh-task-worktree-local',
     })
+    expect(entries.find(entry => entry.id === 'task-review-local')).toMatchObject({
+      name: '@deepseek-ai/dsh-task-review-local',
+    })
     expect(entries.find(entry => entry.id === 'ui-task-overview')).toMatchObject({
       name: '@deepseek-ai/dsh-client-ui-task-overview',
+    })
+    expect(entries.find(entry => entry.id === 'ui-task-review')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-task-review',
     })
     expect(entries.find(entry => entry.id === 'api-gateway')?.inject).toContain('tasks')
     expect(entries.findIndex(entry => entry.id === 'task-session'))
       .toBeLessThan(entries.findIndex(entry => entry.id === 'ui-task-overview'))
     expect(entries.findIndex(entry => entry.id === 'task-worktree-local'))
+      .toBeLessThan(entries.findIndex(entry => entry.id === 'api-gateway'))
+    expect(entries.findIndex(entry => entry.id === 'task-worktree-local'))
+      .toBeLessThan(entries.findIndex(entry => entry.id === 'task-review-local'))
+    expect(entries.findIndex(entry => entry.id === 'task-review-local'))
       .toBeLessThan(entries.findIndex(entry => entry.id === 'api-gateway'))
     expect(manifest.dependencies).toMatchObject({
       '@deepseek-ai/dsh-task': 'workspace:^',
@@ -293,6 +303,9 @@ describe('desktop launch capability', () => {
       '@deepseek-ai/dsh-client-ui-task-overview': 'workspace:^',
     })
     expect(webManifest.dependencies).toMatchObject({
+      '@deepseek-ai/dsh-client-ui-task-review': 'workspace:^',
+      '@deepseek-ai/dsh-task-review': 'workspace:^',
+      '@deepseek-ai/dsh-task-review-local': 'workspace:^',
       '@deepseek-ai/dsh-task-worktree-local': 'workspace:^',
     })
   })

@@ -46,6 +46,14 @@ The Tasks screen creates a root Session in an application-owned Git worktree by 
 
 Isolation requires an accessible Git repository root with a committed `HEAD`, a supported non-nested layout, Git on `PATH`, and sufficient free space under the Harness home. Preflight and creation failures stop Session creation. The recovery panel offers an isolation retry and an explicit direct-project choice with a write-risk warning; it never changes to direct mode silently. A recorded worktree is verified against Git's live registry before reuse, and a missing or diverged path fails closed.
 
+## Task review and delivery
+
+An isolated Task in review, ready, or settled state opens in a separate Review workspace. It shows the recorded source and worktree identities, acceptance criteria, risks, bounded file summaries, and a unified diff for the selected text file. Binary files and truncated output are labeled explicitly. The Renderer obtains these values through typed Host APIs and receives no direct filesystem or Git authority.
+
+Request Changes returns the Task to active work without claiming a delivery result. Commit stages the exact displayed worktree state and creates a commit on the Task branch without changing the source checkout. Apply requires that recorded commit, the reviewed revision, a clean source checkout, and its exact current `HEAD`; it runs a three-way preflight before applying the same patch to the source index and working tree. A conflict, stale revision, moved source, or dirty source fails before mutation. Apply deliberately leaves the source `HEAD` unchanged so the user can inspect and commit the staged result.
+
+Discard always requires an explicit confirmation. Dirty uncommitted content is described as unrecoverable and requires acknowledgement; a committed Task branch remains available after its managed worktree is removed. Commit, Apply, and Discard receipts are Session events, so their exact Git identities and recovery facts survive Renderer reload and cold replay.
+
 ## Windows installer development
 
 `pnpm run desktop:package` builds the per-user x64 assisted installer, with a selectable directory and independent desktop, Start-menu, and login-startup choices. Packaging verifies the generated [PowerShell commands](../../scripts/desktop/generate-installer-powershell.ts) and [uninstall file operations](../../scripts/desktop/generate-installer-file-operations.ts) before building. The latter retain electron-builder's relocation and rollback algorithm with extended-length Windows paths; an upstream template change requires review before regeneration with `pnpm run desktop:generate-installer-file-operations`. See the [installer decision](../../.agents/notes/implemented/feature/2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md) for ownership and cleanup rules.
@@ -76,6 +84,6 @@ The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) 
 
 - **Installer qualification** — Windows lifecycle qualification is required before distribution; unsigned local builds can trigger SmartScreen. Automatic updates are not implemented.
 - **Foreground window lifecycle** — there is no tray persistence or task-aware background policy; closing the last window exits on Windows and Linux.
-- **Task integration** — the task overview and root-task worktree isolation are available. Child-writer worktrees, conflict integration, Apply, Commit, Archive, Discard, the complete review workspace, and Harness Studio are not implemented.
+- **Task integration** — task overview, root-task worktree isolation, review, Commit, conflict-safe Apply, and recoverability-aware Discard are available. Child-writer worktrees, automatic reconciliation between concurrent writers, Task archival, and Harness Studio are not implemented.
 - **Native integration** — deep links, native notifications, external-link handling, and persisted window placement are not implemented.
 - **Crash recovery** — Main reports startup and shutdown failures but does not yet present task-aware recovery or restart the Harness after an abnormal runtime exit.

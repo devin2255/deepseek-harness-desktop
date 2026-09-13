@@ -46,6 +46,14 @@ Electron 应用不添加模型可见内容。桌面 profile 的 [`@deepseek-ai/d
 
 隔离要求所选目录是可访问且已有 `HEAD` 的 Git 仓库根目录，目录布局不是不受支持的嵌套仓库，`PATH` 中存在 Git，并且 Harness home 所在磁盘空间充足。预检或创建失败时不会创建 Session。恢复面板提供重试隔离和带写入风险提示的显式“直接使用项目”选择，绝不会静默切换到直接模式。复用已记录的 worktree 前会根据 Git 实时注册表验证其身份；路径缺失或身份不一致时会拒绝继续。
 
+## Task 审查与交付
+
+处于审查、就绪或已结算状态的隔离 Task 会在独立“审查”工作区打开。该工作区显示已记录的源目录与 worktree 身份、验收标准、风险、有界文件摘要，以及所选文本文件的统一 diff。二进制文件和截断输出都有明确标记。Renderer 只通过类型化 Host API 获取这些值，不拥有直接文件系统或 Git 权限。
+
+“要求修改”会使 Task 返回活动工作状态，不会伪造交付结果。“提交”把界面所示的确切 worktree 状态加入暂存区，并在 Task 分支创建提交，但不改变源 checkout。“应用”要求使用已记录的提交、已审查 revision、干净的源 checkout 和它的确切当前 `HEAD`；它先执行三方预检，再把相同 patch 应用到源目录索引与工作树。冲突、过期 revision、源目录移动或源目录脏状态都会在变更前失败。“应用”刻意保持源 `HEAD` 不变，让用户仍可检查并提交已暂存结果。
+
+“丢弃”始终需要显式确认。界面会把未提交的脏内容说明为不可恢复，并要求用户确认；已提交的 Task 分支在受管 worktree 删除后仍然保留。提交、应用和丢弃回执都是 Session 事件，因此其中确切的 Git 身份与恢复事实可在 Renderer 重载和冷态回放后恢复。
+
 ## Windows 安装程序开发
 
 `pnpm run desktop:package` 构建按用户安装的 x64 辅助安装程序，支持选择目录以及独立的桌面、开始菜单和登录启动选项。打包前会验证生成的 [PowerShell 命令](../../scripts/desktop/generate-installer-powershell.ts)和[卸载文件操作](../../scripts/desktop/generate-installer-file-operations.ts)。后者保留 electron-builder 的移动和回滚算法，并使用 Windows 扩展长度路径；上游模板变化时，必须先审查，再通过 `pnpm run desktop:generate-installer-file-operations` 重新生成。所有权与清理规则参见[安装程序决策](../../.agents/notes/implemented/feature/2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md)。
@@ -76,6 +84,6 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 - **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen。尚未实现自动更新。
 - **前台窗口生命周期** — 当前没有托盘驻留或感知任务的后台策略；在 Windows 和 Linux 上关闭最后一个窗口会退出。
-- **任务集成** — 任务总览与根任务 worktree 隔离已经可用。子写入 Agent 的 worktree、冲突整合、应用、提交、归档、丢弃、完整审查工作区和 Harness Studio 尚未实现。
+- **任务集成** — 任务总览、根任务 worktree 隔离、审查、提交、冲突安全的应用及感知可恢复性的丢弃已经可用。子写入 Agent 的 worktree、并行写入者之间的自动协调、Task 归档和 Harness Studio 尚未实现。
 - **原生集成** — 尚未实现深层链接、原生通知、外部链接处理和窗口位置持久化。
 - **崩溃恢复** — Main 会报告启动与关闭故障，但尚未提供感知任务的恢复，也不会在 Harness 运行时异常退出后将其重启。

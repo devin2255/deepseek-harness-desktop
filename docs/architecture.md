@@ -107,6 +107,12 @@ Seams are why one provider swap changes the whole product. Filesystem and subpro
 
 The local Provider accepts only a repository root with a committed `HEAD`, rejects nested repositories and submodules, checks free space, serializes creation per source repository, and uses deterministic application-owned paths and branches. It records whether the source was dirty but bases the worktree on the committed `HEAD`, so source changes are neither copied nor modified. Git failures preserve partial paths or branches for recovery. Existing assignments are reused only after their path, commit, and branch still match Git's live worktree registry.
 
+### Task review and delivery
+
+`dsh-task-review` defines bounded review reads and revision-authorized Commit, Apply, and Discard operations. `dsh-task-review-local` implements them through `ctx.subprocess` and Git against the durable worktree assignment. `dsh-host-apiproxy` validates root-Task ownership and lifecycle, invokes the Provider, and records successful mutation receipts through the Task service. `dsh-client-ui-task-review` renders the separate Review workspace from typed Client runtime state; Electron and the browser never receive Git authority.
+
+Review revisions identify the exact Task tree contents the user inspected. Commit creates a Task-branch commit without moving the source checkout. Apply serializes by canonical repository, requires a clean source at the requested `HEAD`, preflights the complete binary patch with a temporary index, revalidates source state, then applies it while preserving source `HEAD`. Discard removes only the verified managed worktree and reports whether uncommitted content was lost and whether a committed branch remains recoverable. `task/review-committed`, `task/review-applied`, and `task/review-discarded` make successful delivery identities durable and strictly replayable.
+
 ## Where new behavior goes
 
 New behavior attaches to a documented extension point. Changing the loop itself updates this map.
@@ -131,6 +137,7 @@ New behavior attaches to a documented extension point. Changing the loop itself 
 | Manage a same-session objective | use `ctx.goals`; continue through `agent/*` |
 | Fork a live session | `ctx.sessions.fork(source, boundary?, childSessionId?)` |
 | Isolate a root task from its source checkout | request `session.create` with a Workspace and `isolation: worktree`; the Host records the returned `ctx.taskWorktrees` assignment |
+| Review and deliver an isolated root task | read through `ctx.taskReview`; authorize mutations with the exact review revision and record Provider receipts through `ctx.tasks` |
 | Scope a registration to one agent | use that agent's `agent.ctx` |
 
 The [extension cookbook](cookbook/extension-cookbook.md) maps features to capabilities and indexes the step-by-step guides for [packages](cookbook/adding-a-package.md), [tools](cookbook/adding-a-tool.md), [LLM adapters](cookbook/adding-an-llm-adapter.md), [Chat nodes](cookbook/adding-a-conversation-node.md), and [settings cards](cookbook/adding-a-settings-card.md).

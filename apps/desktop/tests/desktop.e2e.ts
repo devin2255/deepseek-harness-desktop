@@ -19,6 +19,16 @@ interface TaskIdentitySnapshot {
   readonly tasks: readonly {
     readonly taskId: string
     readonly status: string
+    readonly asOfSeq: number
+    readonly definition?: {
+      readonly goal: string
+      readonly criteria: readonly {
+        readonly id: string
+        readonly text: string
+        readonly status: string
+        readonly evidence: readonly { readonly sessionId: string; readonly seq: number }[]
+      }[]
+    }
     readonly workspaceId?: string
     readonly executionWorkspace?: {
       readonly kind: 'git-worktree'
@@ -38,7 +48,29 @@ interface TaskIdentitySnapshot {
       readonly ownerSessionId: string
       readonly summary: string
     }[]
+    readonly commitReceipt?: {
+      readonly committedRevision: string
+      readonly commit: string
+    }
+    readonly applyReceipt?: {
+      readonly commit: string
+      readonly sourceHeadBefore: string
+      readonly sourceHeadAfter: string
+    }
+    readonly discardReceipt?: {
+      readonly branch: string
+      readonly branchPreserved: boolean
+      readonly worktreeRemoved: boolean
+      readonly recoverableCommit?: string
+    }
   }[]
+}
+
+interface TaskReviewSummarySnapshot {
+  readonly revision: string
+  readonly sourceHead: string
+  readonly dirty: boolean
+  readonly files: readonly { readonly path: string; readonly binary: boolean }[]
 }
 
 let application: ElectronApplication | undefined
@@ -302,6 +334,163 @@ describe('desktop Electron acceptance', () => {
     await expect.poll(() => isolatedRows.count(), { timeout: 15_000 }).toBe(2)
     await expect.poll(async () => (await isolatedRows.allTextContents())
       .every(row => /(Worktree|工作树)/u.test(row)), { timeout: 15_000 }).toBe(true)
+
+    const deliverySource = join(temporaryRoot, 'review-delivery-source')
+    await initializeRepository(deliverySource)
+    const deliveryWorkspace = await pageRpc<{ workspace: { workspaceId: string } }>(
+      page,
+      'workspace.create',
+      { path: deliverySource },
+    )
+    const delivery = await pageRpc<{
+      sessionId: string
+      executionWorkspace: NonNullable<TaskIdentitySnapshot['tasks'][number]['executionWorkspace']>
+    }>(page, 'session.create', {
+      workspaceId: deliveryWorkspace.workspace.workspaceId,
+      isolation: 'worktree',
+    })
+    await writeFile(join(delivery.executionWorkspace.path, 'tracked.txt'), 'delivered task change\n')
+    await writeFile(join(delivery.executionWorkspace.path, 'artifact.bin'), Buffer.from([0, 1, 2, 255]))
+    const deliveryReady = await makeTaskReady(page, delivery.sessionId, 'Deliver reviewed desktop changes')
+    const deliveryReview = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+      sessionId: delivery.sessionId,
+    })
+    expect(deliveryReview).toMatchObject({ dirty: true, sourceHead: delivery.executionWorkspace.sourceHead })
+    expect(deliveryReview.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'tracked.txt', binary: false }),
+      expect.objectContaining({ path: 'artifact.bin', binary: true }),
+    ]))
+    const deliveredTextDiff = await pageRpc<{ binary: boolean; patch: string }>(page, 'task.reviewDiff', {
+      sessionId: delivery.sessionId,
+      path: 'tracked.txt',
+      expectedRevision: deliveryReview.revision,
+    })
+    expect(deliveredTextDiff.binary).toBe(false)
+    expect(deliveredTextDiff.patch).toContain('+delivered task change')
+    const deliveredBinaryDiff = await pageRpc<{ binary: boolean; patch: string }>(page, 'task.reviewDiff', {
+      sessionId: delivery.sessionId,
+      path: 'artifact.bin',
+      expectedRevision: deliveryReview.revision,
+    })
+    expect(deliveredBinaryDiff).toMatchObject({ binary: true, patch: '' })
+    const deliveryCommitted = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.commit', {
+      sessionId: delivery.sessionId,
+      expectedRevision: deliveryReview.revision,
+      message: 'feat: deliver desktop review',
+      expectedSeq: deliveryReady.asOfSeq,
+    })
+    expect(deliveryCommitted.commitReceipt?.commit).toMatch(/^[0-9a-f]{40}$/u)
+    const deliveryApplied = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.apply', {
+      sessionId: delivery.sessionId,
+      expectedRevision: deliveryCommitted.commitReceipt?.committedRevision,
+      expectedSourceHead: deliveryReview.sourceHead,
+      commit: deliveryCommitted.commitReceipt?.commit,
+      expectedSeq: deliveryCommitted.asOfSeq,
+    })
+    expect(deliveryApplied.applyReceipt).toMatchObject({
+      commit: deliveryCommitted.commitReceipt?.commit,
+      sourceHeadBefore: deliveryReview.sourceHead,
+      sourceHeadAfter: deliveryReview.sourceHead,
+    })
+    expect(await readFile(join(deliverySource, 'tracked.txt'), 'utf8')).toBe('delivered task change\n')
+    expect(await readFile(join(deliverySource, 'artifact.bin'))).toEqual(Buffer.from([0, 1, 2, 255]))
+    expect(git(deliverySource, ['rev-parse', 'HEAD']).trim()).toBe(deliveryReview.sourceHead)
+
+    const conflictSource = join(temporaryRoot, 'review-conflict-source')
+    await initializeRepository(conflictSource)
+    const conflictWorkspace = await pageRpc<{ workspace: { workspaceId: string } }>(
+      page,
+      'workspace.create',
+      { path: conflictSource },
+    )
+    const conflict = await pageRpc<{
+      sessionId: string
+      executionWorkspace: NonNullable<TaskIdentitySnapshot['tasks'][number]['executionWorkspace']>
+    }>(page, 'session.create', {
+      workspaceId: conflictWorkspace.workspace.workspaceId,
+      isolation: 'worktree',
+    })
+    await writeFile(join(conflict.executionWorkspace.path, 'tracked.txt'), 'task side\n')
+    const conflictReady = await makeTaskReady(page, conflict.sessionId, 'Reject conflicting delivery')
+    const conflictReview = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+      sessionId: conflict.sessionId,
+    })
+    const conflictCommitted = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.commit', {
+      sessionId: conflict.sessionId,
+      expectedRevision: conflictReview.revision,
+      message: 'feat: conflicting desktop review',
+      expectedSeq: conflictReady.asOfSeq,
+    })
+    await writeFile(join(conflictSource, 'tracked.txt'), 'source side\n')
+    git(conflictSource, ['add', 'tracked.txt'])
+    git(conflictSource, ['commit', '-m', 'source side'])
+    const conflictAfterSourceMove = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+      sessionId: conflict.sessionId,
+    })
+    const conflictBefore = {
+      head: git(conflictSource, ['rev-parse', 'HEAD']).trim(),
+      index: git(conflictSource, ['diff', '--cached', '--binary']),
+      status: git(conflictSource, ['status', '--porcelain=v1', '-z']),
+      text: await readFile(join(conflictSource, 'tracked.txt'), 'utf8'),
+    }
+    const conflictOutcome = await pageRpcOutcome(page, 'task.apply', {
+      sessionId: conflict.sessionId,
+      expectedRevision: conflictCommitted.commitReceipt?.committedRevision,
+      expectedSourceHead: conflictAfterSourceMove.sourceHead,
+      commit: conflictCommitted.commitReceipt?.commit,
+      expectedSeq: conflictCommitted.asOfSeq,
+    })
+    expect(conflictOutcome).toMatchObject({
+      ok: false,
+      error: { code: 'task-review-rejected', details: { reviewCode: 'REVIEW_APPLY_CONFLICT' } },
+    })
+    expect({
+      head: git(conflictSource, ['rev-parse', 'HEAD']).trim(),
+      index: git(conflictSource, ['diff', '--cached', '--binary']),
+      status: git(conflictSource, ['status', '--porcelain=v1', '-z']),
+      text: await readFile(join(conflictSource, 'tracked.txt'), 'utf8'),
+    }).toEqual(conflictBefore)
+
+    const discardSource = join(temporaryRoot, 'review-discard-source')
+    await initializeRepository(discardSource)
+    const discardWorkspace = await pageRpc<{ workspace: { workspaceId: string } }>(
+      page,
+      'workspace.create',
+      { path: discardSource },
+    )
+    const discard = await pageRpc<{
+      sessionId: string
+      executionWorkspace: NonNullable<TaskIdentitySnapshot['tasks'][number]['executionWorkspace']>
+    }>(page, 'session.create', {
+      workspaceId: discardWorkspace.workspace.workspaceId,
+      isolation: 'worktree',
+    })
+    await writeFile(join(discard.executionWorkspace.path, 'tracked.txt'), 'recoverable committed task\n')
+    const discardReady = await makeTaskReady(page, discard.sessionId, 'Discard delivered worktree safely')
+    const discardReview = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+      sessionId: discard.sessionId,
+    })
+    const discardCommitted = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.commit', {
+      sessionId: discard.sessionId,
+      expectedRevision: discardReview.revision,
+      message: 'feat: preserve discarded branch',
+      expectedSeq: discardReady.asOfSeq,
+    })
+    const discarded = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.discard', {
+      sessionId: discard.sessionId,
+      expectedRevision: discardCommitted.commitReceipt?.committedRevision,
+      confirmedUncommittedLoss: false,
+      expectedSeq: discardCommitted.asOfSeq,
+    })
+    expect(discarded.discardReceipt).toMatchObject({
+      branch: discard.executionWorkspace.branch,
+      branchPreserved: true,
+      worktreeRemoved: true,
+      recoverableCommit: discardCommitted.commitReceipt?.commit,
+    })
+    expect(existsSync(discard.executionWorkspace.path)).toBe(false)
+    expect(git(discardSource, ['show-ref', '--verify', `refs/heads/${discard.executionWorkspace.branch}`]).trim())
+      .toContain(discardCommitted.commitReceipt?.commit)
     await overview.getByText('workspace-a').locator('xpath=ancestor::li').getByRole('button').first().click()
     await overview.waitFor({ state: 'hidden' })
     await page.getByRole('button', { name: /^(Tasks|任务)$/u }).click()
@@ -366,6 +555,10 @@ describe('desktop Electron acceptance', () => {
       expect(restored?.workspaceId).toBe(isolatedWorkspace.workspace.workspaceId)
       expect(restored?.executionWorkspace).toEqual(created.executionWorkspace)
     }
+    expect(afterReload.tasks.find(task => task.taskId === delivery.sessionId)?.applyReceipt)
+      .toEqual(deliveryApplied.applyReceipt)
+    expect(afterReload.tasks.find(task => task.taskId === discard.sessionId)?.discardReceipt)
+      .toEqual(discarded.discardReceipt)
 
     const reloadedNeedsYou = overview.getByRole('heading', { name: /^(Needs You|需要你处理)$/u }).locator('..')
     const reloadedChildQuestion = reloadedNeedsYou.getByRole('button', { name: DESCENDANT_QUESTION_NAME })
@@ -421,6 +614,45 @@ function git(cwd: string, args: readonly string[]): string {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+  })
+}
+
+async function initializeRepository(path: string): Promise<void> {
+  await mkdir(path)
+  git(path, ['init'])
+  git(path, ['config', 'core.autocrlf', 'false'])
+  git(path, ['config', 'user.name', 'DeepSeek Harness Test'])
+  git(path, ['config', 'user.email', 'test@localhost'])
+  await writeFile(join(path, 'tracked.txt'), 'clean base\n')
+  git(path, ['add', 'tracked.txt'])
+  git(path, ['commit', '-m', 'clean base'])
+}
+
+async function makeTaskReady(page: Page, sessionId: string, goal: string): Promise<TaskIdentitySnapshot['tasks'][number]> {
+  const snapshot = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+  const current = snapshot.tasks.find(task => task.taskId === sessionId)
+  if (current === undefined) throw new Error(`Task ${sessionId} was not projected`)
+  const defined = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.define', {
+    sessionId,
+    goal,
+    criteria: [{ text: 'The reviewed change is ready for delivery' }],
+    expectedSeq: current.asOfSeq,
+  })
+  const criterion = defined.definition?.criteria[0]
+  if (criterion === undefined) throw new Error(`Task ${sessionId} did not retain its acceptance criterion`)
+  const satisfied = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.updateCriterion', {
+    sessionId,
+    criterion: {
+      ...criterion,
+      status: 'satisfied',
+      evidence: [{ sessionId, seq: 0 }],
+    },
+    expectedSeq: defined.asOfSeq,
+  })
+  return pageRpc(page, 'task.review', {
+    sessionId,
+    decision: 'ready',
+    expectedSeq: satisfied.asOfSeq,
   })
 }
 
@@ -560,6 +792,32 @@ async function pageRpc<T>(page: Page, method: string, payload: unknown): Promise
     if (!response.ok) throw new Error(`${method} failed over HTTP ${String(response.status)}`)
     if (!body.result.ok) throw new Error(`${method} failed: ${body.result.error.code}: ${body.result.error.message}`)
     return body.result.value
+  }, { method, payload })
+}
+
+async function pageRpcOutcome(
+  page: Page,
+  method: string,
+  payload: unknown,
+): Promise<{ readonly ok: true; readonly value: unknown } | {
+  readonly ok: false
+  readonly error: { readonly code: string; readonly message: string; readonly details?: unknown }
+}> {
+  return page.evaluate(async ({ method, payload }) => {
+    const response = await fetch(`/api/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: `desktop-${method}-${crypto.randomUUID()}`, method, payload }),
+    })
+    const body = await response.json() as { result: {
+      ok: true
+      value: unknown
+    } | {
+      ok: false
+      error: { code: string; message: string; details?: unknown }
+    } }
+    if (!response.ok) throw new Error(`${method} failed over HTTP ${String(response.status)}`)
+    return body.result
   }, { method, payload })
 }
 

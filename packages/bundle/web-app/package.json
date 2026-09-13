@@ -101,6 +101,8 @@
     "@deepseek-ai/dsh-storage": "workspace:^",
     "@deepseek-ai/dsh-storage-domain": "workspace:^",
     "@deepseek-ai/dsh-storage-json": "workspace:^",
+    "@deepseek-ai/dsh-task-review": "workspace:^",
+    "@deepseek-ai/dsh-task-review-local": "workspace:^",
     "@deepseek-ai/dsh-task-worktree-local": "workspace:^",
     "@deepseek-ai/dsh-workspace": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",

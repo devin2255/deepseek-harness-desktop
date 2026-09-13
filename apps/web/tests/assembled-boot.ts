@@ -111,10 +111,11 @@ export function installAssembledBootEnv(): void {
 /**
  * Mount the assembled application on the fixture transport; the teardown
  * registered by installAssembledBootEnv disposes it.
- * @param options - explicit desktop-only plugin opt-ins; ordinary Web stays unchanged.
+ * @param options - Explicit desktop-only plugin opt-ins; ordinary Web stays unchanged.
  */
-export function mountAssembledApp(options: { taskOverview?: boolean } = {}): void {
-  const plugins = options.taskOverview === true ? [...PLUGINS,
+export function mountAssembledApp(options: { taskOverview?: boolean; taskReview?: boolean } = {}): void {
+  const hasTaskUi = options.taskOverview === true || options.taskReview === true
+  const plugins = hasTaskUi ? [...PLUGINS,
     {
       id: '@deepseek-ai/dsh-client-ui-user-questions',
       bundlePath: 'packages/client/ui-user-questions/lib/client.js',
@@ -127,12 +128,19 @@ export function mountAssembledApp(options: { taskOverview?: boolean } = {}): voi
       url: '/plugins/ui-task-overview.js', rev: 'fx',
       inject: ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-layout', '@deepseek-ai/dsh-client-ui-sidebar', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-connection'],
     },
+    ...options.taskReview === true ? [{
+      id: '@deepseek-ai/dsh-client-ui-task-review',
+      bundlePath: 'packages/client/ui-task-review/lib/client.js',
+      url: '/plugins/ui-task-review.js', rev: 'fx',
+      inject: ['@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-ui-layout'],
+    }] : [],
   ] : PLUGINS
   const selectedBundles = new Map(bundles)
   for (const plugin of plugins) {
     if (!selectedBundles.has(plugin.url)) selectedBundles.set(plugin.url, readFileSync(join(process.cwd(), plugin.bundlePath), 'utf8'))
   }
-  history.replaceState(null, '', options.taskOverview === true ? '/?fixture=task-overview' : '/?fixture')
+  const fixture = options.taskReview === true ? 'task-review' : options.taskOverview === true ? 'task-overview' : ''
+  history.replaceState(null, '', `/?fixture=${fixture}`)
   const root = document.createElement('div')
   root.id = 'root'
   document.body.appendChild(root)
