@@ -722,7 +722,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/criterion-updated': { readonly criterion: TaskCriterion }
 ```
 
-来源：[`packages/task/task/src/index.ts:31`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:32`](../packages/task/task/src/index.ts)
 
 <a id="taskdefined--log-only"></a>
 
@@ -736,7 +736,35 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/defined': { readonly definition: TaskDefinition }
 ```
 
-来源：[`packages/task/task/src/index.ts:26`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:27`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-applied--log-only"></a>
+
+#### `task/review-applied` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after applying a Task commit to its source checkout.
+ * @param data - provider-produced source-application receipt.
+ */
+'task/review-applied': { readonly receipt: TaskApplyReceipt }
+```
+
+来源：[`packages/task/task/src/index.ts:52`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-committed--log-only"></a>
+
+#### `task/review-committed` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after committing reviewed Task changes.
+ * @param data - provider-produced commit receipt.
+ */
+'task/review-committed': { readonly receipt: TaskCommitReceipt }
+```
+
+来源：[`packages/task/task/src/index.ts:47`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-decided--log-only"></a>
 
@@ -750,7 +778,21 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/review-decided': { readonly decision: TaskReviewDecision }
 ```
 
-来源：[`packages/task/task/src/index.ts:41`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:42`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-discarded--log-only"></a>
+
+#### `task/review-discarded` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after removing a Task worktree.
+ * @param data - provider-produced discard receipt.
+ */
+'task/review-discarded': { readonly receipt: TaskDiscardReceipt }
+```
+
+来源：[`packages/task/task/src/index.ts:57`](../packages/task/task/src/index.ts)
 
 <a id="taskrisk-recorded--log-only"></a>
 
@@ -764,7 +806,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/risk-recorded': { readonly risk: TaskRisk }
 ```
 
-来源：[`packages/task/task/src/index.ts:36`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:37`](../packages/task/task/src/index.ts)
 
 <a id="taskworktree-assigned--log-only"></a>
 
@@ -778,7 +820,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'task/worktree-assigned': { readonly assignment: TaskWorktreeAssignment }
 ```
 
-来源：[`packages/task/task/src/index.ts:21`](../packages/task/task/src/index.ts)
+来源：[`packages/task/task/src/index.ts:22`](../packages/task/task/src/index.ts)
 
 ### `todo/*`
 

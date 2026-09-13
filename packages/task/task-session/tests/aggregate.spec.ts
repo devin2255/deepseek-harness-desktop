@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Session, SessionId, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
 import { AttentionItemId, TaskCriterionId, type LiveTaskFact } from '@deepseek-ai/dsh-task'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
+import { TaskReviewOperationId, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
 import { aggregateTasks, sortAttentionItems, TaskLineageError, type TaskSessionInput } from '../src/aggregate.ts'
 
 const sid = SessionId
@@ -19,6 +20,25 @@ const assignment: TaskWorktreeAssignment = {
   baseCommit: '0123456789abcdef0123456789abcdef01234567',
   sourceHead: '0123456789abcdef0123456789abcdef01234567', sourceDirty: false,
   sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+}
+const commitReceipt = {
+  kind: 'commit' as const, operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000001'),
+  taskId: sid('root'), workspaceId: assignment.workspaceId,
+  reviewRevision: TaskReviewRevision('b'.repeat(64)), committedRevision: TaskReviewRevision('c'.repeat(64)),
+  branch: assignment.branch, commit: '1'.repeat(40), committedAt: 8,
+}
+const applyReceipt = {
+  kind: 'apply' as const, operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000002'),
+  taskId: sid('root'), workspaceId: assignment.workspaceId,
+  reviewRevision: commitReceipt.committedRevision, commit: commitReceipt.commit,
+  sourceHeadBefore: '2'.repeat(40), sourceHeadAfter: '2'.repeat(40), appliedAt: 9,
+}
+const discardReceipt = {
+  kind: 'discard' as const, operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000003'),
+  taskId: sid('root'), workspaceId: assignment.workspaceId,
+  reviewRevision: commitReceipt.committedRevision, branch: assignment.branch,
+  branchPreserved: true, worktreeRemoved: true, uncommittedChangesDiscarded: false,
+  recoverableCommit: commitReceipt.commit, discardedAt: 10,
 }
 const liveAttention = (taskId: string, owner: string, sourceId: string, severity: 'info' | 'warning' | 'error' | 'critical' = 'warning'): LiveTaskFact => ({
   kind: 'attention',
@@ -166,7 +186,7 @@ describe('aggregateTasks', () => {
     expect(result).toMatchObject({ status: 'ready', freshness: 'disconnected', workspaceId: 'workspace', reviewDecision: 'ready' })
   })
 
-  it('treats terminal delivery decisions as settled', () => {
+  it('projects durable delivery receipts and treats them as settled', () => {
     const defined = event('task/defined', 0, 2, { definition: { goal: 'ship', criteria: [
       { id: TaskCriterionId('done'), text: 'done', status: 'pending', evidence: [] },
     ] } })
@@ -174,18 +194,20 @@ describe('aggregateTasks', () => {
       id: TaskCriterionId('done'), text: 'done', status: 'satisfied', evidence: [{ sessionId: sid('root'), seq: 0 }],
     } })
     const ready = event('task/review-decided', 2, 4, { decision: 'ready' })
-    const committed = event('task/review-decided', 3, 5, { decision: 'committed' })
-    const applied = event('task/review-decided', 4, 6, { decision: 'applied' })
-    const archived = event('task/review-decided', 5, 7, { decision: 'archived' })
-    const discarded = event('task/review-decided', 1, 3, { decision: 'discarded' })
+    const assigned = event('task/worktree-assigned', 0, 1, { assignment })
+    const committed = event('task/review-committed', 4, 6, { receipt: commitReceipt })
+    const applied = event('task/review-applied', 5, 7, { receipt: applyReceipt })
+    const discarded = event('task/review-discarded', 6, 8, { receipt: discardReceipt })
     for (const events of [
-      [defined, satisfied, ready, committed],
-      [defined, satisfied, ready, committed, applied],
-      [defined, satisfied, ready, committed, applied, archived],
-      [defined, discarded],
+      [assigned, defined, satisfied, ready, committed],
+      [assigned, defined, satisfied, ready, committed, applied],
+      [assigned, defined, satisfied, ready, committed, applied, discarded],
     ]) {
       expect(aggregateTasks({ generation: 1, sessions: [input('root', {}, events)] }).tasks[0]?.status).toBe('settled')
     }
+    expect(aggregateTasks({ generation: 1, sessions: [input('root', {}, [
+      assigned, defined, satisfied, ready, committed, applied, discarded,
+    ])] }).tasks[0]).toMatchObject({ commitReceipt, applyReceipt, discardReceipt })
   })
 
   it('ignores live facts whose owner is missing or belongs to another root', () => {

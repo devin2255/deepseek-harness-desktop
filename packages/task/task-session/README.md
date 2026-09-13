@@ -14,6 +14,7 @@ Session-backed Provider for the durable Task service. It reconstructs one Task p
 - `invalidateLiveGeneration(generation): void` retains the last known live facts but marks affected rows `disconnected` until a newer baseline arrives.
 - `assignWorktree` records one immutable execution assignment after validating the root Task and registered source Workspace. Reassignment, mismatched Task identity, missing Workspace identity, and source-path mismatch fail before append.
 - `define`, `updateCriterion`, `recordRisk`, and `review` serialize compare-and-set writes, validate the root and same-tree evidence, and append exactly one whole-value event.
+- `recordCommit`, `recordApply`, and `recordDiscard` accept complete Git Provider receipts, reject active Task trees, and append exactly one delivery event after strict replay validation.
 
 ## Projection Rules
 
@@ -21,7 +22,7 @@ Ordinary forks remain independent root Tasks even when their header names a pare
 
 A durable worktree assignment supersedes transient Workspace membership when projecting `workspaceId`, and the complete assignment is returned as `executionWorkspace`. Cold replay therefore preserves both the registered source project and the actual directory where the Agent ran.
 
-Status precedence is actionable attention, unresolved failure, running activity, review in progress, explicitly proven readiness, then settled. Readiness requires a `ready` decision, every criterion satisfied or waived, and every risk resolved. Idle state never implies completion.
+Status precedence is actionable attention, unresolved failure, running activity, durable delivery, review in progress, explicitly proven readiness, then settled. Readiness requires a `ready` decision, every criterion satisfied or waived, and every risk resolved. A valid commit, apply, or discard receipt produces settled state. Idle state never implies completion.
 
 Pending durable approvals and the latest unresolved turn failure become attention items whose identity comes from the source request or event, not display text. Live facts name both the root and exact owner Session; facts with missing or foreign owners are ignored.
 

@@ -2,6 +2,7 @@
 
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
+import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import {
   TaskCriterionId,
@@ -18,7 +19,7 @@ import {
 const CRITERION_STATUSES: ReadonlySet<TaskCriterionStatus> = new Set(['pending', 'satisfied', 'failed', 'waived'])
 const RISK_SEVERITIES: ReadonlySet<TaskRiskSeverity> = new Set(['low', 'medium', 'high', 'critical'])
 const REVIEW_DECISIONS: ReadonlySet<TaskReviewDecision> = new Set([
-  'changes-requested', 'ready', 'committed', 'applied', 'archived', 'discarded',
+  'changes-requested', 'ready',
 ])
 
 /** Result of replaying durable task facts from one root Session. */
@@ -27,6 +28,9 @@ export interface TaskFoldState {
   readonly definition: TaskDefinition | undefined
   readonly risks: readonly TaskRisk[]
   readonly reviewDecision: TaskReviewDecision | undefined
+  readonly commitReceipt: TaskCommitReceipt | undefined
+  readonly applyReceipt: TaskApplyReceipt | undefined
+  readonly discardReceipt: TaskDiscardReceipt | undefined
   readonly updatedAt: number | undefined
 }
 
@@ -53,7 +57,16 @@ export class TaskLogError extends Error {
  * @returns a fresh task accumulator with no durable facts.
  */
 export function emptyTaskFoldState(): TaskFoldState {
-  return { assignment: undefined, definition: undefined, risks: [], reviewDecision: undefined, updatedAt: undefined }
+  return {
+    assignment: undefined,
+    definition: undefined,
+    risks: [],
+    reviewDecision: undefined,
+    commitReceipt: undefined,
+    applyReceipt: undefined,
+    discardReceipt: undefined,
+    updatedAt: undefined,
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,6 +96,28 @@ function normalizedPath(value: unknown, subject: string): string {
 function gitObjectId(value: unknown, subject: string): string {
   if (typeof value !== 'string' || !/^[0-9a-f]{40}$/.test(value)) {
     throw new Error(`${subject} must be a lowercase forty-character Git object id`)
+  }
+  return value
+}
+
+function sha256Digest(value: unknown, subject: string): string {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`${subject} must be a lowercase SHA-256 digest`)
+  }
+  return value
+}
+
+function operationId(value: unknown, subject: string): string {
+  if (typeof value !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value)) {
+    throw new Error(`${subject} must be a normalized UUID`)
+  }
+  return value
+}
+
+function timestamp(value: unknown, subject: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${subject} must be a non-negative safe integer`)
   }
   return value
 }
@@ -187,6 +222,84 @@ function decodeDecision(value: unknown): TaskReviewDecision {
   return value as TaskReviewDecision
 }
 
+function assertReceiptOwner(
+  state: TaskFoldState,
+  receipt: { readonly taskId: SessionId; readonly workspaceId: WorkspaceId },
+  subject: string,
+): TaskWorktreeAssignment {
+  if (state.assignment === undefined) throw new Error(`${subject} requires an assigned worktree`)
+  if (receipt.taskId !== state.assignment.taskId) throw new Error(`${subject} receipt taskId does not match the worktree assignment`)
+  if (receipt.workspaceId !== state.assignment.workspaceId) throw new Error(`${subject} receipt workspaceId does not match the worktree assignment`)
+  return state.assignment
+}
+
+function decodeCommitReceipt(value: unknown): TaskCommitReceipt {
+  const record = exactRecord(value, [
+    'branch', 'commit', 'committedAt', 'committedRevision', 'kind', 'operationId',
+    'reviewRevision', 'taskId', 'workspaceId',
+  ], 'commit receipt')
+  if (record['kind'] !== 'commit') throw new Error('commit receipt kind must be commit')
+  return {
+    kind: 'commit',
+    operationId: operationId(record['operationId'], 'commit receipt operationId') as TaskCommitReceipt['operationId'],
+    taskId: normalizedString(record['taskId'], 'commit receipt taskId') as SessionId,
+    workspaceId: normalizedString(record['workspaceId'], 'commit receipt workspaceId') as WorkspaceId,
+    reviewRevision: sha256Digest(record['reviewRevision'], 'commit receipt reviewRevision') as TaskCommitReceipt['reviewRevision'],
+    committedRevision: sha256Digest(record['committedRevision'], 'commit receipt committedRevision') as TaskCommitReceipt['committedRevision'],
+    branch: normalizedString(record['branch'], 'commit receipt branch'),
+    commit: gitObjectId(record['commit'], 'commit receipt commit'),
+    committedAt: timestamp(record['committedAt'], 'commit receipt committedAt'),
+  }
+}
+
+function decodeApplyReceipt(value: unknown): TaskApplyReceipt {
+  const record = exactRecord(value, [
+    'appliedAt', 'commit', 'kind', 'operationId', 'reviewRevision', 'sourceHeadAfter',
+    'sourceHeadBefore', 'taskId', 'workspaceId',
+  ], 'apply receipt')
+  if (record['kind'] !== 'apply') throw new Error('apply receipt kind must be apply')
+  return {
+    kind: 'apply',
+    operationId: operationId(record['operationId'], 'apply receipt operationId') as TaskApplyReceipt['operationId'],
+    taskId: normalizedString(record['taskId'], 'apply receipt taskId') as SessionId,
+    workspaceId: normalizedString(record['workspaceId'], 'apply receipt workspaceId') as WorkspaceId,
+    reviewRevision: sha256Digest(record['reviewRevision'], 'apply receipt reviewRevision') as TaskApplyReceipt['reviewRevision'],
+    commit: gitObjectId(record['commit'], 'apply receipt commit'),
+    sourceHeadBefore: gitObjectId(record['sourceHeadBefore'], 'apply receipt sourceHeadBefore'),
+    sourceHeadAfter: gitObjectId(record['sourceHeadAfter'], 'apply receipt sourceHeadAfter'),
+    appliedAt: timestamp(record['appliedAt'], 'apply receipt appliedAt'),
+  }
+}
+
+function decodeDiscardReceipt(value: unknown): TaskDiscardReceipt {
+  if (!isRecord(value)) throw new Error('discard receipt must be a record')
+  const fields = value['recoverableCommit'] === undefined
+    ? ['branch', 'branchPreserved', 'discardedAt', 'kind', 'operationId', 'reviewRevision', 'taskId', 'uncommittedChangesDiscarded', 'workspaceId', 'worktreeRemoved']
+    : ['branch', 'branchPreserved', 'discardedAt', 'kind', 'operationId', 'recoverableCommit', 'reviewRevision', 'taskId', 'uncommittedChangesDiscarded', 'workspaceId', 'worktreeRemoved']
+  const record = exactRecord(value, fields, 'discard receipt')
+  if (record['kind'] !== 'discard') throw new Error('discard receipt kind must be discard')
+  if (record['branchPreserved'] !== true) throw new Error('discard receipt must confirm branch preservation')
+  if (record['worktreeRemoved'] !== true) throw new Error('discard receipt must confirm worktree removal')
+  if (typeof record['uncommittedChangesDiscarded'] !== 'boolean') {
+    throw new Error('discard receipt uncommittedChangesDiscarded must be boolean')
+  }
+  const receipt: TaskDiscardReceipt = {
+    kind: 'discard',
+    operationId: operationId(record['operationId'], 'discard receipt operationId') as TaskDiscardReceipt['operationId'],
+    taskId: normalizedString(record['taskId'], 'discard receipt taskId') as SessionId,
+    workspaceId: normalizedString(record['workspaceId'], 'discard receipt workspaceId') as WorkspaceId,
+    reviewRevision: sha256Digest(record['reviewRevision'], 'discard receipt reviewRevision') as TaskDiscardReceipt['reviewRevision'],
+    branch: normalizedString(record['branch'], 'discard receipt branch'),
+    branchPreserved: true,
+    worktreeRemoved: true,
+    uncommittedChangesDiscarded: record['uncommittedChangesDiscarded'],
+    discardedAt: timestamp(record['discardedAt'], 'discard receipt discardedAt'),
+  }
+  return record['recoverableCommit'] === undefined
+    ? receipt
+    : { ...receipt, recoverableCommit: gitObjectId(record['recoverableCommit'], 'discard receipt recoverableCommit') }
+}
+
 function validateCriterionTransition(current: TaskCriterionStatus, next: TaskCriterionStatus): void {
   const allowed: Readonly<Record<TaskCriterionStatus, ReadonlySet<TaskCriterionStatus>>> = {
     pending: new Set(['pending', 'satisfied', 'failed', 'waived']),
@@ -198,6 +311,9 @@ function validateCriterionTransition(current: TaskCriterionStatus, next: TaskCri
 }
 
 function validateReview(state: TaskFoldState, decision: TaskReviewDecision): void {
+  if (state.commitReceipt !== undefined || state.applyReceipt !== undefined || state.discardReceipt !== undefined) {
+    throw new Error('review decision cannot change after delivery')
+  }
   if (decision === 'ready') {
     if (state.definition === undefined
       || state.definition.criteria.some(criterion => criterion.status !== 'satisfied' && criterion.status !== 'waived')) {
@@ -208,17 +324,8 @@ function validateReview(state: TaskFoldState, decision: TaskReviewDecision): voi
     }
     return
   }
-  if (decision === 'committed' && state.reviewDecision !== 'ready') {
-    throw new Error('committed requires a ready decision')
-  }
-  if (decision === 'applied' && state.reviewDecision !== 'committed') {
-    throw new Error('applied requires a committed decision')
-  }
-  if (decision === 'archived' && state.reviewDecision !== 'applied') {
-    throw new Error('archived requires an applied decision')
-  }
-  if ((decision === 'changes-requested' || decision === 'discarded') && state.definition === undefined) {
-    throw new Error(`${decision} requires a current definition`)
+  if (state.definition === undefined) {
+    throw new Error('changes-requested requires a current definition')
   }
 }
 
@@ -268,6 +375,49 @@ export function applyTaskEvent(state: TaskFoldState, event: SessionEvent): TaskF
         const decision = decodeDecision(data['decision'])
         validateReview(state, decision)
         return { ...state, reviewDecision: decision, updatedAt: event.time }
+      }
+      case 'task/review-committed': {
+        const data = exactRecord(event.data, ['receipt'], 'task/review-committed data')
+        if (state.commitReceipt !== undefined) throw new Error('commit receipt already exists')
+        if (state.discardReceipt !== undefined) throw new Error('commit cannot follow discard')
+        if (state.reviewDecision !== 'ready') throw new Error('commit requires a ready decision')
+        const receipt = decodeCommitReceipt(data['receipt'])
+        const assignment = assertReceiptOwner(state, receipt, 'commit')
+        if (receipt.branch !== assignment.branch) throw new Error('commit receipt branch does not match the worktree assignment')
+        return { ...state, commitReceipt: receipt, updatedAt: event.time }
+      }
+      case 'task/review-applied': {
+        const data = exactRecord(event.data, ['receipt'], 'task/review-applied data')
+        if (state.commitReceipt === undefined) throw new Error('apply requires a recorded commit')
+        if (state.applyReceipt !== undefined) throw new Error('apply receipt already exists')
+        if (state.discardReceipt !== undefined) throw new Error('apply cannot follow discard')
+        const receipt = decodeApplyReceipt(data['receipt'])
+        assertReceiptOwner(state, receipt, 'apply')
+        if (receipt.commit !== state.commitReceipt.commit) throw new Error('apply receipt commit does not match the recorded commit')
+        if (receipt.reviewRevision !== state.commitReceipt.committedRevision) {
+          throw new Error('apply receipt reviewRevision does not match the committed revision')
+        }
+        if (receipt.sourceHeadBefore !== receipt.sourceHeadAfter) throw new Error('apply receipt must not change source HEAD')
+        return { ...state, applyReceipt: receipt, updatedAt: event.time }
+      }
+      case 'task/review-discarded': {
+        const data = exactRecord(event.data, ['receipt'], 'task/review-discarded data')
+        if (state.discardReceipt !== undefined) throw new Error('discard receipt already exists')
+        if (state.reviewDecision !== 'ready' && state.commitReceipt === undefined && state.applyReceipt === undefined) {
+          throw new Error('discard requires a ready decision or recorded delivery')
+        }
+        const receipt = decodeDiscardReceipt(data['receipt'])
+        const assignment = assertReceiptOwner(state, receipt, 'discard')
+        if (receipt.branch !== assignment.branch) throw new Error('discard receipt branch does not match the worktree assignment')
+        if (state.commitReceipt !== undefined) {
+          if (receipt.reviewRevision !== state.commitReceipt.committedRevision) {
+            throw new Error('discard receipt reviewRevision does not match the committed revision')
+          }
+          if (receipt.recoverableCommit !== state.commitReceipt.commit) {
+            throw new Error('discard receipt recoverableCommit does not match the recorded commit')
+          }
+        }
+        return { ...state, discardReceipt: receipt, updatedAt: event.time }
       }
       default:
         return state

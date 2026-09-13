@@ -12,6 +12,7 @@
     { "path": "../../core/session" },
     { "path": "../../session/session-persistence" },
     { "path": "../task" },
+    { "path": "../task-review" },
     { "path": "../task-worktree" },
     { "path": "../../interaction/user-approval" },
     { "path": "../../workspace/workspace" },

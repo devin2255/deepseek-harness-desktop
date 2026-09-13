@@ -10,7 +10,8 @@ import {
   TaskCriterionId, TaskError, TaskRiskId, TaskService,
 } from '@deepseek-ai/dsh-task'
 import type {
-  AssignTaskWorktreeRequest, DefineTaskRequest, LiveTaskFact, RecordTaskRiskRequest, ReviewTaskRequest, TaskListChange,
+  AssignTaskWorktreeRequest, DefineTaskRequest, LiveTaskFact, RecordTaskApplyRequest, RecordTaskCommitRequest,
+  RecordTaskDiscardRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListChange,
   TaskListSnapshot, TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task'
 import { createApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
@@ -84,6 +85,18 @@ class FakeTasks extends TaskService {
 
   review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot> {
     return this.result('review', sessionId, request)
+  }
+
+  recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot> {
+    return this.result('recordCommit', sessionId, request)
+  }
+
+  recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot> {
+    return this.result('recordApply', sessionId, request)
+  }
+
+  recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot> {
+    return this.result('recordDiscard', sessionId, request)
   }
 }
 

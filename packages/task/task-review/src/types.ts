@@ -22,7 +22,7 @@ export type TaskReviewOperationId = Branded<'TaskReviewOperationId'>
 
 /**
  * Brand a provider-produced delivery operation identity.
- * @param value - Unique operation value.
+ * @param value - Provider-produced normalized UUID.
  * @returns the branded operation identity.
  */
 export function TaskReviewOperationId(value: string): TaskReviewOperationId {

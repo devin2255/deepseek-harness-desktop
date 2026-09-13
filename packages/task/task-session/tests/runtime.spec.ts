@@ -10,6 +10,13 @@ import {
 } from '@deepseek-ai/dsh-task'
 import TaskSessionProvider from '../src/index.ts'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
+import {
+  TaskReviewOperationId,
+  TaskReviewRevision,
+  type TaskApplyReceipt,
+  type TaskCommitReceipt,
+  type TaskDiscardReceipt,
+} from '@deepseek-ai/dsh-task-review'
 
 const sid = SessionId
 const assignment = (taskId = sid('root'), workspaceId = 'workspace' as TaskWorktreeAssignment['workspaceId']): TaskWorktreeAssignment => ({
@@ -19,6 +26,25 @@ const assignment = (taskId = sid('root'), workspaceId = 'workspace' as TaskWorkt
   baseCommit: '0123456789abcdef0123456789abcdef01234567',
   sourceHead: '0123456789abcdef0123456789abcdef01234567', sourceDirty: false,
   sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+})
+const commitReceipt = (): TaskCommitReceipt => ({
+  kind: 'commit', operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000001'),
+  taskId: sid('root'), workspaceId: 'workspace' as TaskCommitReceipt['workspaceId'],
+  reviewRevision: TaskReviewRevision('b'.repeat(64)), committedRevision: TaskReviewRevision('c'.repeat(64)),
+  branch: assignment().branch, commit: '1'.repeat(40), committedAt: 10,
+})
+const applyReceipt = (): TaskApplyReceipt => ({
+  kind: 'apply', operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000002'),
+  taskId: sid('root'), workspaceId: 'workspace' as TaskApplyReceipt['workspaceId'],
+  reviewRevision: commitReceipt().committedRevision, commit: commitReceipt().commit,
+  sourceHeadBefore: '2'.repeat(40), sourceHeadAfter: '2'.repeat(40), appliedAt: 11,
+})
+const discardReceipt = (): TaskDiscardReceipt => ({
+  kind: 'discard', operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000003'),
+  taskId: sid('root'), workspaceId: 'workspace' as TaskDiscardReceipt['workspaceId'],
+  reviewRevision: commitReceipt().committedRevision, branch: assignment().branch,
+  branchPreserved: true, worktreeRemoved: true, uncommittedChangesDiscarded: false,
+  recoverableCommit: commitReceipt().commit, discardedAt: 12,
 })
 function persistence(initial: readonly { header: SessionHeader; events: readonly SessionEvent[] }[] = []) {
   const logs = new Map(initial.map(item => [item.header.id, { meta: item.header, events: [...item.events] }]))
@@ -226,7 +252,34 @@ describe('TaskSessionProvider', () => {
     })).rejects.toMatchObject({ code: 'TASK_INVALID_RISK' })
   })
 
-  it('rejects subagent command targets and terminal review while work is active', async () => {
+  it('records delivery receipts through dedicated compare-and-set mutations', async () => {
+    const test = await harness()
+    const root = test.ctx.sessions.create(sid('root'))
+    root.append('task/worktree-assigned', { assignment: assignment() })
+    root.append('task/defined', { definition: { goal: 'ship', criteria: [
+      { id: TaskCriterionId('done'), text: 'works', status: 'pending', evidence: [] },
+    ] } })
+    root.append('task/criterion-updated', { criterion: {
+      id: TaskCriterionId('done'), text: 'works', status: 'satisfied', evidence: [{ sessionId: root.id, seq: 1 }],
+    } })
+    root.append('task/review-decided', { decision: 'ready' })
+
+    const committed = await test.tasks.recordCommit(root.id, { receipt: commitReceipt(), expectedSeq: 4 })
+    const applied = await test.tasks.recordApply(root.id, { receipt: applyReceipt(), expectedSeq: 5 })
+    const discarded = await test.tasks.recordDiscard(root.id, { receipt: discardReceipt(), expectedSeq: 6 })
+
+    expect(root.events.map(current => current.type)).toEqual([
+      'task/worktree-assigned', 'task/defined', 'task/criterion-updated', 'task/review-decided',
+      'task/review-committed', 'task/review-applied', 'task/review-discarded',
+    ])
+    expect(committed.commitReceipt).toEqual(commitReceipt())
+    expect(applied.applyReceipt).toEqual(applyReceipt())
+    expect(discarded).toMatchObject({ status: 'settled', discardReceipt: discardReceipt(), asOfSeq: 7 })
+    await expect(test.tasks.recordCommit(root.id, { receipt: commitReceipt(), expectedSeq: 6 }))
+      .rejects.toMatchObject({ code: 'TASK_STALE_SEQUENCE' })
+  })
+
+  it('rejects subagent command targets and every delivery mutation while work is active', async () => {
     const test = await harness()
     const root = test.ctx.sessions.create(sid('root'))
     const child = test.ctx.sessions.create(sid('child'), { meta: { origin: 'subagent', parentSession: root.id } })
@@ -236,8 +289,12 @@ describe('TaskSessionProvider', () => {
     test.tasks.replaceLiveGeneration(1, [question(1, 'q').facts[0]!, {
       kind: 'activity', taskId: root.id, ownerSessionId: child.id, sourceId: 'run', state: 'running', createdAt: 2,
     }])
-    await expect(test.tasks.review(root.id, { decision: 'discarded', expectedSeq: 1 }))
-      .rejects.toMatchObject({ code: 'TASK_ACTIVE' })
+    for (const operation of [
+      () => test.tasks.recordCommit(root.id, { receipt: commitReceipt(), expectedSeq: 1 }),
+      () => test.tasks.recordApply(root.id, { receipt: applyReceipt(), expectedSeq: 1 }),
+      () => test.tasks.recordDiscard(root.id, { receipt: discardReceipt(), expectedSeq: 1 }),
+    ]) await expect(operation()).rejects.toMatchObject({ code: 'TASK_ACTIVE' })
+    expect(root.events).toHaveLength(1)
   })
 
   it('classifies malformed definitions as stable Task errors', async () => {

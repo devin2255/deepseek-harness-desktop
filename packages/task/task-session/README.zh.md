@@ -14,6 +14,7 @@
 - `invalidateLiveGeneration(generation): void` 保留最近已知的实时事实，但将受影响行标为 `disconnected`，直到更新的基线到达。
 - `assignWorktree` 在校验根 Task 与已登记的源 Workspace 后记录一次不可变执行分配。重复分配、Task 标识不匹配、Workspace 不存在和源路径不匹配都会在追加前失败。
 - `define`、`updateCriterion`、`recordRisk` 和 `review` 串行执行比较并设置写入，验证根与同树证据，并且只追加一个全值事件。
+- `recordCommit`、`recordApply` 和 `recordDiscard` 接受完整 Git Provider 收据，在 Task 树仍有活动工作时拒绝操作，并在严格回放校验后只追加一个交付事件。
 
 ## 投影规则
 
@@ -21,7 +22,7 @@
 
 投影 `workspaceId` 时，持久 Worktree 分配优先于瞬态 Workspace 成员关系，并通过 `executionWorkspace` 返回完整分配。冷态回放因此能同时恢复已登记的源项目和 Agent 的实际执行目录。
 
-状态优先级依次为：可执行注意事项、未解决失败、运行中活动、审查中、显式证明的就绪，最后是已安定。就绪必须有 `ready` 决定、所有条件均为满足或豁免，并且所有风险均已解决。空闲状态绝不代表完成。
+状态优先级依次为：可执行注意事项、未解决失败、运行中活动、持久交付、审查中、显式证明的就绪，最后是已安定。就绪必须有 `ready` 决定、所有条件均为满足或豁免，并且所有风险均已解决。有效的提交、应用或丢弃收据会产生已安定状态。空闲状态绝不代表完成。
 
 待处理的持久审批与最近一次未解决的轮次失败会成为注意事项，其标识来自源请求或事件，而不是展示文本。实时事实同时指定根和准确的所属 Session；所属 Session 缺失或不属于该根的事实会被忽略。
 

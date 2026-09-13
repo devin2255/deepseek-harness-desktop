@@ -14,6 +14,9 @@ import {
   type AssignTaskWorktreeRequest,
   type LiveTaskFact,
   type RecordTaskRiskRequest,
+  type RecordTaskApplyRequest,
+  type RecordTaskCommitRequest,
+  type RecordTaskDiscardRequest,
   type ReviewTaskRequest,
   type TaskErrorCode,
   type TaskListChange,
@@ -26,7 +29,15 @@ import { aggregateTasks, type TaskSessionInput } from './aggregate.ts'
 
 export * from './aggregate.ts'
 
-type TaskEventType = 'task/worktree-assigned' | 'task/defined' | 'task/criterion-updated' | 'task/risk-recorded' | 'task/review-decided'
+type TaskEventType =
+  | 'task/worktree-assigned'
+  | 'task/defined'
+  | 'task/criterion-updated'
+  | 'task/risk-recorded'
+  | 'task/review-decided'
+  | 'task/review-committed'
+  | 'task/review-applied'
+  | 'task/review-discarded'
 
 interface TaskEventDataMap {
   readonly 'task/worktree-assigned': Extract<SessionEvent, { type: 'task/worktree-assigned' }>['data']
@@ -34,6 +45,9 @@ interface TaskEventDataMap {
   readonly 'task/criterion-updated': Extract<SessionEvent, { type: 'task/criterion-updated' }>['data']
   readonly 'task/risk-recorded': Extract<SessionEvent, { type: 'task/risk-recorded' }>['data']
   readonly 'task/review-decided': Extract<SessionEvent, { type: 'task/review-decided' }>['data']
+  readonly 'task/review-committed': Extract<SessionEvent, { type: 'task/review-committed' }>['data']
+  readonly 'task/review-applied': Extract<SessionEvent, { type: 'task/review-applied' }>['data']
+  readonly 'task/review-discarded': Extract<SessionEvent, { type: 'task/review-discarded' }>['data']
 }
 
 function clone<T>(value: T): T {
@@ -199,6 +213,27 @@ export class TaskSessionProvider extends TaskService {
     })
   }
 
+  /** @inheritdoc */
+  recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot> {
+    return this.appendTerminalCommand(
+      sessionId, request.expectedSeq, 'TASK_INVALID_COMMIT', 'task/review-committed', { receipt: request.receipt },
+    )
+  }
+
+  /** @inheritdoc */
+  recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot> {
+    return this.appendTerminalCommand(
+      sessionId, request.expectedSeq, 'TASK_INVALID_APPLY', 'task/review-applied', { receipt: request.receipt },
+    )
+  }
+
+  /** @inheritdoc */
+  recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot> {
+    return this.appendTerminalCommand(
+      sessionId, request.expectedSeq, 'TASK_INVALID_DISCARD', 'task/review-discarded', { receipt: request.receipt },
+    )
+  }
+
   private captureLive(session: Session): void {
     this.inputs.set(session.id, { header: session.header, events: session.events })
   }
@@ -284,6 +319,20 @@ export class TaskSessionProvider extends TaskService {
     return this.enqueueValue(async () => this.commit(this.requireRoot(sessionId), expectedSeq, invalidCode, type, data))
   }
 
+  private appendTerminalCommand<T extends 'task/review-committed' | 'task/review-applied' | 'task/review-discarded'>(
+    sessionId: SessionId,
+    expectedSeq: number,
+    invalidCode: TaskErrorCode,
+    type: T,
+    data: TaskEventDataMap[T],
+  ): Promise<TaskSnapshot> {
+    return this.enqueueValue(async () => {
+      const input = this.requireRoot(sessionId)
+      if (this.hasActiveRun(sessionId)) throw new TaskError(`Task "${sessionId}" still has active work`, 'TASK_ACTIVE')
+      return await this.commit(input, expectedSeq, invalidCode, type, data)
+    })
+  }
+
   private async commit<T extends TaskEventType>(
     input: TaskSessionInput,
     expectedSeq: number,
@@ -325,6 +374,15 @@ export class TaskSessionProvider extends TaskService {
           break
         case 'task/review-decided':
           live.append('task/review-decided', data as TaskEventDataMap['task/review-decided'])
+          break
+        case 'task/review-committed':
+          live.append('task/review-committed', data as TaskEventDataMap['task/review-committed'])
+          break
+        case 'task/review-applied':
+          live.append('task/review-applied', data as TaskEventDataMap['task/review-applied'])
+          break
+        case 'task/review-discarded':
+          live.append('task/review-discarded', data as TaskEventDataMap['task/review-discarded'])
           break
       }
       this.captureLive(live)

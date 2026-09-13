@@ -21,6 +21,9 @@
       "path": "../task-worktree"
     },
     {
+      "path": "../task-review"
+    },
+    {
       "path": "../../workspace/workspace"
     },
     {

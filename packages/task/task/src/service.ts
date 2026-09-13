@@ -6,6 +6,9 @@ import type {
   AssignTaskWorktreeRequest,
   DefineTaskRequest,
   LiveTaskFact,
+  RecordTaskApplyRequest,
+  RecordTaskCommitRequest,
+  RecordTaskDiscardRequest,
   RecordTaskRiskRequest,
   ReviewTaskRequest,
   TaskListChange,
@@ -23,6 +26,9 @@ export type TaskErrorCode =
   | 'TASK_INVALID_CRITERION'
   | 'TASK_INVALID_RISK'
   | 'TASK_INVALID_REVIEW'
+  | 'TASK_INVALID_COMMIT'
+  | 'TASK_INVALID_APPLY'
+  | 'TASK_INVALID_DISCARD'
   | 'TASK_INVALID_EVIDENCE'
   | 'TASK_INVALID_WORKTREE'
   | 'TASK_WORKTREE_ASSIGNED'
@@ -121,12 +127,36 @@ export abstract class TaskService extends Service {
   abstract recordRisk(sessionId: SessionId, request: RecordTaskRiskRequest): Promise<TaskSnapshot>
 
   /**
-   * Record an explicit review or delivery decision.
+   * Record an explicit human review decision.
    * @param sessionId - root Session identity.
    * @param request - decision and expected next sequence.
    * @returns the committed task row.
    */
   abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot>
+
+  /**
+   * Record facts returned by a completed Task commit operation.
+   * @param sessionId - root Session identity.
+   * @param request - whole commit receipt and expected next sequence.
+   * @returns the committed task row.
+   */
+  abstract recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot>
+
+  /**
+   * Record facts returned by a completed source application.
+   * @param sessionId - root Session identity.
+   * @param request - whole apply receipt and expected next sequence.
+   * @returns the committed task row.
+   */
+  abstract recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot>
+
+  /**
+   * Record facts returned by a completed worktree discard.
+   * @param sessionId - root Session identity.
+   * @param request - whole discard receipt and expected next sequence.
+   * @returns the committed task row.
+   */
+  abstract recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot>
 }
 
 export default TaskService

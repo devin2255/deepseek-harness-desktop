@@ -13,6 +13,9 @@ import type {
   DefineTaskRequest,
   LiveTaskFact,
   RecordTaskRiskRequest,
+  RecordTaskApplyRequest,
+  RecordTaskCommitRequest,
+  RecordTaskDiscardRequest,
   ReviewTaskRequest,
   TaskErrorCode,
   TaskListChange,
@@ -53,6 +56,18 @@ class StubTaskService extends TaskService {
   }
 
   async review(_sessionId: SessionId, _request: ReviewTaskRequest): Promise<TaskSnapshot> {
+    throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
+  }
+
+  async recordCommit(_sessionId: SessionId, _request: RecordTaskCommitRequest): Promise<TaskSnapshot> {
+    throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
+  }
+
+  async recordApply(_sessionId: SessionId, _request: RecordTaskApplyRequest): Promise<TaskSnapshot> {
+    throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
+  }
+
+  async recordDiscard(_sessionId: SessionId, _request: RecordTaskDiscardRequest): Promise<TaskSnapshot> {
     throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
   }
 }
@@ -104,7 +119,7 @@ describe('task Service Definition', () => {
     }>()
     expectTypeOf<UpdateTaskCriterionRequest['expectedSeq']>().toEqualTypeOf<number>()
     expectTypeOf<RecordTaskRiskRequest['risk']['id']>().toEqualTypeOf<ReturnType<typeof TaskRiskId>>()
-    expectTypeOf<ReviewTaskRequest['decision']>().toExtend<string>()
+    expectTypeOf<ReviewTaskRequest['decision']>().toEqualTypeOf<'changes-requested' | 'ready'>()
     expectTypeOf<TaskSnapshot>().toExtend<{ readonly workspaceId?: WorkspaceId }>()
   })
 })

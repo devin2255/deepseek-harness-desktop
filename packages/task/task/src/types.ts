@@ -4,6 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
+import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
 
 /** Opaque identity of one acceptance criterion. */
 export type TaskCriterionId = Branded<'TaskCriterionId'>
@@ -47,8 +48,8 @@ export type TaskCriterionStatus = 'pending' | 'satisfied' | 'failed' | 'waived'
 /** User-facing severity of a recorded task risk. */
 export type TaskRiskSeverity = 'low' | 'medium' | 'high' | 'critical'
 
-/** Explicit review or landing decision for a task. */
-export type TaskReviewDecision = 'changes-requested' | 'ready' | 'committed' | 'applied' | 'archived' | 'discarded'
+/** Human review decision that cannot assert a Git-backed delivery result. */
+export type TaskReviewDecision = 'changes-requested' | 'ready'
 
 /** Derived operational state of one root task and its owned descendants. */
 export type TaskStatus = 'needs-attention' | 'failed' | 'running' | 'reviewing' | 'ready' | 'settled'
@@ -126,6 +127,9 @@ export interface TaskSnapshot {
   readonly attention: readonly AttentionItem[]
   readonly risks: readonly TaskRisk[]
   readonly reviewDecision?: TaskReviewDecision
+  readonly commitReceipt?: TaskCommitReceipt
+  readonly applyReceipt?: TaskApplyReceipt
+  readonly discardReceipt?: TaskDiscardReceipt
   readonly updatedAt: number
   readonly asOfSeq: number
 }
@@ -203,5 +207,23 @@ export interface RecordTaskRiskRequest {
 /** Compare-and-set input for recording one review decision. */
 export interface ReviewTaskRequest {
   readonly decision: TaskReviewDecision
+  readonly expectedSeq: number
+}
+
+/** Compare-and-set input for recording a completed Task commit. */
+export interface RecordTaskCommitRequest {
+  readonly receipt: TaskCommitReceipt
+  readonly expectedSeq: number
+}
+
+/** Compare-and-set input for recording a completed source application. */
+export interface RecordTaskApplyRequest {
+  readonly receipt: TaskApplyReceipt
+  readonly expectedSeq: number
+}
+
+/** Compare-and-set input for recording a completed worktree discard. */
+export interface RecordTaskDiscardRequest {
+  readonly receipt: TaskDiscardReceipt
   readonly expectedSeq: number
 }

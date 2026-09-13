@@ -184,19 +184,19 @@ export function aggregateTasks(input: TaskAggregationInput): TaskListSnapshot {
       && fold.definition !== undefined
       && fold.definition.criteria.every(criterion => criterion.status === 'satisfied' || criterion.status === 'waived')
       && fold.risks.every(risk => risk.resolution !== undefined)
-    const terminal = fold?.reviewDecision === 'committed'
-      || fold?.reviewDecision === 'applied'
-      || fold?.reviewDecision === 'archived'
-      || fold?.reviewDecision === 'discarded'
+    const terminal = fold?.commitReceipt !== undefined
+      || fold?.applyReceipt !== undefined
+      || fold?.discardReceipt !== undefined
     const reviewing = fold !== undefined
       && !terminal
       && (fold.definition !== undefined || fold.reviewDecision !== undefined || fold.risks.length > 0)
     const status = actionable ? 'needs-attention'
       : failed ? 'failed'
         : running ? 'running'
-          : reviewing && !ready ? 'reviewing'
-            : ready ? 'ready'
-              : 'settled'
+          : terminal ? 'settled'
+            : reviewing && !ready ? 'reviewing'
+              : ready ? 'ready'
+                : 'settled'
     const orderedAttention = sortAttentionItems(attention, taskUpdatedAt)
     const executionWorkspace = fold?.assignment
     const workspaceId = executionWorkspace?.workspaceId ?? input.workspaceBySession?.get(root.header.id)
@@ -211,6 +211,9 @@ export function aggregateTasks(input: TaskAggregationInput): TaskListSnapshot {
       attention: orderedAttention,
       risks: clone(fold?.risks ?? []),
       ...fold?.reviewDecision === undefined ? {} : { reviewDecision: fold.reviewDecision },
+      ...fold?.commitReceipt === undefined ? {} : { commitReceipt: clone(fold.commitReceipt) },
+      ...fold?.applyReceipt === undefined ? {} : { applyReceipt: clone(fold.applyReceipt) },
+      ...fold?.discardReceipt === undefined ? {} : { discardReceipt: clone(fold.discardReceipt) },
       updatedAt,
       asOfSeq: root.events?.length ?? 0,
     })

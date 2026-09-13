@@ -720,7 +720,7 @@ Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent
 'task/criterion-updated': { readonly criterion: TaskCriterion }
 ```
 
-Source: [`packages/task/task/src/index.ts:31`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:32`](../packages/task/task/src/index.ts)
 
 <a id="taskdefined--log-only"></a>
 
@@ -734,7 +734,35 @@ Source: [`packages/task/task/src/index.ts:31`](../packages/task/task/src/index.t
 'task/defined': { readonly definition: TaskDefinition }
 ```
 
-Source: [`packages/task/task/src/index.ts:26`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:27`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-applied--log-only"></a>
+
+#### `task/review-applied` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after applying a Task commit to its source checkout.
+ * @param data - provider-produced source-application receipt.
+ */
+'task/review-applied': { readonly receipt: TaskApplyReceipt }
+```
+
+Source: [`packages/task/task/src/index.ts:52`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-committed--log-only"></a>
+
+#### `task/review-committed` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after committing reviewed Task changes.
+ * @param data - provider-produced commit receipt.
+ */
+'task/review-committed': { readonly receipt: TaskCommitReceipt }
+```
+
+Source: [`packages/task/task/src/index.ts:47`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-decided--log-only"></a>
 
@@ -748,7 +776,21 @@ Source: [`packages/task/task/src/index.ts:26`](../packages/task/task/src/index.t
 'task/review-decided': { readonly decision: TaskReviewDecision }
 ```
 
-Source: [`packages/task/task/src/index.ts:41`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:42`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-discarded--log-only"></a>
+
+#### `task/review-discarded` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after removing a Task worktree.
+ * @param data - provider-produced discard receipt.
+ */
+'task/review-discarded': { readonly receipt: TaskDiscardReceipt }
+```
+
+Source: [`packages/task/task/src/index.ts:57`](../packages/task/task/src/index.ts)
 
 <a id="taskrisk-recorded--log-only"></a>
 
@@ -762,7 +804,7 @@ Source: [`packages/task/task/src/index.ts:41`](../packages/task/task/src/index.t
 'task/risk-recorded': { readonly risk: TaskRisk }
 ```
 
-Source: [`packages/task/task/src/index.ts:36`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:37`](../packages/task/task/src/index.ts)
 
 <a id="taskworktree-assigned--log-only"></a>
 
@@ -776,7 +818,7 @@ Source: [`packages/task/task/src/index.ts:36`](../packages/task/task/src/index.t
 'task/worktree-assigned': { readonly assignment: TaskWorktreeAssignment }
 ```
 
-Source: [`packages/task/task/src/index.ts:21`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:22`](../packages/task/task/src/index.ts)
 
 ### `todo/*`
 

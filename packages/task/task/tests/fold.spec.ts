@@ -10,6 +10,13 @@ import {
 } from '@deepseek-ai/dsh-task'
 import type { TaskCriterion, TaskDefinition, TaskRisk } from '@deepseek-ai/dsh-task'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
+import {
+  TaskReviewOperationId,
+  TaskReviewRevision,
+  type TaskApplyReceipt,
+  type TaskCommitReceipt,
+  type TaskDiscardReceipt,
+} from '@deepseek-ai/dsh-task-review'
 
 const firstCriterion: TaskCriterion = {
   id: TaskCriterionId('installer'),
@@ -45,6 +52,33 @@ const riskRecorded = (risk: TaskRisk, seq = 2): SessionEvent =>
 const reviewed = (decision: string, seq = 3): SessionEvent =>
   event('task/review-decided', { decision }, seq)
 
+const commitReceipt: TaskCommitReceipt = {
+  kind: 'commit', operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000001'),
+  taskId: SessionId('root'), workspaceId: 'workspace' as TaskCommitReceipt['workspaceId'],
+  reviewRevision: TaskReviewRevision('b'.repeat(64)), committedRevision: TaskReviewRevision('c'.repeat(64)),
+  branch: 'dsh/task-0123456789abcdef01234567', commit: '1'.repeat(40), committedAt: 1_700_000_000_010,
+}
+const applyReceipt: TaskApplyReceipt = {
+  kind: 'apply', operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000002'),
+  taskId: SessionId('root'), workspaceId: 'workspace' as TaskApplyReceipt['workspaceId'],
+  reviewRevision: commitReceipt.committedRevision, commit: commitReceipt.commit,
+  sourceHeadBefore: '2'.repeat(40), sourceHeadAfter: '2'.repeat(40), appliedAt: 1_700_000_000_011,
+}
+const discardReceipt: TaskDiscardReceipt = {
+  kind: 'discard', operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000003'),
+  taskId: SessionId('root'), workspaceId: 'workspace' as TaskDiscardReceipt['workspaceId'],
+  reviewRevision: commitReceipt.committedRevision, branch: commitReceipt.branch,
+  branchPreserved: true, worktreeRemoved: true, uncommittedChangesDiscarded: false,
+  recoverableCommit: commitReceipt.commit, discardedAt: 1_700_000_000_012,
+}
+
+const committed = (receipt: unknown = commitReceipt, seq = 4): SessionEvent =>
+  event('task/review-committed', { receipt }, seq)
+const applied = (receipt: unknown = applyReceipt, seq = 5): SessionEvent =>
+  event('task/review-applied', { receipt }, seq)
+const discarded = (receipt: unknown = discardReceipt, seq = 6): SessionEvent =>
+  event('task/review-discarded', { receipt }, seq)
+
 const assignment: TaskWorktreeAssignment = {
   kind: 'git-worktree',
   taskId: SessionId('root'),
@@ -62,6 +96,15 @@ const assignment: TaskWorktreeAssignment = {
 const worktreeAssigned = (value: unknown, seq = 0): SessionEvent =>
   event('task/worktree-assigned', { assignment: value }, seq)
 
+function readyDeliveryPrefix(): SessionEvent[] {
+  const criterion = { ...firstCriterion, status: 'satisfied' as const, evidence: [{ sessionId: SessionId('root'), seq: 1 }] }
+  return [
+    defined({ goal: 'Ship', criteria: [firstCriterion] }, 1),
+    criterionUpdated(criterion, 2),
+    reviewed('ready', 3),
+  ]
+}
+
 describe('task replay fold', () => {
   it('starts empty and preserves identity for unrelated events', () => {
     const state = emptyTaskFoldState()
@@ -70,6 +113,9 @@ describe('task replay fold', () => {
       definition: undefined,
       risks: [],
       reviewDecision: undefined,
+      commitReceipt: undefined,
+      applyReceipt: undefined,
+      discardReceipt: undefined,
       updatedAt: undefined,
     })
     expect(applyTaskEvent(state, event('turn/start', { turn: 1 }, 0))).toBe(state)
@@ -199,7 +245,7 @@ describe('task replay fold', () => {
     expect(() => foldTask([defined(definition()), reviewed('ready')]))
       .toThrow(/ready requires every criterion to be satisfied or waived/)
     expect(() => foldTask([defined(definition()), reviewed('committed')]))
-      .toThrow(/committed requires a ready decision/)
+      .toThrow(/review decision is invalid/)
   })
 
   it('rejects forbidden criterion transitions', () => {
@@ -257,7 +303,7 @@ describe('task replay fold', () => {
     expect(() => foldTask([event('task/risk-recorded', { risk }, 0)])).toThrow(message)
   })
 
-  it('enforces complete review progression and unresolved-risk blocking', () => {
+  it('enforces complete review progression and records whole delivery receipts', () => {
     const satisfied = {
       ...firstCriterion,
       status: 'satisfied' as const,
@@ -268,22 +314,41 @@ describe('task replay fold', () => {
     expect(() => foldTask([...readyPrefix, riskRecorded({
       id: TaskRiskId('risk'), severity: 'high', summary: 'Unsafe',
     }), reviewed('ready')])).toThrow(/ready requires every risk to be resolved/)
-    expect(() => foldTask([...readyPrefix, reviewed('applied')])).toThrow(/applied requires a committed decision/)
-    expect(() => foldTask([...readyPrefix, reviewed('archived')])).toThrow(/archived requires an applied decision/)
+    expect(() => foldTask([...readyPrefix, reviewed('ready'), committed()])).toThrow(/commit requires an assigned worktree/)
+    expect(() => foldTask([worktreeAssigned(assignment), ...readyPrefix, applied()])).toThrow(/apply requires a recorded commit/)
     expect(() => foldTask([reviewed('changes-requested')])).toThrow(/changes-requested requires a current definition/)
-    expect(() => foldTask([reviewed('discarded')])).toThrow(/discarded requires a current definition/)
 
     const state = foldTask([
+      worktreeAssigned(assignment),
       ...readyPrefix,
       reviewed('ready'),
-      reviewed('committed', 3),
-      reviewed('applied', 4),
-      reviewed('archived', 5),
+      committed(commitReceipt, 4),
+      applied(applyReceipt, 5),
+      discarded(discardReceipt, 6),
     ])
-    expect(state.reviewDecision).toBe('archived')
+    expect(state).toMatchObject({ reviewDecision: 'ready', commitReceipt, applyReceipt, discardReceipt })
+    expect(state.commitReceipt).not.toBe(commitReceipt)
     expect(foldTask([defined(oneCriterion), reviewed('changes-requested')]).reviewDecision)
       .toBe('changes-requested')
-    expect(foldTask([defined(oneCriterion), reviewed('discarded')]).reviewDecision).toBe('discarded')
+  })
+
+  it.each([
+    ['commit before ready', [worktreeAssigned(assignment), committed()], 'commit requires a ready decision'],
+    ['mismatched task', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, taskId: SessionId('other') })], 'commit receipt taskId does not match'],
+    ['mismatched workspace', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, workspaceId: 'other' })], 'commit receipt workspaceId does not match'],
+    ['mismatched branch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, branch: 'dsh/task-aaaaaaaaaaaaaaaaaaaaaaaa' })], 'commit receipt branch does not match'],
+    ['malformed review revision', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, reviewRevision: 'bad' })], 'commit receipt reviewRevision must be a lowercase SHA-256 digest'],
+    ['malformed operation id', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, operationId: 'operation' })], 'commit receipt operationId must be a normalized UUID'],
+    ['malformed commit', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, commit: 'HEAD' })], 'commit receipt commit must be a lowercase forty-character Git object id'],
+    ['duplicate commit', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), committed(commitReceipt, 5)], 'commit receipt already exists'],
+    ['apply commit mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied({ ...applyReceipt, commit: '3'.repeat(40) })], 'apply receipt commit does not match'],
+    ['apply revision mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied({ ...applyReceipt, reviewRevision: TaskReviewRevision('d'.repeat(64)) })], 'apply receipt reviewRevision does not match'],
+    ['apply changed HEAD', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied({ ...applyReceipt, sourceHeadAfter: '3'.repeat(40) })], 'apply receipt must not change source HEAD'],
+    ['discard without readiness', [worktreeAssigned(assignment), discarded(discardReceipt, 1)], 'discard requires a ready decision or recorded delivery'],
+    ['discard missing removed flag', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded({ ...discardReceipt, worktreeRemoved: false }, 4)], 'discard receipt must confirm worktree removal'],
+    ['discard revision mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), discarded({ ...discardReceipt, reviewRevision: TaskReviewRevision('d'.repeat(64)) }, 5)], 'discard receipt reviewRevision does not match'],
+  ])('rejects forged delivery state: %s', (_label, events, message) => {
+    expect(() => foldTask(events)).toThrow(message)
   })
 
   it('rejects a satisfied criterion becoming waived', () => {
