@@ -155,6 +155,11 @@ export interface IApiClient {
     updateCriterion(payload: RequestPayload<'task.updateCriterion'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.updateCriterion'>>>
     recordRisk(payload: RequestPayload<'task.recordRisk'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.recordRisk'>>>
     review(payload: RequestPayload<'task.review'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.review'>>>
+    reviewSummary(payload: RequestPayload<'task.reviewSummary'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewSummary'>>>
+    reviewDiff(payload: RequestPayload<'task.reviewDiff'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewDiff'>>>
+    commit(payload: RequestPayload<'task.commit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.commit'>>>
+    apply(payload: RequestPayload<'task.apply'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.apply'>>>
+    discard(payload: RequestPayload<'task.discard'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.discard'>>>
   }
   settings: {
     describe(payload: RequestPayload<'settings.describe'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'settings.describe'>>>
@@ -508,6 +513,11 @@ export abstract class AbstractApiClient implements IApiClient {
     updateCriterion: (payload, signal) => this.callUnary('task.updateCriterion', payload, signal),
     recordRisk: (payload, signal) => this.callUnary('task.recordRisk', payload, signal),
     review: (payload, signal) => this.callUnary('task.review', payload, signal),
+    reviewSummary: (payload, signal) => this.callUnary('task.reviewSummary', payload, signal),
+    reviewDiff: (payload, signal) => this.callUnary('task.reviewDiff', payload, signal),
+    commit: (payload, signal) => this.callUnary('task.commit', payload, signal),
+    apply: (payload, signal) => this.callUnary('task.apply', payload, signal),
+    discard: (payload, signal) => this.callUnary('task.discard', payload, signal),
   }
 
   readonly settings: IApiClient['settings'] = {

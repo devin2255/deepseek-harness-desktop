@@ -51,7 +51,7 @@ function attentionOwnerTitle(entry: TaskRow['attention'][number], attention: Tas
 
 /** Overview page with task groups and metadata health. */
 export function TaskOverview({
-  useSessions, useWorkspaces, useTasks, useHostDescription, openTask, startTask, refresh, t,
+  useSessions, useWorkspaces, useTasks, useHostDescription, openTask, openReview, startTask, refresh, t,
 }: TaskOverviewProps) {
   const sessions = useSessions(value => value)
   const workspaces = useWorkspaces(value => value)
@@ -179,6 +179,10 @@ export function TaskOverview({
                   <li key={row.task.taskId} className={css.task}>
                     <button type="button" className={css.taskTitle} title={row.goal}
                       onClick={() => { open(row.task.taskId) }}>{row.goal}</button>
+                    {row.task.executionWorkspace !== undefined
+                      && ['reviewing', 'ready', 'settled'].includes(row.task.status)
+                      && <button type="button" className={css.reviewAction}
+                        onClick={() => { run(() => openReview(row.task.taskId)) }}>{t('reviewChanges')}</button>}
                     <div className={css.metadata}>
                       <span>{row.workspace?.title ?? t('unassigned')}</span>
                       {row.task.executionWorkspace !== undefined &&

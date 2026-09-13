@@ -50,7 +50,8 @@ function props(): TaskOverviewProps {
     useSessions: selector => selector(list), useWorkspaces: selector => selector(workspaces),
     useTasks: selector => selector(tasks),
     useHostDescription: selector => selector({} as never),
-    openTask: vi.fn(async () => {}), startTask: vi.fn(async () => {}), refresh: vi.fn(async () => {}), t,
+    openTask: vi.fn(async () => {}), openReview: vi.fn(async () => {}),
+    startTask: vi.fn(async () => {}), refresh: vi.fn(async () => {}), t,
   }
 }
 
@@ -86,6 +87,18 @@ describe('TaskOverview', () => {
     view.rerender(<TaskOverview {...p} />)
     fireEvent.click(view.getByRole('button', { name: 'New Task' }))
     await waitFor(() => { expect(p.startTask).toHaveBeenLastCalledWith(undefined, 'worktree') })
+  })
+  it.each(['reviewing', 'ready', 'settled'] as const)('opens isolated %s tasks in Review', async (status) => {
+    const p = props()
+    const useTasks = p.useTasks
+    if (useTasks === undefined) throw new Error('fixture Task hook missing')
+    const state = useTasks(value => value)
+    if (state === undefined) throw new Error('fixture Task projection missing')
+    const task = state.byId['root' as SessionId]!
+    p.useTasks = selector => selector({ ...state, byId: { [task.taskId]: { ...task, status } } })
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Review changes' }))
+    await waitFor(() => { expect(p.openReview).toHaveBeenCalledWith('root') })
   })
   it('fails closed and offers explicit isolation recovery with focus management', async () => {
     const p = props()

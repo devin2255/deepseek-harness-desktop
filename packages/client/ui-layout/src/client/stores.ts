@@ -20,7 +20,7 @@ import {
  * `narrowExpanded` is the manual override that re-expands the auto-collapsed
  * sidebar over the squeezed center without rewriting the width preference.
  */
-type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowExpanded: boolean; centerPage: 'home' | 'conversation' }
+type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowExpanded: boolean; centerPage: 'home' | 'conversation' | 'review' }
 
 /**
  * Annotation twin of the actions literal below (the export needs a declared
@@ -29,6 +29,7 @@ type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowEx
 type LayoutActions = {
   showHome: (draft: LayoutState) => void
   showConversation: (draft: LayoutState) => void
+  showReview: (draft: LayoutState) => void
   setSidebar: (draft: LayoutState, px: number) => void
   setDetails: (draft: LayoutState, px: number) => void
   toggleSidebar: (draft: LayoutState) => void
@@ -53,6 +54,7 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
     actions: {
       showHome: (d) => { d.centerPage = 'home' },
       showConversation: (d) => { d.centerPage = 'conversation' },
+      showReview: (d) => { d.centerPage = 'review' },
       setSidebar: (d, px: number) => { d.sidebar = clampWidth(px, SIDEBAR_MIN, SIDEBAR_MAX) },
       setDetails: (d, px: number) => { d.details = clampWidth(px, DETAILS_MIN, DETAILS_MAX) },
       // Narrow toggles flip only the override: the width preference survives

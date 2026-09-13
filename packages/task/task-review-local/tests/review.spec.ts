@@ -71,17 +71,18 @@ describe('local Task review snapshots', () => {
     writeFileSync(join(assignment.path, 'binary.bin'), Buffer.from([0, 1, 2, 3]))
     const summary = await ctx.taskReview.summarize({ assignment })
 
-    await expect(ctx.taskReview.diff({
+    const trackedDiff = await ctx.taskReview.diff({
       assignment,
       path: 'tracked.txt',
       expectedRevision: summary.revision,
-    })).resolves.toMatchObject({
+    })
+    expect(trackedDiff).toMatchObject({
       revision: summary.revision,
       path: 'tracked.txt',
       binary: false,
       truncated: false,
-      patch: expect.stringContaining('+changed'),
     })
+    expect(trackedDiff.patch).toContain('+changed')
     await expect(ctx.taskReview.diff({
       assignment,
       path: 'binary.bin',
@@ -142,7 +143,7 @@ describe('local Task review snapshots', () => {
     const fixture = repository()
     const test = await mount(fixture, { maxDiffBytes: 80 })
     const { assignment, ctx } = test
-    writeFileSync(join(assignment.path, 'tracked.txt'), `${'changed line\n'.repeat(100)}`)
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'changed line\n'.repeat(100))
     const summary = await ctx.taskReview.summarize({ assignment })
     const diff = await ctx.taskReview.diff({
       assignment,

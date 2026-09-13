@@ -20,9 +20,9 @@ import css from './AppFrame.module.css'
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'shell.home'>
+  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'shell.home' | 'shell.review'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
-  & InjectFace<{ hooks: { homeAvailable: HostObservable<boolean> } }>
+  & InjectFace<{ hooks: { homeAvailable: HostObservable<boolean>; reviewAvailable: HostObservable<boolean> } }>
 
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode; hidden?: boolean }) {
@@ -89,12 +89,15 @@ export function AppFrame({
   useStore,
   useSessions,
   useHomeAvailable,
+  useReviewAvailable,
   actions,
   renderSlot,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   const homeAvailable = useHomeAvailable(s => s)
+  const reviewAvailable = useReviewAvailable(s => s)
   const home = panels.centerPage === 'home' && homeAvailable
+  const review = panels.centerPage === 'review' && reviewAvailable
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
@@ -143,7 +146,7 @@ export function AppFrame({
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
-  const cols = computeColumns(viewport, sidebarPreference, home || detailsSession === undefined ? 0 : panels.details)
+  const cols = computeColumns(viewport, sidebarPreference, home || review || detailsSession === undefined ? 0 : panels.details)
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -191,9 +194,10 @@ export function AppFrame({
             the shell's own pending rendering. The conversation
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
-        <CenterColumn hidden={home}>{renderSlot('conversation', {})}</CenterColumn>
-        <DetailsColumn hidden={home}>{renderSlot('details', {})}</DetailsColumn>
+        <CenterColumn hidden={home || review}>{renderSlot('conversation', {})}</CenterColumn>
+        <DetailsColumn hidden={home || review}>{renderSlot('details', {})}</DetailsColumn>
         <CenterColumn hidden={!home}>{renderSlot('shell.home', {})}</CenterColumn>
+        <CenterColumn hidden={!review}>{renderSlot('shell.review', {})}</CenterColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}

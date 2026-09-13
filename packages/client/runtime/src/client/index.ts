@@ -50,6 +50,8 @@ export { DirectoryBrowseError, WorkspaceCreateError, WorkspaceRuntime } from './
 export { TaskRuntime } from './tasks/service.ts'
 export { TaskManager } from './tasks/manager.ts'
 export type { TaskListFreshness, TaskListPhase, TaskListState } from './tasks/manager.ts'
+export { TaskReviewManager } from './tasks/review-manager.ts'
+export type { TaskReviewOperation, TaskReviewState } from './tasks/review-manager.ts'
 export { resolveWorkspacePath } from './workspaces/path.ts'
 // Contract only: the scope implementation and its Host transport belong to
 // dsh-client-ui-settings (see that package's settings-scope.ts).
@@ -68,7 +70,8 @@ export type { SessionListPhase, SessionSearchResultItem, SubagentCatalogSnapshot
 export type { SubagentAddress, JobView } from '@deepseek-ai/dsh-client-connection/client'
 export type {
   AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
-  TaskListChange, TaskListSnapshot, TaskReviewDecision, TaskRisk, TaskSnapshot,
+  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskListChange, TaskListSnapshot,
+  TaskReviewDecision, TaskReviewFile, TaskReviewSummary, TaskRisk, TaskSnapshot,
 } from '@deepseek-ai/dsh-client-connection/client'
 export type { WorkspaceListPhase } from './workspaces/manager.ts'
 export type { WorkspaceListState } from './workspaces/service.ts'

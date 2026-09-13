@@ -52,7 +52,7 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
   return function useSelector<S>(sel: (s: T) => S): S { return sel(useSyncExternalStore(inst.subscribe, inst.getSnapshot)) }
 }
 
-function mountFrame(homeAvailable = false) {
+function mountFrame(homeAvailable = false, reviewAvailable = false) {
   window.innerWidth = frameWidth // first-render viewport source before the observer fires
   const instance = createLayoutStore().create()
   const slotCalls: { key: string; props: unknown }[] = []
@@ -61,6 +61,7 @@ function mountFrame(homeAvailable = false) {
     if (key === 'sidebar') return <div data-testid="sidebar-content" />
     if (key === 'conversation') return <input aria-label="Draft" data-testid="center-content" defaultValue="kept draft" />
     if (key === 'shell.home') return <div data-testid="home-content" />
+    if (key === 'shell.review') return <div data-testid="review-content" />
     if (key === 'details') return <div data-testid="details-content"><button type="button">Details control</button></div>
     if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
@@ -85,6 +86,7 @@ function mountFrame(homeAvailable = false) {
     <AppFrame
       useStore={hookOf(instance)}
       useHomeAvailable={selector => selector(homeAvailable)}
+      useReviewAvailable={selector => selector(reviewAvailable)}
       actions={instance.actions}
       renderSlot={renderSlot}
       useSessions={useSessions}
@@ -165,6 +167,18 @@ describe('AppFrame', () => {
     act(() => { b.instance.actions.showConversation() })
     expect(b.getByTestId('center-content')).toBe(draft)
     expect(draft.value).toBe('retained input')
+  })
+  it('shows Review as a separate full center workspace and keeps conversation state mounted', () => {
+    const b = mountFrame(true, true)
+    const draft = b.getByTestId('center-content') as HTMLInputElement
+    draft.value = 'retained for review'
+    act(() => { b.instance.actions.openDetails(); b.instance.actions.showReview() })
+    expect(b.getByTestId('review-content').closest('[hidden]')).toBeNull()
+    expect(draft.closest('[hidden]')).not.toBeNull()
+    expect(b.queryByRole('button', { name: 'Details control' })).toBeNull()
+    expect(tracks(b.frame)).toEqual([280, 0])
+    act(() => { b.instance.actions.showConversation() })
+    expect(draft.value).toBe('retained for review')
   })
 
   it('falls back to conversation without a home occupant and leaves automatic selection on home', () => {

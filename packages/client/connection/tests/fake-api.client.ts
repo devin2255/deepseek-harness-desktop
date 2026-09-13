@@ -190,6 +190,21 @@ export class FakeApiClient implements IApiClient {
     review: (payload: unknown) => this.record('task.review', payload, Promise.resolve(err({
       code: 'task-unavailable', message: 'Task mutations are not configured in the connection fake.', details: {},
     }))),
+    reviewSummary: (payload: unknown) => this.record('task.reviewSummary', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    reviewDiff: (payload: unknown) => this.record('task.reviewDiff', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    commit: (payload: unknown) => this.record('task.commit', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    apply: (payload: unknown) => this.record('task.apply', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    discard: (payload: unknown) => this.record('task.discard', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
   }
 
   // Payloads stay `unknown` (lint-lane note above); response rows are the real

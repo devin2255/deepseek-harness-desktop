@@ -62,7 +62,8 @@ export type { EventsApi, MuxFrame, HostFrame, QueuedInboxItem, ToolCallView, Too
 export type { GoalsApi, GoalId, GoalRef } from './goals.ts'
 export type {
   AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
-  TaskListChange, TaskListSnapshot, TaskReviewDecision, TaskRisk, TaskSnapshot, TasksApi,
+  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskListChange, TaskListSnapshot,
+  TaskReviewDecision, TaskReviewFile, TaskReviewSummary, TaskRisk, TaskSnapshot, TasksApi,
 } from './tasks.ts'
 export type { SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSecretView } from './settings.ts'
 export type { CredentialsApi, CredentialView } from './credentials.ts'

@@ -289,7 +289,7 @@ describe('local Task review delivery', () => {
       maxDiffBytes: 128,
       maxPatchBytes: 64,
     })
-    writeFileSync(join(patchBound.assignment.path, 'tracked.txt'), `${'large task change\n'.repeat(20)}`)
+    writeFileSync(join(patchBound.assignment.path, 'tracked.txt'), 'large task change\n'.repeat(20))
     let reviewed = await patchBound.ctx.taskReview.summarize({ assignment: patchBound.assignment })
     const committed = await patchBound.ctx.taskReview.commit({
       assignment: patchBound.assignment,

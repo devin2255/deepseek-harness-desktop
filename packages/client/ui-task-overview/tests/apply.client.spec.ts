@@ -14,8 +14,8 @@ async function bench() {
     refresh: vi.fn(async () => {}), startSession: vi.fn(), connectWorkspace: vi.fn(async () => 'isolated'),
     list: { getSnapshot: () => ({ state: 'idle' }) },
   }
-  const tasks = { refresh: vi.fn(async () => {}), list: { getSnapshot: () => ({ state: 'idle' }) } }
-  const layout = { showHome: vi.fn(), showConversation: vi.fn() }
+  const tasks = { refresh: vi.fn(async () => {}), openReview: vi.fn(async () => {}), list: { getSnapshot: () => ({ state: 'idle' }) } }
+  const layout = { showHome: vi.fn(), showConversation: vi.fn(), showReview: vi.fn() }
   const hostDescription = { getSnapshot: () => ({}), subscribe: () => () => {} }
   const locale = new LocaleRuntime(ctx)
   ctx.provide('sessions', sessions as never)
@@ -30,7 +30,7 @@ async function bench() {
 }
 
 describe('overview composition', () => {
-  it.each(['home', 'conversation'] as const)('abandons child lookup after explicit navigation to %s', async (page) => {
+  it.each(['home', 'conversation', 'review'] as const)('abandons child lookup after explicit navigation to %s', async (page) => {
     const b = await bench()
     b.declare()
     const fiber = b.ctx.plugin({ inject, apply })
@@ -84,6 +84,9 @@ describe('overview composition', () => {
     expect(b.tasks.refresh).toHaveBeenCalledOnce()
     await face.openTask('root' as never)
     expect(b.sessions.open).toHaveBeenCalledWith('root')
+    await face.openReview('root' as never)
+    expect(b.tasks.openReview).toHaveBeenCalledWith('root')
+    expect(b.layout.showReview).toHaveBeenCalledOnce()
     const footer = (b.slots.entries('sidebar.footer.action')[0]!.inject as () => { showHome(): void })()
     footer.showHome()
     expect(b.layout.showHome).toHaveBeenCalledOnce()

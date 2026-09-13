@@ -19,9 +19,12 @@ import {
   SdkProtocolError,
   TransportClosedError,
   type HarnessNotification,
+  type TaskReviewRevision,
   type TaskWorktreeAssignment,
 } from '../src/index.ts'
 import { finalResponse, normalizeInput } from '../src/api.ts'
+
+const reviewRevision = 'b'.repeat(64) as TaskReviewRevision
 
 const fakeRuntime = fileURLToPath(new URL('./fake-runtime.ts', import.meta.url))
 
@@ -333,9 +336,9 @@ describe('HarnessClient', () => {
     const call = method === 'summary'
       ? client.getTaskReviewSummary('task-root')
       : method === 'diff'
-        ? client.getTaskReviewDiff('task-root', { path: 'src/app.ts', expectedRevision: 'b'.repeat(64) })
+        ? client.getTaskReviewDiff('task-root', { path: 'src/app.ts', expectedRevision: reviewRevision })
         : client.discardTask('task-root', {
-          expectedRevision: 'b'.repeat(64), confirmedUncommittedLoss: false, expectedSeq: 6,
+          expectedRevision: reviewRevision, confirmedUncommittedLoss: false, expectedSeq: 6,
         })
     await expect(call).rejects.toThrow(SdkProtocolError)
   })
@@ -353,10 +356,10 @@ describe('HarnessClient', () => {
       files: [{ previousPath: 'src/old.ts' }],
     })
     await expect(diffClient.getTaskReviewDiff('task-root', {
-      path: 'src/app.ts', expectedRevision: 'b'.repeat(64),
+      path: 'src/app.ts', expectedRevision: reviewRevision,
     })).resolves.toMatchObject({ previousPath: 'src/old.ts' })
     await expect(discardClient.discardTask('task-root', {
-      expectedRevision: 'b'.repeat(64), confirmedUncommittedLoss: false, expectedSeq: 6,
+      expectedRevision: reviewRevision, confirmedUncommittedLoss: false, expectedSeq: 6,
     })).resolves.toMatchObject({ discardReceipt: { recoverableCommit: '3'.repeat(40) } })
   })
 

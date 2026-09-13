@@ -17,6 +17,7 @@ export const zh = {
   stale: '任务数据可能已过时。', sessionActivityOnly: '仅显示会话活动',
   notice: '新任务默认在独立的 Git 工作树中运行，不会改动当前项目目录。',
   worktree: '工作树', isolationFailed: '无法创建隔离的工作树', retryIsolation: '重试隔离', useDirect: '直接使用项目',
+  reviewChanges: '审查变更',
   useDirectWarning: '直接模式允许 Agent 修改所选项目目录中的文件，请仅在你接受该风险时使用。',
 } satisfies Record<string, string>
 
@@ -43,5 +44,6 @@ export const en = {
   stale: 'Task data may be out of date.', sessionActivityOnly: 'Session activity only',
   notice: 'New tasks run in isolated Git worktrees by default and leave the project directory unchanged.',
   worktree: 'Worktree', isolationFailed: 'Could not create an isolated worktree', retryIsolation: 'Retry isolation', useDirect: 'Use project directly',
+  reviewChanges: 'Review changes',
   useDirectWarning: 'Direct mode lets the Agent modify files in the selected project directory. Use it only if you accept that risk.',
 } satisfies Record<TaskOverviewKey, string>

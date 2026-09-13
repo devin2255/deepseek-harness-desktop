@@ -9,7 +9,10 @@ import type { SidebarRootInjected } from '@deepseek-ai/dsh-client-ui-sidebar/cli
 async function bench(declare = true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
-  const layout = { toggleSidebar: vi.fn(), showHome: vi.fn(), showConversation: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn() }
+  const layout = {
+    toggleSidebar: vi.fn(), showHome: vi.fn(), showConversation: vi.fn(), showReview: vi.fn(),
+    openDetails: vi.fn(), closeDetails: vi.fn(),
+  }
   const workspaces = { startSession: vi.fn() }
   const sessions = { open: vi.fn(), clear: vi.fn() }
   ctx.provide('layout', layout)

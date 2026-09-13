@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-可选的 `shell.home` 插槽添加首页，不替换会话注册及其子插槽。该插槽被占用时布局从首页启动，否则显示普通会话。`ctx.layout.showHome()` 与 `showConversation()` 仅修改展示状态，每次调用均发出 `layout/navigate`，包括重复目标，以便取消尚未完成的导航。隐藏的会话保持挂载，保留草稿和选择；首页将详情渲染宽度置零，不修改已保存的宽度偏好。侧边栏和工作区手势显式显示会话，即使选中的会话 id 没有变化。
+可选的 `shell.home` 与 `shell.review` 插槽添加完整的中央工作区，不替换会话注册及其子插槽。`shell.home` 被占用时布局从首页启动，否则显示普通会话。`ctx.layout.showHome()`、`showConversation()` 与 `showReview()` 仅修改展示状态，每次调用均发出 `layout/navigate`，包括重复目标，以便取消尚未完成的导航。隐藏的会话保持挂载，保留草稿和选择；首页与审查页将详情渲染宽度置零，不修改已保存的宽度偏好。侧边栏和工作区手势显式显示会话，即使选中的会话 id 没有变化。
 
 外壳插件：三栏 AppFrame（拖动手柄与让步链）加 `ctx.layout` 面板几何服务；它注册到运行时拥有的 `root` slot，并声明 `sidebar`、`conversation`、`details` 和 `conversation.empty`。侧边栏的缩放边界是不可见命中条带，详情栏边界则保留其浮动胶囊；让步期间只有详情栏会收缩并随后自动关闭。关闭的侧边栏仍保留 56px 控制栏，详情栏则关闭到零宽度。该包还提供主题呈现器：它消费解析后的 `ctx.theme` 快照，并将其投影到 document（用 `html { color-scheme }` 驱动原生 UA 控件，依据当前配色方案设置 `body[data-ds-dark-theme]`，并将主题的别名 token 设为 body 上的内联变量，同时拥有一个 `<meta name="theme-color">`，其内容随计算后的 body 背景色更新）。在应用调色板和 token 后进行测量，可确保渲染后的背景成为唯一的颜色依据；呈现器在 dispose（资源释放）时会移除其自有的元数据节点，并一并清除其写入的其他全局状态。
 

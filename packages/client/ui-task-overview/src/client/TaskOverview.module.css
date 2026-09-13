@@ -73,7 +73,8 @@
 
 .action,
 .taskTitle,
-.pendingAction {
+.pendingAction,
+.reviewAction {
   cursor: pointer;
   text-align: start;
   overflow-wrap: anywhere;
@@ -81,7 +82,8 @@
 
 .action:hover,
 .taskTitle:hover,
-.pendingAction:hover {
+.pendingAction:hover,
+.reviewAction:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
@@ -177,7 +179,8 @@
 }
 
 .taskTitle,
-.pendingAction {
+.pendingAction,
+.reviewAction {
   max-width: 100%;
   border: 0;
   border-radius: 4px;
@@ -189,6 +192,17 @@
 
 .taskTitle {
   font-weight: 600;
+}
+
+.reviewAction {
+  float: inline-end;
+  border: 1px solid var(--dsw-alias-state-business-primary);
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--dsw-alias-state-business-primary);
+  background: none;
+  font: inherit;
+  font-size: 12px;
 }
 
 .metadata {

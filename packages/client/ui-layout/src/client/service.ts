@@ -25,6 +25,8 @@ export interface ILayout {
   showHome(): void
   /** Reveal the selected conversation, including an existing blank draft. */
   showConversation(): void
+  /** Reveal the separate Task Review workspace. */
+  showReview(): void
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void
   /** Open the details panel (no-op when already open). */
@@ -38,7 +40,7 @@ export class LayoutController implements ILayout {
   #panels: PanelActions | undefined
 
   /** @param navigate - publish explicit center navigation, including repeated destinations. */
-  constructor(private readonly navigate: (page: 'home' | 'conversation') => void) {}
+  constructor(private readonly navigate: (page: 'home' | 'conversation' | 'review') => void) {}
 
   showHome(): void {
     this.#require().showHome()
@@ -48,6 +50,11 @@ export class LayoutController implements ILayout {
   showConversation(): void {
     this.#require().showConversation()
     this.navigate('conversation')
+  }
+
+  showReview(): void {
+    this.#require().showReview()
+    this.navigate('review')
   }
 
   /**

@@ -289,7 +289,7 @@ reader.on('line', (line) => {
       return
     case 'task/reviewSummary':
       if (env.FAKE_TASK_CASE === 'summary-non-record') {
-        respond(null)
+        respond(null as unknown as object)
         return
       }
       respond({
@@ -308,7 +308,7 @@ reader.on('line', (line) => {
       return
     case 'task/reviewDiff':
       if (env.FAKE_TASK_CASE === 'diff-non-record') {
-        respond(null)
+        respond(null as unknown as object)
         return
       }
       respond({

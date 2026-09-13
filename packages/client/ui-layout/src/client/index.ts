@@ -31,7 +31,7 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      * @param page - requested presentation page.
      */
-    'layout/navigate'(page: 'home' | 'conversation'): void
+    'layout/navigate'(page: 'home' | 'conversation' | 'review'): void
   }
   interface Context {
     /** The outward face only; the concrete service stays inside this plugin. */
@@ -43,6 +43,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /** Optional root home surface; no occupant leaves the conversation visible. */
     'shell.home': { kind: 'single'; scope: 'root' }
+    /** Optional separate Task Review workspace. */
+    'shell.review': { kind: 'single'; scope: 'root' }
     // The 'root' entry itself is the runtime's built-in slot (declared
     // there); these four are the frame's children, declared by the same
     // register() call that contributes AppFrame. Session owners never pass
@@ -130,12 +132,17 @@ export function apply(ctx: ClientContext): void {
     getSnapshot: () => ctx.slots.entries('shell.home').length > 0,
     subscribe: listener => ctx.slots.subscribe('shell.home', listener),
   }
+  const reviewAvailable: HostObservable<boolean> = {
+    getSnapshot: () => ctx.slots.entries('shell.review').length > 0,
+    subscribe: listener => ctx.slots.subscribe('shell.review', listener),
+  }
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
     const disposeRegistration = ctx.slots.register({
       name: 'root',
       children: {
         'shell.home': { kind: 'single', scope: 'root' },
+        'shell.review': { kind: 'single', scope: 'root' },
         'sidebar': { kind: 'single', scope: 'root' },
         'conversation': { kind: 'single', scope: 'session-maybe' },
         'details': { kind: 'single', scope: 'session' },
@@ -148,7 +155,7 @@ export function apply(ctx: ClientContext): void {
       // conversation business actions belong to their registrants.
       inject: (actions: PanelActions) => {
         layout.attachPanels(actions)
-        return { hooks: { homeAvailable } }
+        return { hooks: { homeAvailable, reviewAvailable } }
       },
     }, AppFrame)
     return () => {
