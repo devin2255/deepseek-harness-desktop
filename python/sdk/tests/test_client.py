@@ -51,12 +51,55 @@ def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.M
 
     def request(method: str, params: dict[str, object], *, response_model: type, **_kwargs: object):
         calls.append((method, params))
-        value = {"generation": 7, "tasks": [row]} if method == "task/list" else {
-            **row,
-            "definition": {"goal": "Ship", "criteria": []},
-            "risks": [params["risk"]] if method == "task/recordRisk" else [],
-            "reviewDecision": params["decision"] if method == "task/review" else None,
+        summary = {
+            "taskId": "root", "workspaceId": "workspace", "revision": "b" * 64,
+            "baseCommit": "0" * 40, "headCommit": "0" * 40, "sourceHead": "0" * 40,
+            "sourceDirty": False, "branch": "dsh/task-0123456789abcdef01234567",
+            "dirty": True, "truncated": False,
+            "files": [{"path": "src/app.ts", "status": "modified", "binary": False,
+                       "additions": 2, "deletions": 1}],
+            "additions": 2, "deletions": 1,
         }
+        commit_receipt = {
+            "kind": "commit", "operationId": "00000000-0000-4000-8000-000000000001",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "b" * 64,
+            "committedRevision": "c" * 64, "branch": row["executionWorkspace"]["branch"],
+            "commit": "1" * 40, "committedAt": 2,
+        }
+        apply_receipt = {
+            "kind": "apply", "operationId": "00000000-0000-4000-8000-000000000002",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "c" * 64,
+            "commit": "1" * 40, "sourceHeadBefore": "2" * 40,
+            "sourceHeadAfter": "2" * 40, "appliedAt": 3,
+        }
+        discard_receipt = {
+            "kind": "discard", "operationId": "00000000-0000-4000-8000-000000000003",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "c" * 64,
+            "branch": row["executionWorkspace"]["branch"], "branchPreserved": True,
+            "worktreeRemoved": True, "uncommittedChangesDiscarded": False,
+            "recoverableCommit": "1" * 40, "discardedAt": 4,
+        }
+        if method == "task/list":
+            value = {"generation": 7, "tasks": [row]}
+        elif method == "task/reviewSummary":
+            value = summary
+        elif method == "task/reviewDiff":
+            value = {
+                "taskId": "root", "workspaceId": "workspace", "revision": params["expectedRevision"],
+                "path": params["path"], "binary": False, "truncated": False, "patch": "+new",
+            }
+        else:
+            value = {
+                **row,
+                "definition": {"goal": "Ship", "criteria": []},
+                "risks": [params["risk"]] if method == "task/recordRisk" else [],
+                "reviewDecision": params["decision"] if method == "task/review" else None,
+                **({"commitReceipt": commit_receipt} if method == "task/commit" else {}),
+                **({"commitReceipt": commit_receipt, "applyReceipt": apply_receipt}
+                   if method == "task/apply" else {}),
+                **({"commitReceipt": commit_receipt, "applyReceipt": apply_receipt,
+                    "discardReceipt": discard_receipt} if method == "task/discard" else {}),
+            }
         return response_model.model_validate(value)
 
     monkeypatch.setattr(client, "request", request)
@@ -71,8 +114,28 @@ def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.M
     risk = TaskRisk(id="risk", severity="high", summary="Signing")
     assert client.record_task_risk("root", risk=risk, expected_seq=2).risks[0].summary == "Signing"
     assert client.review_task("root", decision="ready", expected_seq=3).review_decision == "ready"
+    summary = client.get_task_review_summary("root")
+    assert summary.files[0].additions == 2
+    assert client.get_task_review_diff(
+        "root", path="src/app.ts", expected_revision=summary.revision
+    ).patch == "+new"
+    committed = client.commit_task(
+        "root", expected_revision=summary.revision, message="feat: ship", expected_seq=4
+    )
+    assert committed.commit_receipt.commit == "1" * 40
+    applied = client.apply_task(
+        "root", expected_revision=committed.commit_receipt.committed_revision,
+        expected_source_head="2" * 40, commit=committed.commit_receipt.commit, expected_seq=5,
+    )
+    assert applied.apply_receipt.source_head_before == "2" * 40
+    discarded = client.discard_task(
+        "root", expected_revision=committed.commit_receipt.committed_revision,
+        confirmed_uncommitted_loss=False, expected_seq=6,
+    )
+    assert discarded.discard_receipt.worktree_removed is True
     assert [method for method, _params in calls] == [
-        "task/list", "task/define", "task/updateCriterion", "task/recordRisk", "task/review"
+        "task/list", "task/define", "task/updateCriterion", "task/recordRisk", "task/review",
+        "task/reviewSummary", "task/reviewDiff", "task/commit", "task/apply", "task/discard",
     ]
 
 

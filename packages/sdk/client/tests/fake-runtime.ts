@@ -42,6 +42,9 @@
  * - `FAKE_STDERR`: write this line to stderr at boot (diagnostics-tail probe).
  * - `FAKE_STDERR_NO_NEWLINE`: write this to stderr WITHOUT a newline (buffer-flush probe).
  * - `FAKE_RECORD_INIT`: append each `initialize` params JSON to this file (handshake probe).
+ * - `FAKE_TASK_CASE`: select a Task projection or review-response validation
+ *   probe; `FAKE_TASK_INVALID` switches probes with valid optional fields to
+ *   their malformed counterpart.
  */
 
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
@@ -227,19 +230,31 @@ reader.on('line', (line) => {
         respond({ generation: 'wrong', tasks: [{}] })
         return
       }
-      respond({ generation: 4, tasks: [{
-        taskId: 'task-root', workspaceId: 'workspace-root', descendantSessionIds: [], status: 'running', freshness: 'live',
-        executionWorkspace: env.FAKE_MALFORMED_TASK_WORKTREE !== undefined
-          ? { kind: 'git-worktree', path: 42 }
-          : {
-            kind: 'git-worktree', taskId: 'task-root', workspaceId: 'workspace-root',
-            sourcePath: 'D:\\source\\project', path: 'D:\\harness\\worktrees\\task-root',
-            branch: 'dsh/task-0123456789abcdef01234567', baseCommit: '0'.repeat(40),
-            sourceHead: '0'.repeat(40), sourceDirty: false,
-            sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
-          },
-        attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
-      }] })
+      if (env.FAKE_TASK_CASE === 'snapshot-non-record') {
+        respond({ generation: 4, tasks: [null] })
+        return
+      }
+      {
+        const task: Record<string, unknown> = {
+          taskId: 'task-root', workspaceId: 'workspace-root', descendantSessionIds: [], status: 'running', freshness: 'live',
+          executionWorkspace: env.FAKE_MALFORMED_TASK_WORKTREE !== undefined
+            ? { kind: 'git-worktree', path: 42 }
+            : {
+              kind: 'git-worktree', taskId: 'task-root', workspaceId: 'workspace-root',
+              sourcePath: 'D:\\source\\project', path: 'D:\\harness\\worktrees\\task-root',
+              branch: 'dsh/task-0123456789abcdef01234567', baseCommit: '0'.repeat(40),
+              sourceHead: '0'.repeat(40), sourceDirty: false,
+              sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+            },
+          attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+        }
+        if (env.FAKE_TASK_CASE === 'review-decision-number') task.reviewDecision = 1
+        if (env.FAKE_TASK_CASE === 'review-decision-invalid') task.reviewDecision = 'approved'
+        if (env.FAKE_TASK_CASE === 'commit-receipt-invalid') task.commitReceipt = {}
+        if (env.FAKE_TASK_CASE === 'apply-receipt-invalid') task.applyReceipt = {}
+        if (env.FAKE_TASK_CASE === 'discard-receipt-invalid') task.discardReceipt = {}
+        respond({ generation: 4, tasks: [task] })
+      }
       return
     case 'task/define':
       respond({
@@ -270,6 +285,78 @@ reader.on('line', (line) => {
         taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'ready', freshness: 'live',
         definition: { goal: 'Ship SDK', criteria: [] }, reviewDecision: frame.params?.decision,
         attention: [], risks: [], updatedAt: 5, asOfSeq: 4,
+      })
+      return
+    case 'task/reviewSummary':
+      if (env.FAKE_TASK_CASE === 'summary-non-record') {
+        respond(null)
+        return
+      }
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', revision: 'b'.repeat(64),
+        baseCommit: '0'.repeat(40), headCommit: '0'.repeat(40), sourceHead: '0'.repeat(40), sourceDirty: false,
+        branch: 'dsh/task-0123456789abcdef01234567', dirty: true, truncated: false,
+        files: [{
+          path: 'src/app.ts',
+          ...(env.FAKE_TASK_CASE === 'summary-previous-path'
+            ? { previousPath: env.FAKE_TASK_INVALID === undefined ? 'src/old.ts' : '../old.ts' }
+            : {}),
+          status: 'modified', binary: false, additions: 2, deletions: 1,
+        }],
+        additions: 2, deletions: 1,
+      })
+      return
+    case 'task/reviewDiff':
+      if (env.FAKE_TASK_CASE === 'diff-non-record') {
+        respond(null)
+        return
+      }
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', revision: frame.params?.expectedRevision,
+        path: frame.params?.path,
+        ...(env.FAKE_TASK_CASE === 'diff-previous-path'
+          ? { previousPath: env.FAKE_TASK_INVALID === undefined ? 'src/old.ts' : '../old.ts' }
+          : {}),
+        binary: false, truncated: false, patch: '@@ -1 +1 @@\n-old\n+new\n',
+      })
+      return
+    case 'task/commit':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], reviewDecision: 'ready', updatedAt: 6, asOfSeq: 5,
+        commitReceipt: {
+          kind: 'commit', operationId: '00000000-0000-4000-8000-000000000001', taskId: sessionIdOf(frame.params),
+          workspaceId: 'workspace-root', reviewRevision: frame.params?.expectedRevision,
+          committedRevision: 'c'.repeat(64), branch: 'dsh/task-0123456789abcdef01234567',
+          commit: '1'.repeat(40), committedAt: 6,
+        },
+      })
+      return
+    case 'task/apply':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], reviewDecision: 'ready', updatedAt: 7, asOfSeq: 6,
+        applyReceipt: {
+          kind: 'apply', operationId: '00000000-0000-4000-8000-000000000002', taskId: sessionIdOf(frame.params),
+          workspaceId: 'workspace-root', reviewRevision: frame.params?.expectedRevision, commit: frame.params?.commit,
+          sourceHeadBefore: frame.params?.expectedSourceHead, sourceHeadAfter: frame.params?.expectedSourceHead, appliedAt: 7,
+        },
+      })
+      return
+    case 'task/discard':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], reviewDecision: 'ready', updatedAt: 8, asOfSeq: 7,
+        discardReceipt: {
+          kind: 'discard', operationId: '00000000-0000-4000-8000-000000000003', taskId: sessionIdOf(frame.params),
+          workspaceId: 'workspace-root', reviewRevision: frame.params?.expectedRevision,
+          branch: 'dsh/task-0123456789abcdef01234567', branchPreserved: true, worktreeRemoved: true,
+          uncommittedChangesDiscarded: frame.params?.confirmedUncommittedLoss,
+          ...(env.FAKE_TASK_CASE === 'discard-recoverable'
+            ? { recoverableCommit: env.FAKE_TASK_INVALID === undefined ? '3'.repeat(40) : 'bad' }
+            : {}),
+          discardedAt: 8,
+        },
       })
       return
     case 'shutdown':

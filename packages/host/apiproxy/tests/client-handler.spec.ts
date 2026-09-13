@@ -115,6 +115,11 @@ function scriptedApi(overrides: {
       updateCriterion: err,
       recordRisk: err,
       review: err,
+      reviewSummary: err,
+      reviewDiff: err,
+      commit: err,
+      apply: err,
+      discard: err,
       ...overrides.tasks,
     },
     settings: {

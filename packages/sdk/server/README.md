@@ -24,7 +24,7 @@ The plugin answers `shutdown`, flushes the response, disposes the root context s
 
 `initialize.serverInfo.name` is the wire-stable `deepseek-harness-sdk-runtime`. An optional positive `initialize.maxTokens` becomes the request output cap of each SDK-created agent and its in-process descendants; invalid values reject initialization, while omission sends no SDK cap and allows the selected adapter or provider route default to apply. `session/prompt` queues one identified user message and immediately returns `{ messageId }`. The server streams every durable fact as `session.event` and every whole-agent lifecycle transition as `session.status`; it does not assign an assistant message or `turn/end` to that prompt. Independent requests may enqueue more work on the same session. Persistence roots and persona come from `cordis.yml`.
 
-`task/list` returns the Task Provider's complete baseline. The four Task mutation methods forward their `expectedSeq` compare-and-set value and return the committed whole row; domain rejections become JSON-RPC errors without resuming a target session.
+`task/list` returns the Task Provider's complete baseline. The four Task definition and review methods forward their `expectedSeq` compare-and-set value and return the committed whole row. `task/reviewSummary` and `task/reviewDiff` read bounded values from the recorded application-owned worktree; `task/commit`, `task/apply`, and `task/discard` validate the exact Task lifecycle and revision, call the Task Review Provider, then record its durable receipt. Direct-workspace Tasks are never interpreted as Git worktrees. Domain rejections become JSON-RPC errors without resuming a target session.
 
 ## Model Experience
 

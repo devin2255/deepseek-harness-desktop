@@ -54,8 +54,9 @@ import {
   goalClearValueSchema,
 } from '../api/goals.schema.ts'
 import {
-  taskDefineValueSchema, taskListValueSchema, taskRecordRiskValueSchema,
-  taskReviewValueSchema, taskUpdateCriterionValueSchema,
+  taskApplyValueSchema, taskCommitValueSchema, taskDefineValueSchema, taskDiscardValueSchema,
+  taskListValueSchema, taskRecordRiskValueSchema, taskReviewDiffValueSchema,
+  taskReviewSummaryValueSchema, taskReviewValueSchema, taskUpdateCriterionValueSchema,
 } from '../api/tasks.schema.ts'
 import {
   settingsDescribeValueSchema, settingsMutateValueSchema, settingsOpenDocumentValueSchema,
@@ -227,6 +228,11 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'task.updateCriterion': taskUpdateCriterionValueSchema,
   'task.recordRisk': taskRecordRiskValueSchema,
   'task.review': taskReviewValueSchema,
+  'task.reviewSummary': taskReviewSummaryValueSchema,
+  'task.reviewDiff': taskReviewDiffValueSchema,
+  'task.commit': taskCommitValueSchema,
+  'task.apply': taskApplyValueSchema,
+  'task.discard': taskDiscardValueSchema,
   'settings.describe': settingsDescribeValueSchema,
   'settings.openDocument': settingsOpenDocumentValueSchema,
   'settings.update': settingsUpdateValueSchema,

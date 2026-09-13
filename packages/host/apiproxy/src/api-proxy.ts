@@ -62,9 +62,10 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
-import type { LiveTaskFact, TaskErrorCode } from '@deepseek-ai/dsh-task'
+import type { LiveTaskFact, TaskErrorCode, TaskSnapshot } from '@deepseek-ai/dsh-task'
 import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
+import { TaskReviewError, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -1868,9 +1869,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     TASK_INVALID_CRITERION: 'task-invalid-criterion',
     TASK_INVALID_RISK: 'task-invalid-risk',
     TASK_INVALID_REVIEW: 'task-invalid-review',
-    TASK_INVALID_COMMIT: 'task-invalid-review',
-    TASK_INVALID_APPLY: 'task-invalid-review',
-    TASK_INVALID_DISCARD: 'task-invalid-review',
+    TASK_INVALID_COMMIT: 'task-invalid-commit',
+    TASK_INVALID_APPLY: 'task-invalid-apply',
+    TASK_INVALID_DISCARD: 'task-invalid-discard',
     TASK_INVALID_EVIDENCE: 'task-invalid-evidence',
     TASK_INVALID_WORKTREE: 'task-invalid-worktree',
     TASK_WORKTREE_ASSIGNED: 'task-worktree-assigned',
@@ -1888,6 +1889,77 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       })
     }
     return err(request, { code: 'internal', message: String(error), details: {} })
+  }
+
+  interface TaskReviewTarget {
+    readonly task: TaskSnapshot
+    readonly assignment: TaskWorktreeAssignment
+    readonly tasks: NonNullable<ReturnType<typeof ctx.get<'tasks'>>>
+    readonly review: NonNullable<ReturnType<typeof ctx.get<'taskReview'>>>
+  }
+
+  /** Resolve one durable Task worktree and both services without inferring a directory-only review. */
+  function taskReviewTarget(sessionId: SessionId): TaskReviewTarget | { readonly error: RpcError } {
+    const tasks = ctx.get('tasks')
+    if (tasks === undefined) {
+      return { error: { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId } } }
+    }
+    const task = tasks.snapshot().tasks.find(candidate => candidate.taskId === sessionId)
+    if (task === undefined) return { error: { code: 'task-not-found', message: `Task "${sessionId}" does not exist`, details: { sessionId } } }
+    if (task.executionWorkspace === undefined) {
+      return {
+        error: {
+          code: 'task-review-unavailable',
+          message: 'This Task has no application-owned Git worktree to review.',
+          details: { sessionId },
+        },
+      }
+    }
+    const review = ctx.get('taskReview')
+    if (review === undefined) {
+      return {
+        error: {
+          code: 'task-review-unavailable',
+          message: 'Task review is unavailable in this application.',
+          details: { sessionId },
+        },
+      }
+    }
+    return { task, assignment: task.executionWorkspace, tasks, review }
+  }
+
+  /** Map cancellation and user-safe Task review failures without serializing native causes. */
+  function taskReviewError(
+    request: RpcRequest<{ sessionId: SessionId }>,
+    error: unknown,
+    signal: AbortSignal,
+  ): RpcResponse<never> {
+    if (signal.aborted) return err(request, { code: 'cancelled', message: 'Task review operation was cancelled.', details: {} })
+    if (error instanceof TaskReviewError) {
+      return err(request, {
+        code: 'task-review-rejected',
+        message: error.message,
+        details: { sessionId: request.payload.sessionId, reviewCode: error.code },
+      })
+    }
+    if (error instanceof TaskError) return taskError(request, error)
+    ctx.logger.warn(`task review operation failed: ${String(error)}`)
+    return err(request, { code: 'internal', message: 'Task review operation failed.', details: {} })
+  }
+
+  /** Reject a stale delivery command before it can mutate Git state. */
+  function taskDeliverySequenceError(
+    sessionId: SessionId,
+    task: TaskSnapshot,
+    expectedSeq: number,
+  ): RpcError | undefined {
+    return task.asOfSeq === expectedSeq
+      ? undefined
+      : {
+        code: 'task-stale-sequence',
+        message: `Task "${sessionId}" expected sequence ${expectedSeq}, current sequence is ${task.asOfSeq}`,
+        details: { sessionId },
+      }
   }
 
   /** Resolve a session's agent, apply one goal mutation, and acknowledge with the new CAS ref. */
@@ -3280,6 +3352,113 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           return ok(request, await tasks.review(sessionId, { decision, expectedSeq }))
         } catch (error: unknown) {
           return taskError(request, error)
+        }
+      },
+
+      async reviewSummary(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        try {
+          return ok(request, await target.review.summarize({ assignment: target.assignment }, signal))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async reviewDiff(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        try {
+          return ok(request, await target.review.diff({
+            assignment: target.assignment,
+            path: request.payload.path,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+          }, signal))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async commit(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        const stale = taskDeliverySequenceError(request.payload.sessionId, target.task, request.payload.expectedSeq)
+        if (stale !== undefined) return err(request, stale)
+        if (target.task.status !== 'ready' || target.task.commitReceipt !== undefined || target.task.discardReceipt !== undefined) {
+          return err(request, {
+            code: 'task-invalid-review',
+            message: 'Commit requires a ready Task without an existing delivery receipt.',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        try {
+          const receipt = await target.review.commit({
+            assignment: target.assignment,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+            message: request.payload.message,
+          }, signal)
+          return ok(request, await target.tasks.recordCommit(request.payload.sessionId, {
+            receipt, expectedSeq: request.payload.expectedSeq,
+          }))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async apply(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        const stale = taskDeliverySequenceError(request.payload.sessionId, target.task, request.payload.expectedSeq)
+        if (stale !== undefined) return err(request, stale)
+        const committed = target.task.commitReceipt
+        if (committed === undefined || target.task.applyReceipt !== undefined || target.task.discardReceipt !== undefined
+          || committed.commit !== request.payload.commit
+          || committed.committedRevision !== request.payload.expectedRevision) {
+          return err(request, {
+            code: 'task-invalid-apply',
+            message: 'Apply requires the exact recorded Task commit without an existing apply or discard receipt.',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        try {
+          const receipt = await target.review.apply({
+            assignment: target.assignment,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+            expectedSourceHead: request.payload.expectedSourceHead,
+            commit: request.payload.commit,
+          }, signal)
+          return ok(request, await target.tasks.recordApply(request.payload.sessionId, {
+            receipt, expectedSeq: request.payload.expectedSeq,
+          }))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async discard(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        const stale = taskDeliverySequenceError(request.payload.sessionId, target.task, request.payload.expectedSeq)
+        if (stale !== undefined) return err(request, stale)
+        if (target.task.discardReceipt !== undefined
+          || target.task.status !== 'ready' && target.task.commitReceipt === undefined && target.task.applyReceipt === undefined) {
+          return err(request, {
+            code: 'task-invalid-discard',
+            message: 'Discard requires a ready or delivered Task whose worktree has not already been removed.',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        try {
+          const receipt = await target.review.discard({
+            assignment: target.assignment,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+            confirmedUncommittedLoss: request.payload.confirmedUncommittedLoss,
+          }, signal)
+          return ok(request, await target.tasks.recordDiscard(request.payload.sessionId, {
+            receipt, expectedSeq: request.payload.expectedSeq,
+          }))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
         }
       },
     },

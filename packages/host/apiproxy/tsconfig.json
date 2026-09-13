@@ -75,6 +75,9 @@
       "path": "../../task/task"
     },
     {
+      "path": "../../task/task-review"
+    },
+    {
       "path": "../../task/task-worktree"
     },
     {

@@ -57,8 +57,9 @@ import {
   goalClearRequestSchema,
 } from '../api/goals.schema.ts'
 import {
-  taskDefineRequestSchema, taskListRequestSchema, taskRecordRiskRequestSchema,
-  taskReviewRequestSchema, taskUpdateCriterionRequestSchema,
+  taskApplyRequestSchema, taskCommitRequestSchema, taskDefineRequestSchema, taskDiscardRequestSchema,
+  taskListRequestSchema, taskRecordRiskRequestSchema, taskReviewDiffRequestSchema,
+  taskReviewRequestSchema, taskReviewSummaryRequestSchema, taskUpdateCriterionRequestSchema,
 } from '../api/tasks.schema.ts'
 import {
   settingsDescribeRequestSchema, settingsMutateRequestSchema, settingsOpenDocumentRequestSchema,
@@ -138,6 +139,11 @@ const UNARY_ROUTES: UnaryRoutes = {
   'task.updateCriterion': { schema: taskUpdateCriterionRequestSchema, invoke: (api, r) => api.tasks.updateCriterion(r) },
   'task.recordRisk': { schema: taskRecordRiskRequestSchema, invoke: (api, r) => api.tasks.recordRisk(r) },
   'task.review': { schema: taskReviewRequestSchema, invoke: (api, r) => api.tasks.review(r) },
+  'task.reviewSummary': { schema: taskReviewSummaryRequestSchema, invoke: (api, r, signal) => api.tasks.reviewSummary(r, signal) },
+  'task.reviewDiff': { schema: taskReviewDiffRequestSchema, invoke: (api, r, signal) => api.tasks.reviewDiff(r, signal) },
+  'task.commit': { schema: taskCommitRequestSchema, invoke: (api, r, signal) => api.tasks.commit(r, signal) },
+  'task.apply': { schema: taskApplyRequestSchema, invoke: (api, r, signal) => api.tasks.apply(r, signal) },
+  'task.discard': { schema: taskDiscardRequestSchema, invoke: (api, r, signal) => api.tasks.discard(r, signal) },
   'settings.describe': { schema: settingsDescribeRequestSchema, invoke: (api, r) => api.settings.describe(r) },
   'settings.openDocument': { schema: settingsOpenDocumentRequestSchema, invoke: (api, r, signal) => api.settings.openDocument(r, signal) },
   'settings.update': { schema: settingsUpdateRequestSchema, invoke: (api, r) => api.settings.update(r) },

@@ -4929,6 +4929,9 @@ importers:
       '@deepseek-ai/dsh-task':
         specifier: workspace:^
         version: link:../../task/task
+      '@deepseek-ai/dsh-task-review':
+        specifier: workspace:^
+        version: link:../../task/task-review
       '@deepseek-ai/dsh-task-worktree':
         specifier: workspace:^
         version: link:../../task/task-worktree
@@ -5960,6 +5963,9 @@ importers:
       '@deepseek-ai/dsh-task':
         specifier: workspace:^
         version: link:../../task/task
+      '@deepseek-ai/dsh-task-review':
+        specifier: workspace:^
+        version: link:../../task/task-review
       '@deepseek-ai/dsh-task-worktree':
         specifier: workspace:^
         version: link:../../task/task-worktree
@@ -5984,6 +5990,9 @@ importers:
       '@deepseek-ai/dsh-task':
         specifier: workspace:^
         version: link:../../task/task
+      '@deepseek-ai/dsh-task-review':
+        specifier: workspace:^
+        version: link:../../task/task-review
 
   packages/sdk/server:
     dependencies:
@@ -6030,6 +6039,9 @@ importers:
       '@deepseek-ai/dsh-task':
         specifier: workspace:^
         version: link:../../task/task
+      '@deepseek-ai/dsh-task-review':
+        specifier: workspace:^
+        version: link:../../task/task-review
 
   packages/session-query/session-log-export:
     devDependencies:

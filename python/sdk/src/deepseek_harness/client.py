@@ -23,7 +23,9 @@ from .models import (
     JsonValue,
     Notification,
     TaskCriterion,
+    TaskFileDiff,
     TaskListSnapshot,
+    TaskReviewSummary,
     TaskRisk,
     TaskSnapshot,
 )
@@ -209,13 +211,63 @@ class HarnessClient:
         self,
         session_id: str,
         *,
-        decision: Literal["changes-requested", "ready", "committed", "applied", "archived", "discarded"],
+        decision: Literal["changes-requested", "ready"],
         expected_seq: int,
     ) -> TaskSnapshot:
         """Record one review or delivery decision."""
         return self._task_request("task/review", {
             "sessionId": session_id,
             "decision": decision,
+            "expectedSeq": expected_seq,
+        }, TaskSnapshot)
+
+    def get_task_review_summary(self, session_id: str) -> TaskReviewSummary:
+        """Return one assigned Task's bounded review summary."""
+        return self._task_request("task/reviewSummary", {"sessionId": session_id}, TaskReviewSummary)
+
+    def get_task_review_diff(
+        self, session_id: str, *, path: str, expected_revision: str
+    ) -> TaskFileDiff:
+        """Return one file from an exact Task review snapshot."""
+        return self._task_request("task/reviewDiff", {
+            "sessionId": session_id,
+            "path": path,
+            "expectedRevision": expected_revision,
+        }, TaskFileDiff)
+
+    def commit_task(
+        self, session_id: str, *, expected_revision: str, message: str, expected_seq: int
+    ) -> TaskSnapshot:
+        """Commit one exact ready Task review inside its isolated worktree."""
+        return self._task_request("task/commit", {
+            "sessionId": session_id,
+            "expectedRevision": expected_revision,
+            "message": message,
+            "expectedSeq": expected_seq,
+        }, TaskSnapshot)
+
+    def apply_task(
+        self, session_id: str, *, expected_revision: str, expected_source_head: str,
+        commit: str, expected_seq: int,
+    ) -> TaskSnapshot:
+        """Apply one exact recorded Task commit to its source checkout."""
+        return self._task_request("task/apply", {
+            "sessionId": session_id,
+            "expectedRevision": expected_revision,
+            "expectedSourceHead": expected_source_head,
+            "commit": commit,
+            "expectedSeq": expected_seq,
+        }, TaskSnapshot)
+
+    def discard_task(
+        self, session_id: str, *, expected_revision: str,
+        confirmed_uncommitted_loss: bool, expected_seq: int,
+    ) -> TaskSnapshot:
+        """Explicitly release one exact Task worktree."""
+        return self._task_request("task/discard", {
+            "sessionId": session_id,
+            "expectedRevision": expected_revision,
+            "confirmedUncommittedLoss": confirmed_uncommitted_loss,
             "expectedSeq": expected_seq,
         }, TaskSnapshot)
 

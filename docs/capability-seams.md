@@ -7,10 +7,14 @@ A service can be a core spine service, a swappable capability seam, or a bundle/
 
 ```mermaid
 flowchart LR
+  pkg_task_review["task-review"]
+  svc_taskReview["ctx.taskReview<br/>Task worktree review and delivery"]
+  pkg_task_review_local["task-review-local"]
+  pkg_apiproxy["apiproxy"]
+  pkg_sdk_jsonrpc_server["sdk-jsonrpc-server"]
   pkg_task_worktree["task-worktree"]
   svc_taskWorktrees["ctx.taskWorktrees<br/>Application-owned Task worktrees"]
   pkg_task_worktree_local["task-worktree-local"]
-  pkg_apiproxy["apiproxy"]
   pkg_attachment["attachment"]
   svc_attachments["ctx.attachments<br/>Durable binary attachment storage"]
   pkg_attachment_local["attachment-local"]
@@ -286,6 +290,8 @@ flowchart LR
   pkg_subprocess_local --> svc_subprocess
   pkg_system_prompt --> svc_systemPrompt
   pkg_task --> svc_tasks
+  pkg_task_review --> svc_taskReview
+  pkg_task_review_local --> svc_taskReview
   pkg_task_session --> svc_tasks
   pkg_task_worktree --> svc_taskWorktrees
   pkg_task_worktree_local --> svc_taskWorktrees
@@ -393,6 +399,8 @@ flowchart LR
   svc_systemPrompt --> pkg_tool_terminal
   svc_systemPrompt --> pkg_tool_web
   svc_systemPrompt --> pkg_tools
+  svc_taskReview --> pkg_apiproxy
+  svc_taskReview --> pkg_sdk_jsonrpc_server
   svc_taskWorktrees --> pkg_apiproxy
   svc_tasks --> pkg_apiproxy
   svc_terminals --> pkg_tool_terminal
@@ -423,6 +431,7 @@ flowchart LR
 
 | ctx key | Role | Owner | Implementations | Direct consumers | Companion plugins | Note |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.taskReview` | `seam` | [`task-review`](../packages/task/task-review) | [`task-review-local`](../packages/task/task-review-local) | `apiproxy`, [`sdk-jsonrpc-server`](../packages/sdk/server) | - | Providers inspect and mutate only the recorded application-owned worktree assignment; Host consumers authorize lifecycle transitions and persist completed delivery receipts. |
 | `ctx.taskWorktrees` | `seam` | [`task-worktree`](../packages/task/task-worktree) | [`task-worktree-local`](../packages/task/task-worktree-local) | `apiproxy` | - | The Host requests isolated Git checkouts; the Provider returns immutable assignment facts for the Task log and inspects live registration without repair. |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | `host-runtime`, [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | The host commits accepted images before session events; provider adapters resolve authorized durable references into provider-native content. |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | Adapters register provider implementations; the loop and compaction call the provider-neutral stream service. |

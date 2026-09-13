@@ -15,6 +15,44 @@ import type {
   DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
   TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
+import type { TaskFileDiff, TaskReviewRevision, TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
+
+/** Parameters for loading one assigned Task's bounded review summary. */
+export interface TaskReviewSummaryParams {
+  readonly sessionId: string
+}
+
+/** Parameters for loading one file from an exact Task review revision. */
+export interface TaskReviewDiffParams {
+  readonly sessionId: string
+  readonly path: string
+  readonly expectedRevision: TaskReviewRevision
+}
+
+/** Parameters for committing one exact ready Task review. */
+export interface TaskCommitParams {
+  readonly sessionId: string
+  readonly expectedRevision: TaskReviewRevision
+  readonly message: string
+  readonly expectedSeq: number
+}
+
+/** Parameters for applying one exact Task commit to its source checkout. */
+export interface TaskApplyParams {
+  readonly sessionId: string
+  readonly expectedRevision: TaskReviewRevision
+  readonly expectedSourceHead: string
+  readonly commit: string
+  readonly expectedSeq: number
+}
+
+/** Parameters for removing one exact Task worktree. */
+export interface TaskDiscardParams {
+  readonly sessionId: string
+  readonly expectedRevision: TaskReviewRevision
+  readonly confirmedUncommittedLoss: boolean
+  readonly expectedSeq: number
+}
 
 /** Parameters for the process-wide SDK handshake. */
 export interface InitializeParams {
@@ -110,5 +148,10 @@ export interface HarnessSdkRequestMap {
   'task/updateCriterion': { params: UpdateTaskCriterionRequest & { sessionId: string }; result: TaskSnapshot }
   'task/recordRisk': { params: RecordTaskRiskRequest & { sessionId: string }; result: TaskSnapshot }
   'task/review': { params: ReviewTaskRequest & { sessionId: string }; result: TaskSnapshot }
+  'task/reviewSummary': { params: TaskReviewSummaryParams; result: TaskReviewSummary }
+  'task/reviewDiff': { params: TaskReviewDiffParams; result: TaskFileDiff }
+  'task/commit': { params: TaskCommitParams; result: TaskSnapshot }
+  'task/apply': { params: TaskApplyParams; result: TaskSnapshot }
+  'task/discard': { params: TaskDiscardParams; result: TaskSnapshot }
   'shutdown': { params: undefined; result: Record<string, never> }
 }

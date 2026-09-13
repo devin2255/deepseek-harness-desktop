@@ -18,6 +18,8 @@ import type {
   DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
   TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
+import type {} from '@deepseek-ai/dsh-task-review'
+import { TaskReviewRevision, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   InitializeParams,
@@ -28,6 +30,10 @@ import type {
   SessionPromptResult,
   SubagentFinishedNotification,
   SubagentStartedNotification,
+  TaskApplyParams,
+  TaskCommitParams,
+  TaskDiscardParams,
+  TaskReviewDiffParams,
 } from '@deepseek-ai/dsh-sdk-protocol'
 
 interface SessionRecord {
@@ -206,6 +212,92 @@ export class HarnessSdkJsonRpcServer {
   }
 
   /**
+   * Load one assigned Task's bounded review summary.
+   * @param sessionId - root Session.
+   * @returns the provider-owned review summary.
+   */
+  async getTaskReviewSummary(sessionId: string): Promise<TaskReviewSummary> {
+    const target = this.taskReviewTarget(sessionId)
+    return target.review.summarize({ assignment: target.task.executionWorkspace })
+  }
+
+  /**
+   * Load one file from an exact Task review snapshot.
+   * @param params - root Session, exact revision, and repository-relative path.
+   * @returns the provider-owned bounded file diff.
+   */
+  async getTaskReviewDiff(params: TaskReviewDiffParams): Promise<TaskFileDiff> {
+    const target = this.taskReviewTarget(params.sessionId)
+    return target.review.diff({
+      assignment: target.task.executionWorkspace,
+      path: params.path,
+      expectedRevision: TaskReviewRevision(params.expectedRevision),
+    })
+  }
+
+  /**
+   * Commit one exact ready Task review and record its receipt.
+   * @param params - root Session, revision, message, and compare-and-set sequence.
+   * @returns the Task carrying its durable commit receipt.
+   */
+  async commitTask(params: TaskCommitParams): Promise<TaskSnapshot> {
+    const target = this.taskReviewTarget(params.sessionId)
+    this.assertTaskSequence(target.task, params.expectedSeq)
+    if (target.task.status !== 'ready' || target.task.commitReceipt !== undefined
+      || target.task.discardReceipt !== undefined) {
+      throw new Error('Commit requires a ready Task without an existing delivery receipt.')
+    }
+    const receipt = await target.review.commit({
+      assignment: target.task.executionWorkspace,
+      expectedRevision: TaskReviewRevision(params.expectedRevision),
+      message: params.message,
+    })
+    return target.tasks.recordCommit(SessionId(params.sessionId), { receipt, expectedSeq: params.expectedSeq })
+  }
+
+  /**
+   * Apply one exact recorded Task commit and record its receipt.
+   * @param params - root Session, committed revision, source head, commit, and sequence.
+   * @returns the Task carrying its durable apply receipt.
+   */
+  async applyTask(params: TaskApplyParams): Promise<TaskSnapshot> {
+    const target = this.taskReviewTarget(params.sessionId)
+    this.assertTaskSequence(target.task, params.expectedSeq)
+    const committed = target.task.commitReceipt
+    if (committed === undefined || target.task.applyReceipt !== undefined || target.task.discardReceipt !== undefined
+      || committed.commit !== params.commit || committed.committedRevision !== params.expectedRevision) {
+      throw new Error('Apply requires the exact recorded Task commit without an existing apply or discard receipt.')
+    }
+    const receipt = await target.review.apply({
+      assignment: target.task.executionWorkspace,
+      expectedRevision: TaskReviewRevision(params.expectedRevision),
+      expectedSourceHead: params.expectedSourceHead,
+      commit: params.commit,
+    })
+    return target.tasks.recordApply(SessionId(params.sessionId), { receipt, expectedSeq: params.expectedSeq })
+  }
+
+  /**
+   * Explicitly release one Task worktree and record its receipt.
+   * @param params - root Session, exact revision, loss confirmation, and sequence.
+   * @returns the Task carrying its durable discard receipt.
+   */
+  async discardTask(params: TaskDiscardParams): Promise<TaskSnapshot> {
+    const target = this.taskReviewTarget(params.sessionId)
+    this.assertTaskSequence(target.task, params.expectedSeq)
+    if (target.task.discardReceipt !== undefined
+      || (target.task.status !== 'ready' && target.task.commitReceipt === undefined && target.task.applyReceipt === undefined)) {
+      throw new Error('Discard requires a ready or delivered Task whose worktree has not already been removed.')
+    }
+    const receipt = await target.review.discard({
+      assignment: target.task.executionWorkspace,
+      expectedRevision: TaskReviewRevision(params.expectedRevision),
+      confirmedUncommittedLoss: params.confirmedUncommittedLoss,
+    })
+    return target.tasks.recordDiscard(SessionId(params.sessionId), { receipt, expectedSeq: params.expectedSeq })
+  }
+
+  /**
    * Dispose server-owned agents, adapter, and subscriptions to quiescence.
    * The surrounding context remains running.
    * @returns empty JSON-RPC result.
@@ -274,6 +366,16 @@ export class HarnessSdkJsonRpcServer {
         const { sessionId, ...request } = params as unknown as ReviewTaskRequest & { sessionId: string }
         return this.reviewTask(sessionId, request)
       }
+      case 'task/reviewSummary':
+        return this.getTaskReviewSummary((params as unknown as { sessionId: string }).sessionId)
+      case 'task/reviewDiff':
+        return this.getTaskReviewDiff(params as unknown as TaskReviewDiffParams)
+      case 'task/commit':
+        return this.commitTask(params as unknown as TaskCommitParams)
+      case 'task/apply':
+        return this.applyTask(params as unknown as TaskApplyParams)
+      case 'task/discard':
+        return this.discardTask(params as unknown as TaskDiscardParams)
       case 'shutdown':
         return this.shutdown()
       default:
@@ -294,6 +396,25 @@ export class HarnessSdkJsonRpcServer {
       () => { this.sessionCreations.delete(sessionId) },
     )
     return creation
+  }
+
+  private taskReviewTarget(sessionId: string) {
+    const tasks = this.ctx.get('tasks')
+    if (tasks === undefined) throw new Error('Task service is unavailable in this SDK runtime')
+    const task = tasks.snapshot().tasks.find(candidate => candidate.taskId === sessionId)
+    if (task === undefined) throw new Error(`Task "${sessionId}" does not exist`)
+    if (task.executionWorkspace === undefined) {
+      throw new Error('This Task has no application-owned Git worktree to review.')
+    }
+    const review = this.ctx.get('taskReview')
+    if (review === undefined) throw new Error('Task review is unavailable in this SDK runtime')
+    return { task: task as TaskSnapshot & { executionWorkspace: NonNullable<TaskSnapshot['executionWorkspace']> }, tasks, review }
+  }
+
+  private assertTaskSequence(task: TaskSnapshot, expectedSeq: number): void {
+    if (task.asOfSeq !== expectedSeq) {
+      throw new Error(`Task "${task.taskId}" expected sequence ${expectedSeq}, current sequence is ${task.asOfSeq}`)
+    }
   }
 
   private async createSession(sessionId: string): Promise<SessionRecord> {

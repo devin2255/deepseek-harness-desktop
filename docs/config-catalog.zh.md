@@ -2248,6 +2248,34 @@ export interface Config {
 
 来源：[`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
 
+<a id="deepseek-aidsh-task-review-local"></a>
+
+## `@deepseek-ai/dsh-task-review-local`
+
+依赖：`subprocess`
+
+```ts config-catalog
+/** User configuration accepted by the local Task review Provider. */
+export interface Config {
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+  /** Maximum UTF-8 bytes returned for one file patch. */
+  maxDiffBytes?: number
+  /** Maximum complete binary patch bytes accepted by Apply. */
+  maxPatchBytes?: number
+  /** Maximum file rows returned in one summary. */
+  maxFiles?: number
+}
+```
+
+来源：[`packages/task/task-review-local/src/index.ts:48`](../packages/task/task-review-local/src/index.ts)
+
 <a id="deepseek-aidsh-task-worktree-local"></a>
 
 ## `@deepseek-ai/dsh-task-worktree-local`
@@ -2272,7 +2300,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/task/task-worktree-local/src/index.ts:30`](../packages/task/task-worktree-local/src/index.ts)
+来源：[`packages/task/task-worktree-local/src/index.ts:31`](../packages/task/task-worktree-local/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -3142,6 +3170,7 @@ export interface Config {
 - `@deepseek-ai/dsh-shell` — 抽象 `ShellExecutor`（[`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts)）
 - `@deepseek-ai/dsh-spill` — 抽象 `SpillStore`（[`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts)）
 - `@deepseek-ai/dsh-subprocess` — 抽象 `SubprocessRuntime`（[`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts)）
+- `@deepseek-ai/dsh-task-review` — 抽象 `TaskReviewService`（[`packages/task/task-review/src/index.ts`](../packages/task/task-review/src/index.ts)）
 - `@deepseek-ai/dsh-task-worktree` — 抽象 `TaskWorktreeService`（[`packages/task/task-worktree/src/index.ts`](../packages/task/task-worktree/src/index.ts)）
 - `@deepseek-ai/dsh-workflow` — 抽象 `WorkflowEngine`（[`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts)）
 ## 库包（无插件入口）

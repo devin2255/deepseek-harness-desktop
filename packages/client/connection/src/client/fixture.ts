@@ -2939,6 +2939,26 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         code: 'task-unavailable', message: 'fixture task mutations are not configured',
         details: { sessionId: request.payload.sessionId },
       }),
+      reviewSummary: request => err(request, {
+        code: 'task-review-unavailable', message: 'fixture task review is not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      reviewDiff: request => err(request, {
+        code: 'task-review-unavailable', message: 'fixture task review is not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      commit: request => err(request, {
+        code: 'task-review-unavailable', message: 'fixture task review is not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      apply: request => err(request, {
+        code: 'task-review-unavailable', message: 'fixture task review is not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      discard: request => err(request, {
+        code: 'task-review-unavailable', message: 'fixture task review is not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
     },
     events: {
       async *mux(_request, signal) {
@@ -3236,6 +3256,11 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'task.updateCriterion': return this.api.tasks.updateCriterion(request)
       case 'task.recordRisk': return this.api.tasks.recordRisk(request)
       case 'task.review': return this.api.tasks.review(request)
+      case 'task.reviewSummary': return this.api.tasks.reviewSummary(request, signal)
+      case 'task.reviewDiff': return this.api.tasks.reviewDiff(request, signal)
+      case 'task.commit': return this.api.tasks.commit(request, signal)
+      case 'task.apply': return this.api.tasks.apply(request, signal)
+      case 'task.discard': return this.api.tasks.discard(request, signal)
       case 'settings.describe': return this.api.settings.describe(request)
       case 'settings.openDocument': return this.api.settings.openDocument(request, signal)
       case 'settings.update': return this.api.settings.update(request)

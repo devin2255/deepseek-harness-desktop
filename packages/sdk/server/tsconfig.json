@@ -36,6 +36,9 @@
       "path": "../../task/task"
     },
     {
+      "path": "../../task/task-review"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

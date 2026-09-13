@@ -97,6 +97,15 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'taskReview',
+    pkg: 'task-review',
+    title: 'Task worktree review and delivery',
+    mode: 'seam',
+    implementations: ['task-review-local'],
+    consumers: ['apiproxy', 'sdk-jsonrpc-server'],
+    note: 'Providers inspect and mutate only the recorded application-owned worktree assignment; Host consumers authorize lifecycle transitions and persist completed delivery receipts.',
+  },
+  {
     key: 'taskWorktrees',
     pkg: 'task-worktree',
     title: 'Application-owned Task worktrees',

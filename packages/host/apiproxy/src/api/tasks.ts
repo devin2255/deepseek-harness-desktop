@@ -8,6 +8,10 @@ import type {
   TaskRisk,
   TaskSnapshot,
 } from '@deepseek-ai/dsh-task/types'
+import type {
+  TaskFileDiff,
+  TaskReviewSummary,
+} from '@deepseek-ai/dsh-task-review/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { RpcRequest, RpcResponse } from './rpc.ts'
 
@@ -34,12 +38,42 @@ export interface TasksApi {
     risk: TaskRisk
     expectedSeq: number
   }>): Promise<RpcResponse<TaskSnapshot>>
-  /** Record one explicit review or delivery decision. */
+  /** Record one explicit human review decision. */
   review(request: RpcRequest<{
     sessionId: SessionId
     decision: TaskReviewDecision
     expectedSeq: number
   }>): Promise<RpcResponse<TaskSnapshot>>
+  /** Inspect the complete bounded review summary for one assigned Task. */
+  reviewSummary(request: RpcRequest<{ sessionId: SessionId }>, signal: AbortSignal): Promise<RpcResponse<TaskReviewSummary>>
+  /** Read one bounded file diff from an exact Task review revision. */
+  reviewDiff(request: RpcRequest<{
+    sessionId: SessionId
+    path: string
+    expectedRevision: string
+  }>, signal: AbortSignal): Promise<RpcResponse<TaskFileDiff>>
+  /** Commit one exact ready Task review and record its receipt. */
+  commit(request: RpcRequest<{
+    sessionId: SessionId
+    expectedRevision: string
+    message: string
+    expectedSeq: number
+  }>, signal: AbortSignal): Promise<RpcResponse<TaskSnapshot>>
+  /** Apply one exact Task commit to its source checkout and record its receipt. */
+  apply(request: RpcRequest<{
+    sessionId: SessionId
+    expectedRevision: string
+    expectedSourceHead: string
+    commit: string
+    expectedSeq: number
+  }>, signal: AbortSignal): Promise<RpcResponse<TaskSnapshot>>
+  /** Remove one exact Task worktree and record its recovery facts. */
+  discard(request: RpcRequest<{
+    sessionId: SessionId
+    expectedRevision: string
+    confirmedUncommittedLoss: boolean
+    expectedSeq: number
+  }>, signal: AbortSignal): Promise<RpcResponse<TaskSnapshot>>
 }
 
 export type {
@@ -54,3 +88,11 @@ export type {
   TaskRisk,
   TaskSnapshot,
 } from '@deepseek-ai/dsh-task/types'
+export type {
+  TaskApplyReceipt,
+  TaskCommitReceipt,
+  TaskDiscardReceipt,
+  TaskFileDiff,
+  TaskReviewFile,
+  TaskReviewSummary,
+} from '@deepseek-ai/dsh-task-review/types'

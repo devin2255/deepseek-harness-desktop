@@ -6,6 +6,9 @@
  */
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  TaskApplyParams, TaskCommitParams, TaskDiscardParams, TaskReviewDiffParams,
+} from '@deepseek-ai/dsh-sdk-protocol'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /** One server-to-client notification as received off the wire. */
@@ -70,6 +73,18 @@ export interface RunResult {
   notifications: HarnessNotification[]
 }
 
+/** Client input for loading one file from an exact review snapshot. */
+export type GetTaskReviewDiffRequest = Omit<TaskReviewDiffParams, 'sessionId'>
+
+/** Client input for committing one exact ready Task review. */
+export type CommitTaskRequest = Omit<TaskCommitParams, 'sessionId'>
+
+/** Client input for applying one recorded Task commit to its source checkout. */
+export type ApplyTaskRequest = Omit<TaskApplyParams, 'sessionId'>
+
+/** Client input for explicitly releasing one Task worktree. */
+export type DiscardTaskRequest = Omit<TaskDiscardParams, 'sessionId'>
+
 /** Re-exported content-block alias so SDK callers need no extra import. */
 export type { ContentBlock }
 export type {
@@ -78,3 +93,7 @@ export type {
   TaskSnapshot, TaskStatus, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
 export type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
+export type {
+  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff,
+  TaskReviewFile, TaskReviewFileStatus, TaskReviewRevision, TaskReviewSummary,
+} from '@deepseek-ai/dsh-task-review/types'

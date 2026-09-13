@@ -8,6 +8,13 @@ import type { Wire } from './rpc.schema.ts'
 const nonBlank = z.string().min(1).refine(value => value === value.trim(), 'must not have surrounding whitespace')
 const identity = nonBlank
 const sequence = z.number().int().nonnegative()
+const gitObjectId = z.string().regex(/^[0-9a-f]{40}$/)
+const reviewRevision = z.string().regex(/^[0-9a-f]{64}$/)
+const operationId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+const reviewPath = z.string().min(1).refine(value =>
+  !value.includes('\\') && !value.includes('\0') && !/^(?:[A-Za-z]:|\/)/.test(value)
+  && value.split('/').every(part => part.length > 0 && part !== '.' && part !== '..'),
+'must be a normalized repository-relative path')
 
 const evidenceSchema = z.strictObject({ sessionId: identity, seq: sequence })
 const criterionSchema = z.strictObject({
@@ -37,6 +44,29 @@ const attentionSchema = z.strictObject({
   sourceId: identity,
   actionable: z.boolean(),
 })
+const taskReviewFileSchema = z.strictObject({
+  path: reviewPath,
+  previousPath: reviewPath.optional(),
+  status: z.enum(['added', 'modified', 'deleted', 'renamed', 'copied', 'type-changed', 'untracked', 'conflicted']),
+  binary: z.boolean(),
+  additions: sequence.nullable(),
+  deletions: sequence.nullable(),
+})
+const taskCommitReceiptSchema = z.strictObject({
+  kind: z.literal('commit'), operationId, taskId: identity, workspaceId: identity,
+  reviewRevision, committedRevision: reviewRevision, branch: nonBlank, commit: gitObjectId,
+  committedAt: sequence,
+})
+const taskApplyReceiptSchema = z.strictObject({
+  kind: z.literal('apply'), operationId, taskId: identity, workspaceId: identity,
+  reviewRevision, commit: gitObjectId, sourceHeadBefore: gitObjectId, sourceHeadAfter: gitObjectId,
+  appliedAt: sequence,
+}).refine(value => value.sourceHeadBefore === value.sourceHeadAfter, 'source application must not change HEAD')
+const taskDiscardReceiptSchema = z.strictObject({
+  kind: z.literal('discard'), operationId, taskId: identity, workspaceId: identity,
+  reviewRevision, branch: nonBlank, branchPreserved: z.literal(true), worktreeRemoved: z.literal(true),
+  uncommittedChangesDiscarded: z.boolean(), recoverableCommit: gitObjectId.optional(), discardedAt: sequence,
+})
 
 /** Complete immutable assignment of one application-owned Git worktree. */
 export const taskWorktreeAssignmentSchema = z.strictObject({
@@ -46,8 +76,8 @@ export const taskWorktreeAssignmentSchema = z.strictObject({
   sourcePath: nonBlank,
   path: nonBlank,
   branch: z.string().regex(/^dsh\/task-[0-9a-f]{24}$/),
-  baseCommit: z.string().regex(/^[0-9a-f]{40}$/),
-  sourceHead: z.string().regex(/^[0-9a-f]{40}$/),
+  baseCommit: gitObjectId,
+  sourceHead: gitObjectId,
   sourceDirty: z.boolean(),
   sourceStatusDigest: z.string().regex(/^[0-9a-f]{64}$/),
   createdAt: z.number().int().nonnegative(),
@@ -64,7 +94,10 @@ export const taskSnapshotSchema = z.strictObject({
   freshness: z.enum(['live', 'disconnected', 'unavailable']),
   attention: z.array(attentionSchema),
   risks: z.array(riskSchema),
-  reviewDecision: z.enum(['changes-requested', 'ready', 'committed', 'applied', 'archived', 'discarded']).optional(),
+  reviewDecision: z.enum(['changes-requested', 'ready']).optional(),
+  commitReceipt: taskCommitReceiptSchema.optional(),
+  applyReceipt: taskApplyReceiptSchema.optional(),
+  discardReceipt: taskDiscardReceiptSchema.optional(),
   updatedAt: z.number().int(),
   asOfSeq: sequence,
 }).refine(
@@ -114,6 +147,42 @@ export const taskRecordRiskRequestSchema = z.strictObject({ sessionId: identity,
 /** task.recordRisk response value. */
 export const taskRecordRiskValueSchema: z.ZodType<Wire<ResponseValue<'task.recordRisk'>>> = taskSnapshotSchema
 /** task.review request payload. */
-export const taskReviewRequestSchema = z.strictObject({ sessionId: identity, decision: z.enum(['changes-requested', 'ready', 'committed', 'applied', 'archived', 'discarded']), expectedSeq: sequence }) as unknown as z.ZodType<Wire<RequestPayload<'task.review'>>>
+export const taskReviewRequestSchema = z.strictObject({ sessionId: identity, decision: z.enum(['changes-requested', 'ready']), expectedSeq: sequence }) as unknown as z.ZodType<Wire<RequestPayload<'task.review'>>>
 /** task.review response value. */
 export const taskReviewValueSchema: z.ZodType<Wire<ResponseValue<'task.review'>>> = taskSnapshotSchema
+/** task.reviewSummary request payload. */
+export const taskReviewSummaryRequestSchema = z.strictObject({ sessionId: identity }) as unknown as z.ZodType<Wire<RequestPayload<'task.reviewSummary'>>>
+/** task.reviewSummary response value. */
+export const taskReviewSummaryValueSchema = z.strictObject({
+  taskId: identity, workspaceId: identity, revision: reviewRevision, baseCommit: gitObjectId,
+  headCommit: gitObjectId, sourceHead: gitObjectId, sourceDirty: z.boolean(), branch: nonBlank,
+  dirty: z.boolean(), truncated: z.boolean(), files: z.array(taskReviewFileSchema), additions: sequence, deletions: sequence,
+}) as unknown as z.ZodType<Wire<ResponseValue<'task.reviewSummary'>>>
+/** task.reviewDiff request payload. */
+export const taskReviewDiffRequestSchema = z.strictObject({
+  sessionId: identity, path: reviewPath, expectedRevision: reviewRevision,
+}) as unknown as z.ZodType<Wire<RequestPayload<'task.reviewDiff'>>>
+/** task.reviewDiff response value. */
+export const taskReviewDiffValueSchema = z.strictObject({
+  taskId: identity, workspaceId: identity, revision: reviewRevision, path: reviewPath,
+  previousPath: reviewPath.optional(), binary: z.boolean(), truncated: z.boolean(), patch: z.string(),
+}) as unknown as z.ZodType<Wire<ResponseValue<'task.reviewDiff'>>>
+/** task.commit request payload. */
+export const taskCommitRequestSchema = z.strictObject({
+  sessionId: identity, expectedRevision: reviewRevision, message: nonBlank, expectedSeq: sequence,
+}) as unknown as z.ZodType<Wire<RequestPayload<'task.commit'>>>
+/** task.commit response value. */
+export const taskCommitValueSchema: z.ZodType<Wire<ResponseValue<'task.commit'>>> = taskSnapshotSchema
+/** task.apply request payload. */
+export const taskApplyRequestSchema = z.strictObject({
+  sessionId: identity, expectedRevision: reviewRevision, expectedSourceHead: gitObjectId,
+  commit: gitObjectId, expectedSeq: sequence,
+}) as unknown as z.ZodType<Wire<RequestPayload<'task.apply'>>>
+/** task.apply response value. */
+export const taskApplyValueSchema: z.ZodType<Wire<ResponseValue<'task.apply'>>> = taskSnapshotSchema
+/** task.discard request payload. */
+export const taskDiscardRequestSchema = z.strictObject({
+  sessionId: identity, expectedRevision: reviewRevision, confirmedUncommittedLoss: z.boolean(), expectedSeq: sequence,
+}) as unknown as z.ZodType<Wire<RequestPayload<'task.discard'>>>
+/** task.discard response value. */
+export const taskDiscardValueSchema: z.ZodType<Wire<ResponseValue<'task.discard'>>> = taskSnapshotSchema

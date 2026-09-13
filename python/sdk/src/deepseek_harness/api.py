@@ -7,7 +7,10 @@ from typing import Callable, Literal
 
 from .client import HarnessClient, HarnessConfig
 from .errors import SdkProtocolError
-from .models import DefineTaskCriterion, JsonObject, Notification, TaskCriterion, TaskListSnapshot, TaskRisk, TaskSnapshot
+from .models import (
+    DefineTaskCriterion, JsonObject, Notification, TaskCriterion, TaskFileDiff,
+    TaskListSnapshot, TaskReviewSummary, TaskRisk, TaskSnapshot,
+)
 
 
 @dataclass(slots=True)
@@ -157,12 +160,57 @@ class DeepSeekHarness:
         self,
         session_id: str,
         *,
-        decision: Literal["changes-requested", "ready", "committed", "applied", "archived", "discarded"],
+        decision: Literal["changes-requested", "ready"],
         expected_seq: int,
     ) -> TaskSnapshot:
         """Record one review or delivery decision."""
         self.start()
         return self._client.review_task(session_id, decision=decision, expected_seq=expected_seq)
+
+    def get_task_review_summary(self, session_id: str) -> TaskReviewSummary:
+        """Return one assigned Task's bounded review summary."""
+        self.start()
+        return self._client.get_task_review_summary(session_id)
+
+    def get_task_review_diff(
+        self, session_id: str, *, path: str, expected_revision: str
+    ) -> TaskFileDiff:
+        """Return one file from an exact Task review snapshot."""
+        self.start()
+        return self._client.get_task_review_diff(
+            session_id, path=path, expected_revision=expected_revision
+        )
+
+    def commit_task(
+        self, session_id: str, *, expected_revision: str, message: str, expected_seq: int
+    ) -> TaskSnapshot:
+        """Commit one exact ready Task review."""
+        self.start()
+        return self._client.commit_task(
+            session_id, expected_revision=expected_revision, message=message, expected_seq=expected_seq
+        )
+
+    def apply_task(
+        self, session_id: str, *, expected_revision: str, expected_source_head: str,
+        commit: str, expected_seq: int,
+    ) -> TaskSnapshot:
+        """Apply one exact recorded Task commit to its source checkout."""
+        self.start()
+        return self._client.apply_task(
+            session_id, expected_revision=expected_revision, expected_source_head=expected_source_head,
+            commit=commit, expected_seq=expected_seq,
+        )
+
+    def discard_task(
+        self, session_id: str, *, expected_revision: str,
+        confirmed_uncommitted_loss: bool, expected_seq: int,
+    ) -> TaskSnapshot:
+        """Explicitly release one exact Task worktree."""
+        self.start()
+        return self._client.discard_task(
+            session_id, expected_revision=expected_revision,
+            confirmed_uncommitted_loss=confirmed_uncommitted_loss, expected_seq=expected_seq,
+        )
 
 
 class Session:

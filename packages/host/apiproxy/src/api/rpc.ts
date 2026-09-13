@@ -11,6 +11,7 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TaskWorktreeErrorCode } from '@deepseek-ai/dsh-task-worktree/types'
+import type { TaskReviewErrorCode } from '@deepseek-ai/dsh-task-review/types'
 
 /**
  * Message correlation id: the initiator mints it on a request; a response
@@ -106,6 +107,11 @@ export interface RpcErrorDetailsMap {
   'task-invalid-criterion': { sessionId: SessionId }
   'task-invalid-risk': { sessionId: SessionId }
   'task-invalid-review': { sessionId: SessionId }
+  'task-invalid-commit': { sessionId: SessionId }
+  'task-invalid-apply': { sessionId: SessionId }
+  'task-invalid-discard': { sessionId: SessionId }
+  'task-review-unavailable': { sessionId: SessionId }
+  'task-review-rejected': { sessionId: SessionId; reviewCode: TaskReviewErrorCode }
   'task-invalid-evidence': { sessionId: SessionId }
   'task-invalid-worktree': { sessionId: SessionId }
   'task-worktree-assigned': { sessionId: SessionId }

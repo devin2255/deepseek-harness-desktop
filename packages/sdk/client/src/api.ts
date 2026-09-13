@@ -12,9 +12,10 @@ import { resolve } from 'node:path'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { HarnessClient, isRecord, SdkProtocolError } from './client.ts'
 import type {
-  ContentBlock, DeepSeekHarnessOptions, DefineTaskRequest, HarnessClientOptions, HarnessNotification,
-  RecordTaskRiskRequest, ReviewTaskRequest, RunResult, TaskListSnapshot, TaskSnapshot,
-  UpdateTaskCriterionRequest,
+  ApplyTaskRequest, CommitTaskRequest, ContentBlock, DeepSeekHarnessOptions, DefineTaskRequest,
+  DiscardTaskRequest, GetTaskReviewDiffRequest, HarnessClientOptions, HarnessNotification,
+  RecordTaskRiskRequest, ReviewTaskRequest, RunResult, TaskFileDiff, TaskListSnapshot,
+  TaskReviewSummary, TaskSnapshot, UpdateTaskCriterionRequest,
 } from './types.ts'
 
 /**
@@ -154,6 +155,60 @@ export class DeepSeekHarness implements AsyncDisposable {
   async reviewTask(sessionId: string, request: ReviewTaskRequest): Promise<TaskSnapshot> {
     await this.start()
     return this.client.reviewTask(sessionId, request)
+  }
+
+  /**
+   * Load one assigned Task's bounded review summary.
+   * @param sessionId - root Session.
+   * @returns the validated review summary.
+   */
+  async getTaskReviewSummary(sessionId: string): Promise<TaskReviewSummary> {
+    await this.start()
+    return this.client.getTaskReviewSummary(sessionId)
+  }
+
+  /**
+   * Load one file from an exact Task review snapshot.
+   * @param sessionId - root Session.
+   * @param request - exact revision and repository-relative path.
+   * @returns the validated bounded file diff.
+   */
+  async getTaskReviewDiff(sessionId: string, request: GetTaskReviewDiffRequest): Promise<TaskFileDiff> {
+    await this.start()
+    return this.client.getTaskReviewDiff(sessionId, request)
+  }
+
+  /**
+   * Commit one exact ready Task review.
+   * @param sessionId - root Session.
+   * @param request - exact revision, commit message, and Task sequence.
+   * @returns the Task carrying its durable commit receipt.
+   */
+  async commitTask(sessionId: string, request: CommitTaskRequest): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.commitTask(sessionId, request)
+  }
+
+  /**
+   * Apply one recorded Task commit to its source checkout.
+   * @param sessionId - root Session.
+   * @param request - exact revision, commit, source head, and Task sequence.
+   * @returns the Task carrying its durable apply receipt.
+   */
+  async applyTask(sessionId: string, request: ApplyTaskRequest): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.applyTask(sessionId, request)
+  }
+
+  /**
+   * Explicitly release one Task worktree.
+   * @param sessionId - root Session.
+   * @param request - exact revision, loss confirmation, and Task sequence.
+   * @returns the Task carrying its durable discard receipt.
+   */
+  async discardTask(sessionId: string, request: DiscardTaskRequest): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.discardTask(sessionId, request)
   }
 
   /**

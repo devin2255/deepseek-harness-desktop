@@ -2246,6 +2246,34 @@ export interface Config {
 
 Source: [`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
 
+<a id="deepseek-aidsh-task-review-local"></a>
+
+## `@deepseek-ai/dsh-task-review-local`
+
+Requires: `subprocess`
+
+```ts config-catalog
+/** User configuration accepted by the local Task review Provider. */
+export interface Config {
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+  /** Maximum UTF-8 bytes returned for one file patch. */
+  maxDiffBytes?: number
+  /** Maximum complete binary patch bytes accepted by Apply. */
+  maxPatchBytes?: number
+  /** Maximum file rows returned in one summary. */
+  maxFiles?: number
+}
+```
+
+Source: [`packages/task/task-review-local/src/index.ts:48`](../packages/task/task-review-local/src/index.ts)
+
 <a id="deepseek-aidsh-task-worktree-local"></a>
 
 ## `@deepseek-ai/dsh-task-worktree-local`
@@ -2270,7 +2298,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/task/task-worktree-local/src/index.ts:30`](../packages/task/task-worktree-local/src/index.ts)
+Source: [`packages/task/task-worktree-local/src/index.ts:31`](../packages/task/task-worktree-local/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -3140,6 +3168,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-shell` — abstract `ShellExecutor` ([`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts))
 - `@deepseek-ai/dsh-spill` — abstract `SpillStore` ([`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts))
 - `@deepseek-ai/dsh-subprocess` — abstract `SubprocessRuntime` ([`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts))
+- `@deepseek-ai/dsh-task-review` — abstract `TaskReviewService` ([`packages/task/task-review/src/index.ts`](../packages/task/task-review/src/index.ts))
 - `@deepseek-ai/dsh-task-worktree` — abstract `TaskWorktreeService` ([`packages/task/task-worktree/src/index.ts`](../packages/task/task-worktree/src/index.ts))
 - `@deepseek-ai/dsh-workflow` — abstract `WorkflowEngine` ([`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts))
 
