@@ -388,9 +388,21 @@ describe('Issue lifecycle workflow', () => {
     expect(lifecyclePullRequest.types).toContain('review_requested')
     expect(lifecycleReview.types).toEqual(['submitted'])
     expect(lifecycleJob.if).toBe(
-      "${{ github.event_name != 'pull_request_review' || (github.event.action == 'submitted' && github.event.review.state == 'changes_requested') }}",
+      "${{ github.repository == 'deepseek-harness/deepseek-harness' && (github.event_name != 'pull_request_review' || (github.event.action == 'submitted' && github.event.review.state == 'changes_requested')) }}",
     )
     expect(policyPullRequest.types).toContain('ready_for_review')
+  })
+
+  it('does not run upstream project automation in forks', () => {
+    const lifecycle = loadWorkflow('.github/workflows/issue-lifecycle.yml')
+    const policy = loadWorkflow('.github/workflows/issue-policy.yml')
+
+    expect(workflowJob(lifecycle, 'lifecycle').if).toContain(
+      "github.repository == 'deepseek-harness/deepseek-harness'",
+    )
+    expect(workflowJob(policy, 'policy').if).toBe(
+      "${{ github.repository == 'deepseek-harness/deepseek-harness' }}",
+    )
   })
 })
 
