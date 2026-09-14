@@ -2,8 +2,8 @@
  * Build the SDK runtime executables and Python node carrier. The fixed
  * `@yao-pkg/pkg --sea` route, deploy flags, and artifact layout are owned by
  * .agents/notes/implemented/architecture/2026-07-10-single-file-executable-sdk-runtime-distribution.md.
- * The staged closure is symlink-free, and whole-tree assets cover Cordis's
- * runtime imports that pkg cannot discover statically.
+ * The staged closure is symlink-free, and an explicit file inventory covers
+ * Cordis's runtime imports that pkg cannot discover statically.
  */
 
 import { spawn } from 'node:child_process'
@@ -11,6 +11,7 @@ import { existsSync, statSync } from 'node:fs'
 import { chmod, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
+import { collectPkgAssets } from './build-exe-for-python-sdk-assets.ts'
 import { resolveLinuxNodePtyAddon } from './build-exe-for-python-sdk-native-pty.ts'
 
 const root = resolve(import.meta.dirname, '..')
@@ -33,22 +34,6 @@ const PYTHON_NODE_SUBDIR = 'node'
 const DEPLOY_SOURCE_NODE_MODULES = 'python/sdk-runtime/node_modules'
 /** Documentation excluded from the generated runtime directory. */
 const DEPLOY_ONLY_DOCS = ['README.md', 'README.zh.md', 'README.i18n.yaml']
-
-/**
- * Whole-tree assets cover Cordis's runtime bare-package imports, which pkg's
- * static analysis cannot see. Package manifests are explicit because bare-name
- * resolution depends on them.
- */
-const ASSET_GLOBS = [
-  'package.json',
-  'node_modules/**/*.js',
-  'node_modules/**/*.cjs',
-  'node_modules/**/*.mjs',
-  'node_modules/**/package.json',
-  'node_modules/**/*.json',
-  'node_modules/**/*.node',
-  'node_modules/**/*.wasm',
-]
 
 const PLATFORMS = ['linux', 'macos'] as const
 const ARCHES = ['x64', 'arm64'] as const
@@ -358,10 +343,9 @@ class SingleExeBuild {
 
   /** Add the executable entry and pkg assets to the staged manifest. */
   async injectPkgConfig(): Promise<void> {
-    const patch = { bin: ENTRY_BIN, pkg: { assets: ASSET_GLOBS } }
     const manifestPath = join(this.staging, 'package.json')
     if (this.cli.dryRun) {
-      console.log(`build-exe-for-python-sdk: [dry-run] patch ${manifestPath} with ${JSON.stringify(patch)}`)
+      console.log(`build-exe-for-python-sdk: [dry-run] patch ${manifestPath} with an explicit staged asset inventory`)
       return
     }
     if (!existsSync(manifestPath)) {
@@ -370,9 +354,11 @@ class SingleExeBuild {
     if (!existsSync(join(this.staging, ENTRY_BIN))) {
       throw new Error(`build-exe-for-python-sdk: ${join(this.staging, ENTRY_BIN)} missing — run without --skip-build so lib/ artifacts exist.`)
     }
+    const assets = await collectPkgAssets(this.staging)
+    const patch = { bin: ENTRY_BIN, pkg: { assets } }
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
     await writeFile(manifestPath, `${JSON.stringify({ ...manifest, ...patch }, null, 2)}\n`)
-    console.log(`build-exe-for-python-sdk: injected pkg config into ${manifestPath}`)
+    console.log(`build-exe-for-python-sdk: injected ${assets.length} pkg assets into ${manifestPath}`)
   }
 
   /**
@@ -383,6 +369,7 @@ class SingleExeBuild {
   async pack(target: Target): Promise<string[]> {
     const product = join(this.outDir, `${OUTPUT_BASENAME}-${target.platform}-${target.arch}`)
     await this.prepareNativePty(target)
+    await this.injectPkgConfig()
     if (!this.cli.dryRun) await mkdir(this.outDir, { recursive: true })
     await this.run(`pkg ${target.spec}`, pnpmBin(), [
       'dlx',
@@ -526,7 +513,6 @@ async function main(): Promise<void> {
   await pipeline.verifyClosure()
   await pipeline.build()
   await pipeline.deployStaging()
-  await pipeline.injectPkgConfig()
   const products: string[] = []
   for (const target of cli.targets) products.push(...await pipeline.pack(target))
   pipeline.printProducts(products)
