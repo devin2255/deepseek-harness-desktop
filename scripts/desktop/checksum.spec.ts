@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createReleaseFiles, verifyReleaseFiles } from './checksum.ts'
+import { createReleaseFiles, hasAuthenticodeCertificate, inspectAuthenticode, verifyReleaseFiles } from './checksum.ts'
 
 const roots: string[] = []
 
@@ -12,6 +12,28 @@ afterEach(async () => {
 })
 
 describe('desktop release checksum and metadata', () => {
+  it('classifies an unsigned PE without starting Windows trust-chain inspection', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-release-files-'))
+    roots.push(root)
+    const artifact = join(root, 'unsigned.exe')
+    await writeFile(artifact, portableExecutable())
+
+    expect(hasAuthenticodeCertificate(artifact)).toBe(false)
+    expect(inspectAuthenticode(artifact)).toEqual({ signed: false, signatureStatus: 'NotSigned' })
+  })
+
+  it('recognizes a bounded PE certificate table and rejects malformed executables', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-release-files-'))
+    roots.push(root)
+    const signed = join(root, 'signed.exe')
+    const malformed = join(root, 'malformed.exe')
+    await writeFile(signed, portableExecutable({ certificateOffset: 512, certificateSize: 32 }))
+    await writeFile(malformed, 'not a portable executable')
+
+    expect(hasAuthenticodeCertificate(signed)).toBe(true)
+    expect(() => hasAuthenticodeCertificate(malformed)).toThrow(/portable executable/u)
+  })
+
   it('atomically writes a conventional lowercase checksum and unsigned metadata', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-release-files-'))
     roots.push(root)
@@ -85,3 +107,21 @@ describe('desktop release checksum and metadata', () => {
     await expect(verifyReleaseFiles({ outputRoot: root, artifact, actualSignature })).rejects.toThrow(/signature|Authenticode/u)
   })
 })
+
+function portableExecutable(certificate: { certificateOffset: number; certificateSize: number } = {
+  certificateOffset: 0,
+  certificateSize: 0,
+}): Buffer {
+  const value = Buffer.alloc(544)
+  const peOffset = 0x80
+  const optionalOffset = peOffset + 24
+  value.write('MZ', 0, 'ascii')
+  value.writeUInt32LE(peOffset, 0x3c)
+  value.write('PE\0\0', peOffset, 'binary')
+  value.writeUInt16LE(240, peOffset + 20)
+  value.writeUInt16LE(0x20b, optionalOffset)
+  value.writeUInt32LE(16, optionalOffset + 108)
+  value.writeUInt32LE(certificate.certificateOffset, optionalOffset + 112 + (4 * 8))
+  value.writeUInt32LE(certificate.certificateSize, optionalOffset + 112 + (4 * 8) + 4)
+  return value
+}

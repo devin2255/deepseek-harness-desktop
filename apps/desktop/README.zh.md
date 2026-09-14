@@ -66,7 +66,7 @@ pnpm run desktop:package
 pnpm run desktop:validate-package
 ```
 
-`.artifacts/desktop/installer/` 下的输出包括 `DeepSeek-Harness-Setup-<version>-x64.exe`、对应 `.sha256` 和 `release-metadata.json`。提供给测试者的应是 setup EXE，而不是 `win-unpacked` 内的可执行文件。双击 setup 打开辅助安装程序，默认目录为 `%LOCALAPPDATA%\Programs\DeepSeek Harness`。卸载默认保留 `%APPDATA%\DeepSeek Harness` 下的 Harness 数据和日志，除非用户明确选择并确认删除。未签名构建可能触发 SmartScreen；校验和验证能检测下载文件是否被修改，但不能证明发布者身份，也不能替代签名批准。
+`.artifacts/desktop/installer/` 下的输出包括 `DeepSeek-Harness-Setup-<version>-x64.exe`、对应 `.sha256` 和 `release-metadata.json`。提供给测试者的应是 setup EXE，而不是 `win-unpacked` 内的可执行文件。双击 setup 打开辅助安装程序，默认目录为 `%LOCALAPPDATA%\Programs\DeepSeek Harness`。卸载默认保留 `%APPDATA%\DeepSeek Harness` 下的 Harness 数据和日志，除非用户明确选择并确认删除。发布校验直接读取 PE 证书目录来识别未签名产物；只要证书存在，就必须通过 Windows Authenticode 信任校验。未签名构建可能触发 SmartScreen；校验和验证能检测下载文件是否被修改，但不能证明发布者身份，也不能替代签名批准。
 
 只在没有现有产品安装的临时 Windows 账户中运行生命周期验收。测试会认证隔离的应用数据路径，使用测试专用快捷方式和登录启动注册，并拒绝生产产品标识冲突，但仍会操作真实的按用户安装器注册表：
 

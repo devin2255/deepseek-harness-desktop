@@ -2,6 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import { lstat, open, readFile, realpath, rename, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
@@ -124,8 +125,66 @@ export function authenticodeSpawnOptions(path: string, environment: NodeJS.Proce
   }
 }
 
+function readExact(file: number, length: number, position: number): Buffer {
+  const value = Buffer.alloc(length)
+  if (readSync(file, value, 0, length, position) !== length) {
+    throw new Error('desktop release: portable executable header is truncated')
+  }
+  return value
+}
+
+/** Report whether a PE file declares an embedded Authenticode certificate table. */
+export function hasAuthenticodeCertificate(path: string): boolean {
+  const file = openSync(path, 'r')
+  try {
+    const size = fstatSync(file).size
+    if (size < 64) throw new Error('desktop release: portable executable header is truncated')
+    const dos = readExact(file, 64, 0)
+    if (dos.toString('ascii', 0, 2) !== 'MZ') {
+      throw new Error('desktop release: artifact is not a portable executable')
+    }
+    const peOffset = dos.readUInt32LE(0x3c)
+    if (peOffset > size - 24) throw new Error('desktop release: portable executable header is invalid')
+    const pe = readExact(file, 24, peOffset)
+    if (pe.toString('binary', 0, 4) !== 'PE\0\0') {
+      throw new Error('desktop release: artifact is not a portable executable')
+    }
+    const optionalSize = pe.readUInt16LE(20)
+    const optionalOffset = peOffset + 24
+    if (optionalSize < 2 || optionalSize > size - optionalOffset) {
+      throw new Error('desktop release: portable executable optional header is truncated')
+    }
+    const optional = readExact(file, optionalSize, optionalOffset)
+    const magic = optional.readUInt16LE(0)
+    const directoryOffset = magic === 0x10b ? 96 : magic === 0x20b ? 112 : undefined
+    if (directoryOffset === undefined) {
+      throw new Error('desktop release: portable executable optional header is invalid')
+    }
+    const directoryCountOffset = directoryOffset - 4
+    const certificateEntryOffset = directoryOffset + (4 * 8)
+    if (optionalSize < certificateEntryOffset + 8 || optional.readUInt32LE(directoryCountOffset) < 5) {
+      throw new Error('desktop release: portable executable certificate directory is absent')
+    }
+    const certificateOffset = optional.readUInt32LE(certificateEntryOffset)
+    const certificateSize = optional.readUInt32LE(certificateEntryOffset + 4)
+    if (certificateOffset === 0 && certificateSize === 0) return false
+    if (
+      certificateOffset === 0
+      || certificateSize === 0
+      || certificateOffset > size
+      || certificateSize > size - certificateOffset
+    ) {
+      throw new Error('desktop release: portable executable certificate table is invalid')
+    }
+    return true
+  } finally {
+    closeSync(file)
+  }
+}
+
 /** Read the real Windows Authenticode state of an artifact. */
 export function inspectAuthenticode(path: string): SignatureMetadata {
+  if (!hasAuthenticodeCertificate(path)) return { signed: false, signatureStatus: 'NotSigned' }
   const result = spawnSync(authenticodePowerShellPath(process.env), [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', authenticodePowerShellCommand(),
   ], authenticodeSpawnOptions(path, process.env))
