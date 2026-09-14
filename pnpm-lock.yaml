@@ -8955,6 +8955,9 @@ importers:
       '@deepseek-ai/dsh-task-review':
         specifier: workspace:^
         version: link:../../packages/task/task-review
+      '@deepseek-ai/dsh-task-session':
+        specifier: workspace:^
+        version: link:../../packages/task/task-session
       '@deepseek-ai/dsh-task-worktree':
         specifier: workspace:^
         version: link:../../packages/task/task-worktree
