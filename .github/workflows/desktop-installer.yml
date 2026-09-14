@@ -61,14 +61,14 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           DSH_INSTALLER_E2E: '1'
-        run: pnpm run test:desktop:installer apps/desktop/tests/installer.e2e.ts -t 'installs to the isolated default destination with every option off and starts offline'
+        run: node node_modules/vitest/vitest.mjs run --config vitest.desktop-installer.config.ts apps/desktop/tests/installer.e2e.ts -t 'installs to the isolated default destination with every option off and starts offline'
 
       - name: Complete installer E2E matrix
         id: matrix
         if: github.event_name == 'push'
         env:
           DSH_INSTALLER_E2E: '1'
-        run: pnpm run test:desktop:installer
+        run: node node_modules/vitest/vitest.mjs run --config vitest.desktop-installer.config.ts
 
       - name: Retain validated release files
         id: upload
