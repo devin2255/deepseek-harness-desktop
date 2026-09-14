@@ -14,11 +14,13 @@ The test must accept equivalent ordinary path spellings without weakening its pr
 
 Installer fixture and runtime package roots are validated by walking every existing path component with `lstat()`. Each component must be an ordinary directory and must not be a symbolic link or junction. Text equality between `realpath()` and the supplied spelling is not used as an identity test.
 
+Each registered runtime package root retains both its validated lexical spelling and its physical `realpath()` spelling. Windows extended namespace prefixes are normalized for containment checks. A generated fallback junction is accepted only when both its raw target and its existing physical target are contained by one of those registered representations; a missing target still requires lexical registration evidence.
+
 The authenticated ownership marker, ownership environment value, child-path containment, recursive descendant inspection, and registered fallback-target checks remain required. A path reached through any junction ancestor is rejected before it can be registered or recursively removed.
 
 ## Verification
 
-Installer support tests cover ordinary fixture roots, unregistered descendant junctions, registered generated fallback junctions, and a runtime package root reached through a junction ancestor. The hosted Windows installer smoke test supplies the 8.3 temporary-directory spelling and verifies clean install, packaged application readiness, offline startup, shutdown, and cleanup.
+Installer support tests cover ordinary fixture roots, unregistered descendant junctions, registered generated fallback junctions, equivalent ordinary and extended-namespace target spellings, and a runtime package root reached through a junction ancestor. The hosted Windows installer smoke test supplies the 8.3 temporary-directory spelling and verifies clean install, packaged application readiness, offline startup, shutdown, and cleanup.
 
 ## Alternatives considered
 

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, toNamespacedPath } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -104,6 +104,26 @@ describe.skipIf(process.platform !== 'win32')('installer E2E environment isolati
       const fixture = await createInstallerFixture(root)
       await writeFile(join(target, 'must-survive.txt'), 'survive')
       await registerFixtureRuntimePackageRoot(fixture, target)
+      await mkdir(dirname(redirect), { recursive: true })
+      await symlink(target, redirect, 'junction')
+
+      await cleanupInstallerFixtureDirectory(fixture)
+
+      await expect(readFile(join(target, 'must-survive.txt'), 'utf8')).resolves.toBe('survive')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(target, { recursive: true, force: true })
+    }
+  })
+
+  it('matches a registered runtime root across equivalent Windows namespace spellings', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-installer-environment-'))
+    const target = await mkdtemp(join(tmpdir(), 'dsh-installer-runtime-'))
+    const redirect = join(root, 'appdata', 'roaming', 'DeepSeek Harness', 'Harness', 'profiles', 'node_modules', 'fixture-package')
+    try {
+      const fixture = await createInstallerFixture(root)
+      await writeFile(join(target, 'must-survive.txt'), 'survive')
+      await registerFixtureRuntimePackageRoot(fixture, toNamespacedPath(target))
       await mkdir(dirname(redirect), { recursive: true })
       await symlink(target, redirect, 'junction')
 

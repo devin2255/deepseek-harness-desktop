@@ -20,7 +20,7 @@ const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 const INSTALL_OPERATION_TIMEOUT_MS = 600_000
 const UNINSTALL_OPERATION_TIMEOUT_MS = 300_000
 const UNINSTALL_RESULT_FILE = 'dsh-uninstaller-e2e-result.txt'
-const fixtureRuntimePackageRoots = new WeakMap<InstallerFixture, string[]>()
+const fixtureRuntimePackageRoots = new WeakMap<InstallerFixture, { resolved: string; physical: string }[]>()
 
 export interface InstallerFixture {
   readonly root: string
@@ -398,9 +398,15 @@ async function assertFixtureIdentity(fixture: InstallerFixture): Promise<void> {
 
 /** Register the ordinary runtime package directory that generated fallback links may target. */
 export async function registerFixtureRuntimePackageRoot(fixture: InstallerFixture, packageRoot: string): Promise<void> {
-  const resolved = await assertOrdinaryDirectoryPath(packageRoot, 'refusing an unsafe installer runtime package root')
+  const resolved = normalizeWindowsPath(await assertOrdinaryDirectoryPath(
+    packageRoot,
+    'refusing an unsafe installer runtime package root',
+  ))
+  const physical = normalizeWindowsPath(await realpath(packageRoot))
   const roots = fixtureRuntimePackageRoots.get(fixture) ?? []
-  if (!roots.some(root => root.toLocaleLowerCase() === resolved.toLocaleLowerCase())) roots.push(resolved)
+  if (!roots.some(root => root.resolved.toLocaleLowerCase() === resolved.toLocaleLowerCase())) {
+    roots.push({ resolved, physical })
+  }
   fixtureRuntimePackageRoots.set(fixture, roots)
 }
 
@@ -428,7 +434,7 @@ async function assertRedirectsOwned(fixture: InstallerFixture, root: string): Pr
     const status = await lstat(path)
     if (status.isSymbolicLink()) {
       if (!await isOwnedFallbackRedirect(fixture, path)) {
-        throw new Error('refusing to clean an unowned installer fixture root')
+        throw new Error(`refusing to clean an unowned installer fixture root: ${path}`)
       }
       continue
     }
@@ -446,7 +452,7 @@ async function removeOwnedRedirectsUnder(fixture: InstallerFixture, root: string
     const status = await lstat(path)
     if (status.isSymbolicLink()) {
       if (!await isOwnedFallbackRedirect(fixture, path)) {
-        throw new Error('refusing to clean an unowned installer fixture root')
+        throw new Error(`refusing to clean an unowned installer fixture root: ${path}`)
       }
       await unlink(path)
       continue
@@ -459,12 +465,14 @@ async function isOwnedFallbackRedirect(fixture: InstallerFixture, path: string):
   const fallbackRoot = join(fixture.productData, 'Harness', 'profiles', 'node_modules')
   if (!isPathInside(path, fallbackRoot) || win32.resolve(path) === win32.resolve(fallbackRoot)) return false
   const roots = fixtureRuntimePackageRoots.get(fixture) ?? []
-  const linkedTarget = win32.resolve(dirname(path), await readlink(path))
-  const registered = roots.filter(root => isPathInside(linkedTarget, root))
+  const linkedTarget = normalizeWindowsPath(win32.resolve(dirname(path), await readlink(path)))
+  const registered = roots.filter(root => isPathInside(linkedTarget, root.resolved)
+    || isPathInside(linkedTarget, root.physical))
   if (registered.length === 0) return false
   try {
-    const target = await realpath(path)
-    return registered.some(root => isPathInside(target, root))
+    const target = normalizeWindowsPath(await realpath(path))
+    return registered.some(root => isPathInside(target, root.physical)
+      || isPathInside(target, root.resolved))
   } catch (error: unknown) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return true
     throw error
@@ -579,8 +587,15 @@ function parseExecutablePath(command: string | undefined): string | undefined {
 }
 
 function isPathInside(candidate: string, root: string): boolean {
-  const relative = win32.relative(win32.resolve(root), win32.resolve(candidate))
+  const relative = win32.relative(normalizeWindowsPath(root), normalizeWindowsPath(candidate))
   return relative === '' || (!relative.startsWith('..\\') && relative !== '..' && !win32.isAbsolute(relative))
+}
+
+function normalizeWindowsPath(path: string): string {
+  const resolved = win32.resolve(path)
+  if (resolved.toLocaleLowerCase().startsWith('\\\\?\\unc\\')) return `\\\\${resolved.slice(8)}`
+  if (resolved.startsWith('\\\\?\\')) return resolved.slice(4)
+  return resolved
 }
 
 async function shellFolders(): Promise<{ desktop: string; programs: string }> {
