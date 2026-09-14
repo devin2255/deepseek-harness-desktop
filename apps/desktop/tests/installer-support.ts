@@ -381,13 +381,12 @@ async function assertFixtureRootOwnership(fixture: InstallerFixture): Promise<vo
 
 async function assertFixtureIdentity(fixture: InstallerFixture): Promise<void> {
   const resolvedRoot = win32.resolve(fixture.root)
-  const physicalRoot = await realpath(fixture.root)
+  await assertOrdinaryDirectoryPath(resolvedRoot, 'refusing to clean an unowned installer fixture root')
   const marker = join(fixture.root, INSTALLER_E2E_APP_DATA_MARKER)
   const markerStatus = await lstat(marker)
   const markerContent = await readFile(marker, 'utf8')
   if (
-    physicalRoot.toLocaleLowerCase() !== resolvedRoot.toLocaleLowerCase()
-    || !markerStatus.isFile()
+    !markerStatus.isFile()
     || markerStatus.isSymbolicLink()
     || !/^[A-Za-z0-9_-]{43}$/u.test(fixture.ownership)
     || fixture.environment[INSTALLER_E2E_OWNERSHIP_ENVIRONMENT_KEY] !== fixture.ownership
@@ -399,28 +398,26 @@ async function assertFixtureIdentity(fixture: InstallerFixture): Promise<void> {
 
 /** Register the ordinary runtime package directory that generated fallback links may target. */
 export async function registerFixtureRuntimePackageRoot(fixture: InstallerFixture, packageRoot: string): Promise<void> {
-  const resolved = win32.resolve(packageRoot)
-  const physical = await realpath(packageRoot)
-  const status = await lstat(packageRoot)
-  if (
-    physical.toLocaleLowerCase() !== resolved.toLocaleLowerCase()
-    || !status.isDirectory()
-    || status.isSymbolicLink()
-  ) throw new Error('refusing an unsafe installer runtime package root')
-  await assertOrdinaryAncestors(resolved)
+  const resolved = await assertOrdinaryDirectoryPath(packageRoot, 'refusing an unsafe installer runtime package root')
   const roots = fixtureRuntimePackageRoots.get(fixture) ?? []
   if (!roots.some(root => root.toLocaleLowerCase() === resolved.toLocaleLowerCase())) roots.push(resolved)
   fixtureRuntimePackageRoots.set(fixture, roots)
 }
 
-async function assertOrdinaryAncestors(path: string): Promise<void> {
+async function assertOrdinaryDirectoryPath(path: string, message: string): Promise<string> {
+  const resolved = win32.resolve(path)
+  await assertOrdinaryAncestors(resolved, message)
+  return resolved
+}
+
+async function assertOrdinaryAncestors(path: string, message: string): Promise<void> {
   const root = win32.parse(path).root
   let current = root
   for (const component of win32.relative(root, path).split('\\').filter(Boolean)) {
     current = join(current, component)
     const status = await lstat(current)
     if (!status.isDirectory() || status.isSymbolicLink()) {
-      throw new Error('refusing an unsafe installer runtime package root')
+      throw new Error(message)
     }
   }
 }

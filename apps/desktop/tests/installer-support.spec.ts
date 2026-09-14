@@ -116,6 +116,22 @@ describe.skipIf(process.platform !== 'win32')('installer E2E environment isolati
     }
   })
 
+  it('refuses a runtime package root reached through a junction ancestor', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-installer-environment-'))
+    const target = await mkdtemp(join(tmpdir(), 'dsh-installer-runtime-'))
+    const redirect = join(root, 'runtime-redirect')
+    try {
+      const fixture = await createInstallerFixture(root)
+      await symlink(target, redirect, 'junction')
+      await expect(registerFixtureRuntimePackageRoot(fixture, redirect))
+        .rejects.toThrow(/unsafe installer runtime package root/iu)
+    } finally {
+      await unlink(redirect).catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+      await rm(target, { recursive: true, force: true })
+    }
+  })
+
   it('unlinks a registered generated fallback junction after its packaged target was removed', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-installer-environment-'))
     const target = await mkdtemp(join(tmpdir(), 'dsh-installer-runtime-'))

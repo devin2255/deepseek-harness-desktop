@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-14-windows-installer-e2e-path-identity.md
+2026-09-14-windows-installer-e2e-path-identity.md: 44952f605bb5c41b1c791565112d4be5258eb229
+2026-09-14-windows-installer-e2e-path-identity.zh.md: 80b51971189466ff9ebc90bff2d6d192ced0e05a
