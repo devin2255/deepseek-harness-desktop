@@ -141,6 +141,9 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // The Python runtime uses a distinct closed-resolution bin; the public CLI
   // keeps config-owned bare-package resolution through lib/bin.js.
   '@deepseek-ai/dsh-sdk-jsonrpc-demo': ['lib/packaged-bin.js'],
+  // Task's separately bundled service and invariant entries share the same
+  // generated fold module, so the package must publish that hashed sibling.
+  '@deepseek-ai/dsh-task': ['lib/fold-*.js'],
   // The argv-prefix runner entry ships beside the lib as its own bundle;
   // sandbox-local resolves it through the package's ./runner export. tsdown
   // also shares its generated FFI code through a hashed runtime chunk.
