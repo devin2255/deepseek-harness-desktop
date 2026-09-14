@@ -54,7 +54,7 @@ jobs:
 
       - name: Validate package and release files
         id: validate
-        run: pnpm run desktop:validate-package
+        run: node --import tsx/esm scripts/desktop/validate-package.ts
 
       - name: Clean-install and credential-free launch smoke
         id: smoke

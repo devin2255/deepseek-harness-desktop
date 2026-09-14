@@ -61,7 +61,7 @@ describe('desktop installer workflow', () => {
     ])
     expect(step('build').run).toBe('pnpm run build')
     expect(step('package').run).toBe('pnpm run desktop:package')
-    expect(step('validate').run).toBe('pnpm run desktop:validate-package')
+    expect(step('validate').run).toBe('node --import tsx/esm scripts/desktop/validate-package.ts')
     expect(step('smoke')).toMatchObject({
       if: "github.event_name == 'pull_request'",
       env: { DSH_INSTALLER_E2E: '1' },
