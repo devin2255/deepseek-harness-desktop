@@ -21,7 +21,7 @@ env:
 jobs:
   # Independent of CI's required verdict; installer mutations use a fresh hosted VM.
   installer:
-    name: Windows x64 installer / ${{ github.event_name == 'pull_request' && 'smoke' || 'full matrix' }}
+    name: Windows x64 installer / full matrix
     runs-on: windows-2025
     timeout-minutes: 90
     defaults:
@@ -56,16 +56,8 @@ jobs:
         id: validate
         run: node --import tsx/esm scripts/desktop/validate-package.ts
 
-      - name: Clean-install and credential-free launch smoke
-        id: smoke
-        if: github.event_name == 'pull_request'
-        env:
-          DSH_INSTALLER_E2E: '1'
-        run: node node_modules/vitest/vitest.mjs run --config vitest.desktop-installer.config.ts apps/desktop/tests/installer.e2e.ts -t 'installs to the isolated default destination with every option off and starts offline'
-
       - name: Complete installer E2E matrix
         id: matrix
-        if: github.event_name == 'push'
         env:
           DSH_INSTALLER_E2E: '1'
         run: node node_modules/vitest/vitest.mjs run --config vitest.desktop-installer.config.ts

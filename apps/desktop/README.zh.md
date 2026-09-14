@@ -78,7 +78,7 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 测试覆盖无 API 凭据启动、选项变更、通过较旧注册版本触发的运行中应用替换，以及两种卸载数据选择。它不能替代断网机器验收，也不能替代从单独构建的旧发布产物升级的验收。
 
-[Windows 安装器工作流](../../.github/workflows/desktop-installer.yml) 在全新的托管 Windows runner 上为拉取请求运行全新安装冒烟测试，为 master 和 `dsh-v*` 推送运行完整安装器测试。通过包验证的 EXE、校验和与元数据保留 30 天，即使后续验收失败也会保留；使用产物前须查看该次运行的测试结果。该工作流不持有签名凭据，也不发布生产版本。
+[Windows 安装器工作流](../../.github/workflows/desktop-installer.yml) 在全新的托管 Windows runner 上为拉取请求、master 和 `dsh-v*` 推送运行完整安装器测试。通过包验证的 EXE、校验和与元数据保留 30 天，即使后续验收失败也会保留；使用产物前须查看该次运行的测试结果。该工作流不持有签名凭据，也不发布生产版本。
 
 ## 已知限制
 

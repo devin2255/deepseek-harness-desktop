@@ -25,7 +25,6 @@ interface Workflow {
 }
 
 const root = resolve(import.meta.dirname, '..')
-const cleanInstall = 'installs to the isolated default destination with every option off and starts offline'
 const installerVitest = 'node node_modules/vitest/vitest.mjs run --config vitest.desktop-installer.config.ts'
 
 function workflow(): Workflow {
@@ -62,24 +61,19 @@ describe('desktop installer workflow', () => {
       .toMatchObject({ dest: '${{ runner.temp }}/setup-pnpm' })
   })
 
-  it('builds and validates before selecting one pull-request smoke or the complete push suite', () => {
+  it('builds and validates before running the complete installer suite on every event', () => {
     const steps = workflow().jobs.installer?.steps ?? []
     expect(steps.filter(item => item.id !== undefined).map(item => item.id)).toEqual([
-      'build', 'package', 'validate', 'smoke', 'matrix', 'upload',
+      'build', 'package', 'validate', 'matrix', 'upload',
     ])
     expect(step('build').run).toBe('pnpm run build')
     expect(step('package').run).toBe('pnpm run desktop:package')
     expect(step('validate').run).toBe('node --import tsx/esm scripts/desktop/validate-package.ts')
-    expect(step('smoke')).toMatchObject({
-      if: "github.event_name == 'pull_request'",
-      env: { DSH_INSTALLER_E2E: '1' },
-      run: `${installerVitest} apps/desktop/tests/installer.e2e.ts -t '${cleanInstall}'`,
-    })
     expect(step('matrix')).toMatchObject({
-      if: "github.event_name == 'push'",
       env: { DSH_INSTALLER_E2E: '1' },
       run: installerVitest,
     })
+    expect(step('matrix').if).toBeUndefined()
   })
 
   it('retains only validated installer release files even when a later smoke fails', () => {
@@ -95,15 +89,14 @@ describe('desktop installer workflow', () => {
     })
   })
 
-  it.skipIf(process.platform !== 'win32').each([
-    ['smoke', ['node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.desktop-installer.config.ts', 'apps/desktop/tests/installer.e2e.ts', '-t', cleanInstall]],
-    ['matrix', ['node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.desktop-installer.config.ts']],
-  ] as const)('passes the %s selection intact through native PowerShell', (id, expected) => {
+  it.skipIf(process.platform !== 'win32')('passes the matrix selection intact through native PowerShell', () => {
     // Capture arguments without invoking Node or mutating the installed application.
-    const command = `function node { ConvertTo-Json -InputObject @($args) -Compress }; ${step(id).run}`
+    const command = `function node { ConvertTo-Json -InputObject @($args) -Compress }; ${step('matrix').run}`
     const result = spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8' })
     expect(result.error).toBeUndefined()
     expect(result.status).toBe(0)
-    expect(JSON.parse(result.stdout.trim())).toEqual(expected)
+    expect(JSON.parse(result.stdout.trim())).toEqual([
+      'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.desktop-installer.config.ts',
+    ])
   })
 })

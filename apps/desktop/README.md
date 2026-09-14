@@ -78,7 +78,7 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 The suite checks startup without API credentials, option changes, running-application replacement using an older registered version, and both uninstall data choices. It does not substitute for disconnected-machine acceptance or upgrading from a separately built older release artifact.
 
-The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) runs the clean-install smoke for pull requests and the complete installer suite for master and `dsh-v*` pushes on a fresh hosted Windows runner. It retains package-validated EXE, checksum, and metadata files for 30 days, including when a later acceptance test fails; check the run's test result before using an artifact. This workflow has no signing credentials and does not publish a production release.
+The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) runs the complete installer suite for pull requests, master, and `dsh-v*` pushes on a fresh hosted Windows runner. It retains package-validated EXE, checksum, and metadata files for 30 days, including when a later acceptance test fails; check the run's test result before using an artifact. This workflow has no signing credentials and does not publish a production release.
 
 ## Known Limitations
 
