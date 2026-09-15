@@ -1,11 +1,13 @@
+import { realpathSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir as systemTmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createReleaseFiles, hasAuthenticodeCertificate, inspectAuthenticode, verifyReleaseFiles } from './checksum.ts'
 
 const roots: string[] = []
+const tmpdir = () => realpathSync(systemTmpdir())
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))

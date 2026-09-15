@@ -1,5 +1,6 @@
+import { realpathSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { homedir, tmpdir as systemTmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -11,6 +12,7 @@ import {
 } from './validate-package.ts'
 
 const temporaryRoots: string[] = []
+const tmpdir = () => realpathSync(systemTmpdir())
 
 function x64Pe(): Buffer {
   const value = Buffer.alloc(512)
