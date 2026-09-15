@@ -185,7 +185,7 @@ export class TestSessions implements ISessions {
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
     method: 'open' | 'openSubagent' | 'setSubagentCatalogOpen' | 'refreshSubagents'
-      | 'clear' | 'search' | 'fork'
+      | 'clear' | 'search' | 'fork' | 'refresh'
     args: unknown[]
   }[] = []
 
@@ -201,7 +201,7 @@ export class TestSessions implements ISessions {
    */
   constructor(private readonly stabilize: Stabilizer, private readonly rootCtx: Context) {
     this.list = createSnapshotStore<SessionListState>({
-      ids: [], byId: {}, current: undefined, phase: 'ready',
+      ids: [], byId: {}, current: undefined, phase: 'ready', state: 'idle', error: null,
       subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
     })
     this.channel = new SessionProvideChannel({
@@ -437,6 +437,12 @@ export class TestSessions implements ISessions {
   /** Record a catalog refresh; fixture callers drive snapshots explicitly. */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
     this.calls.push({ method: 'refreshSubagents', args: [parentSessionId] })
+    return Promise.resolve()
+  }
+
+  /** Record a list refresh; fixture callers publish the resulting snapshot explicitly. */
+  refresh(): Promise<void> {
+    this.calls.push({ method: 'refresh', args: [] })
     return Promise.resolve()
   }
 

@@ -58,9 +58,14 @@ import {
 } from './api/session-search.ts'
 // Type-only: resolves `ctx.get('sessionProjections')` to the projection registry.
 import type {} from '@deepseek-ai/dsh-session-projection'
-// Type-only: resolves `ctx.get('tasks')` to the background job registry.
+// Type-only: resolves the background-job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
+import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
+import type { LiveTaskFact, TaskErrorCode, TaskSnapshot } from '@deepseek-ai/dsh-task'
+import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
+import { TaskReviewError, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -674,6 +679,7 @@ function requestedFrame(pending: PendingApproval): RpcRequest<MuxFrame> {
 interface PendingQuestion {
   rpcId: RpcId
   sessionId: SessionId
+  createdAt: number
   questions: AskUserQuestionItem[]
   resolve: (answer: AskUserQuestionAnswer) => void
   reject: (error: UserQuestionError) => void
@@ -1101,6 +1107,82 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const muxQueues = new Set<FrameQueue<RpcRequest<MuxFrame>>>()
   const imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
 
+  const taskServiceAtBoot = ctx.get('tasks')
+  const taskLiveGeneration = taskServiceAtBoot?.snapshot().generation ?? 0
+  const taskActivityStartedAt = new Map<SessionId, number>()
+  if (taskServiceAtBoot !== undefined) {
+    for (const agent of ctx.get('agents')?.list() ?? []) {
+      if (agent.status === 'running') taskActivityStartedAt.set(agent.id, Date.now())
+    }
+  }
+
+  /** Publish one complete live baseline from the host-owned Agent and question registries. */
+  function publishTaskLiveFacts(): void {
+    const tasks = ctx.get('tasks')
+    if (tasks === undefined) return
+    const snapshot = tasks.snapshot()
+    const rootBySession = new Map<SessionId, SessionId>()
+    for (const task of snapshot.tasks) {
+      rootBySession.set(task.taskId, task.taskId)
+      for (const descendant of task.descendantSessionIds) rootBySession.set(descendant, task.taskId)
+    }
+    const facts: LiveTaskFact[] = []
+    for (const agent of ctx.get('agents')?.list() ?? []) {
+      if (agent.status !== 'running') continue
+      const taskId = rootBySession.get(agent.id)
+      if (taskId === undefined) continue
+      let createdAt = taskActivityStartedAt.get(agent.id)
+      if (createdAt === undefined) {
+        createdAt = Date.now()
+        taskActivityStartedAt.set(agent.id, createdAt)
+      }
+      facts.push({
+        kind: 'activity', taskId, ownerSessionId: agent.id,
+        sourceId: `agent:${agent.id}`, state: 'running', createdAt,
+      })
+    }
+    for (const pending of pendingQuestions.values()) {
+      const taskId = rootBySession.get(pending.sessionId)
+      if (taskId === undefined) continue
+      const sourceId = String(pending.rpcId)
+      facts.push({
+        kind: 'attention',
+        item: {
+          id: AttentionItemId(`${pending.sessionId}:question:${sourceId}`),
+          taskId,
+          ownerSessionId: pending.sessionId,
+          kind: 'question',
+          severity: 'warning',
+          summary: pending.questions.map(question => question.question).join(' · '),
+          createdAt: pending.createdAt,
+          sourceId,
+          actionable: true,
+        },
+      })
+    }
+    tasks.replaceLiveGeneration(taskLiveGeneration, facts)
+  }
+
+  ctx.on('agent/created', ({ agent }) => {
+    if (agent.status === 'running') taskActivityStartedAt.set(agent.id, Date.now())
+    publishTaskLiveFacts()
+  })
+  ctx.on('agent/disposed', ({ agent }) => {
+    taskActivityStartedAt.delete(agent.id)
+    publishTaskLiveFacts()
+  })
+  ctx.on('agent/status', ({ agent, status }) => {
+    if (status === 'running') {
+      if (!taskActivityStartedAt.has(agent.id)) taskActivityStartedAt.set(agent.id, Date.now())
+    } else {
+      taskActivityStartedAt.delete(agent.id)
+    }
+    publishTaskLiveFacts()
+  })
+  ctx.on('session/created', publishTaskLiveFacts)
+  ctx.on('session/disposed', publishTaskLiveFacts)
+  publishTaskLiveFacts()
+
   /** Serialize image admission with model selection for one agent. */
   function serializeImageAdmission<T>(agent: Agent, operation: () => Promise<T>): Promise<T> {
     const result = (imageAdmissionChains.get(agent) ?? Promise.resolve()).then(operation)
@@ -1333,6 +1415,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       type: 'question/resolved', sessionId: pending.sessionId,
       questionRpcId: pending.rpcId, outcome,
     })
+    publishTaskLiveFacts()
   }
 
   const disposeProvider = ctx.userQuestions.registerProvider({
@@ -1345,7 +1428,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       return new Promise<AskUserQuestionAnswer>((resolve, reject) => {
         const rpcId = RpcId(randomUUID())
         const pending: PendingQuestion = {
-          rpcId, sessionId, questions: request.questions, resolve, reject,
+          rpcId, sessionId, createdAt: Date.now(), questions: request.questions, resolve, reject,
           ...(request.signal === undefined ? {} : { signal: request.signal }),
         }
         const onAbort = (): void => {
@@ -1355,6 +1438,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
         pending.onAbort = onAbort
         pendingQuestions.set(rpcId, pending)
+        publishTaskLiveFacts()
         request.signal?.addEventListener('abort', onAbort, { once: true })
         const envelope: RpcRequest<MuxFrame> = {
           rpcId,
@@ -1777,6 +1861,107 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return err(request, { code: 'internal', message: String(error), details })
   }
 
+  const TASK_ERROR_CODES = {
+    TASK_NOT_FOUND: 'task-not-found',
+    TASK_TARGET_NOT_ROOT: 'task-target-not-root',
+    TASK_STALE_SEQUENCE: 'task-stale-sequence',
+    TASK_INVALID_DEFINITION: 'task-invalid-definition',
+    TASK_INVALID_CRITERION: 'task-invalid-criterion',
+    TASK_INVALID_RISK: 'task-invalid-risk',
+    TASK_INVALID_REVIEW: 'task-invalid-review',
+    TASK_INVALID_COMMIT: 'task-invalid-commit',
+    TASK_INVALID_APPLY: 'task-invalid-apply',
+    TASK_INVALID_DISCARD: 'task-invalid-discard',
+    TASK_INVALID_EVIDENCE: 'task-invalid-evidence',
+    TASK_INVALID_WORKTREE: 'task-invalid-worktree',
+    TASK_WORKTREE_ASSIGNED: 'task-worktree-assigned',
+    TASK_ACTIVE: 'task-active',
+    TASK_UNAVAILABLE: 'task-unavailable',
+  } as const satisfies Record<TaskErrorCode, RpcError['code']>
+
+  /** Map one Task service failure to its stable host protocol code. */
+  function taskError(request: RpcRequest<{ sessionId: SessionId }>, error: unknown): RpcResponse<never> {
+    if (error instanceof TaskError) {
+      return err(request, {
+        code: TASK_ERROR_CODES[error.code],
+        message: error.message,
+        details: { sessionId: request.payload.sessionId },
+      })
+    }
+    return err(request, { code: 'internal', message: String(error), details: {} })
+  }
+
+  interface TaskReviewTarget {
+    readonly task: TaskSnapshot
+    readonly assignment: TaskWorktreeAssignment
+    readonly tasks: NonNullable<ReturnType<typeof ctx.get<'tasks'>>>
+    readonly review: NonNullable<ReturnType<typeof ctx.get<'taskReview'>>>
+  }
+
+  /** Resolve one durable Task worktree and both services without inferring a directory-only review. */
+  function taskReviewTarget(sessionId: SessionId): TaskReviewTarget | { readonly error: RpcError } {
+    const tasks = ctx.get('tasks')
+    if (tasks === undefined) {
+      return { error: { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId } } }
+    }
+    const task = tasks.snapshot().tasks.find(candidate => candidate.taskId === sessionId)
+    if (task === undefined) return { error: { code: 'task-not-found', message: `Task "${sessionId}" does not exist`, details: { sessionId } } }
+    if (task.executionWorkspace === undefined) {
+      return {
+        error: {
+          code: 'task-review-unavailable',
+          message: 'This Task has no application-owned Git worktree to review.',
+          details: { sessionId },
+        },
+      }
+    }
+    const review = ctx.get('taskReview')
+    if (review === undefined) {
+      return {
+        error: {
+          code: 'task-review-unavailable',
+          message: 'Task review is unavailable in this application.',
+          details: { sessionId },
+        },
+      }
+    }
+    return { task, assignment: task.executionWorkspace, tasks, review }
+  }
+
+  /** Map cancellation and user-safe Task review failures without serializing native causes. */
+  function taskReviewError(
+    request: RpcRequest<{ sessionId: SessionId }>,
+    error: unknown,
+    signal: AbortSignal,
+  ): RpcResponse<never> {
+    if (signal.aborted) return err(request, { code: 'cancelled', message: 'Task review operation was cancelled.', details: {} })
+    if (error instanceof TaskReviewError) {
+      return err(request, {
+        code: 'task-review-rejected',
+        message: error.message,
+        details: { sessionId: request.payload.sessionId, reviewCode: error.code },
+      })
+    }
+    if (error instanceof TaskError) return taskError(request, error)
+    ctx.logger.warn(`task review operation failed: ${String(error)}`)
+    return err(request, { code: 'internal', message: 'Task review operation failed.', details: {} })
+  }
+
+  /** Reject a stale delivery command before it can mutate Git state. */
+  function taskDeliverySequenceError(
+    sessionId: SessionId,
+    task: TaskSnapshot,
+    expectedSeq: number,
+  ): RpcError | undefined {
+    return task.asOfSeq === expectedSeq
+      ? undefined
+      : {
+        code: 'task-stale-sequence',
+        message: `Task "${sessionId}" expected sequence ${expectedSeq}, current sequence is ${task.asOfSeq}`,
+        details: { sessionId },
+      }
+  }
+
   /** Resolve a session's agent, apply one goal mutation, and acknowledge with the new CAS ref. */
   async function mutateGoal(
     request: RpcRequest<{ sessionId: SessionId }>,
@@ -2117,11 +2302,106 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
+        const isolation = request.payload.isolation ?? 'direct'
+        let executionWorkspace: TaskWorktreeAssignment | undefined
+        let recordExecutionWorkspace = false
+        if (isolation === 'worktree') {
+          const taskWorktrees = ctx.get('taskWorktrees')
+          const tasks = ctx.get('tasks')
+          if (workspace === undefined || taskWorktrees === undefined || tasks === undefined) {
+            return err(request, {
+              code: 'workspace-isolation-unavailable',
+              message: 'worktree isolation is not available in this Host composition',
+              details: {
+                sessionId,
+                ...workspace === undefined ? {} : { workspaceId: workspace.id },
+              },
+            })
+          }
+          const existingTask = tasks.snapshot().tasks.find(task => task.taskId === sessionId)
+          const existing = existingTask?.executionWorkspace
+          if (existing !== undefined) {
+            if (existing.workspaceId !== workspace.id || existing.sourcePath !== workspace.path) {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: 'the Session belongs to a different isolated Workspace',
+                details: { sessionId, workspaceId: workspace.id, preservedPath: existing.path },
+              })
+            }
+            try {
+              const availability = await taskWorktrees.inspect(existing)
+              if (availability !== 'available') {
+                return err(request, {
+                  code: 'workspace-isolation-unavailable',
+                  message: `the recorded execution worktree is ${availability}`,
+                  details: {
+                    sessionId,
+                    workspaceId: workspace.id,
+                    worktreeCode: 'WORKTREE_UNAVAILABLE',
+                    preservedPath: existing.path,
+                  },
+                })
+              }
+            } catch (error: unknown) {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: error instanceof TaskWorktreeError
+                  ? error.message
+                  : 'the recorded execution worktree could not be inspected',
+                details: {
+                  sessionId,
+                  workspaceId: workspace.id,
+                  worktreeCode: error instanceof TaskWorktreeError ? error.code : 'WORKTREE_UNAVAILABLE',
+                  preservedPath: existing.path,
+                },
+              })
+            }
+            executionWorkspace = existing
+          } else if (existingTask !== undefined || ctx.agents.get(sessionId) !== undefined) {
+            return err(request, {
+              code: 'workspace-isolation-unavailable',
+              message: 'the Session already exists without a recorded execution Worktree',
+              details: { sessionId, workspaceId: workspace.id },
+            })
+          } else {
+            try {
+              executionWorkspace = await taskWorktrees.create({
+                taskId: sessionId,
+                workspaceId: workspace.id,
+                workspacePath: workspace.path,
+              })
+              recordExecutionWorkspace = true
+            } catch (error: unknown) {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: error instanceof TaskWorktreeError
+                  ? error.message
+                  : 'worktree isolation failed before Session creation',
+                details: {
+                  sessionId,
+                  workspaceId: workspace.id,
+                  ...error instanceof TaskWorktreeError ? { worktreeCode: error.code } : {},
+                },
+              })
+            }
+          }
+        }
+        const cwd = executionWorkspace?.path ?? workspace?.path ?? request.payload.cwd ?? defaults.cwd
         const requestedPreset = request.payload.agentPreset
         try {
           await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
         } catch (error: unknown) {
+          if (executionWorkspace !== undefined) {
+            return err(request, {
+              code: 'workspace-isolation-unavailable',
+              message: 'the worktree was preserved because Session creation failed',
+              details: {
+                sessionId,
+                workspaceId: executionWorkspace.workspaceId,
+                preservedPath: executionWorkspace.path,
+              },
+            })
+          }
           if (error instanceof AgentPresetConflict) {
             return err(request, {
               code: 'agent-preset-conflict',
@@ -2155,7 +2435,27 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: {},
           })
         }
-        if (workspace !== undefined) {
+        if (executionWorkspace !== undefined) {
+          if (recordExecutionWorkspace) {
+            const tasks = ctx.get('tasks')
+            /* v8 ignore next -- availability was checked before worktree creation */
+            if (tasks === undefined) throw new Error('Task service disappeared during isolated Session creation')
+            const live = ctx.agents.get(sessionId)?.session
+            try {
+              await tasks.assignWorktree(sessionId, { assignment: executionWorkspace, expectedSeq: live?.seq ?? 0 })
+            } catch {
+              return err(request, {
+                code: 'workspace-isolation-unavailable',
+                message: 'the worktree was preserved because its assignment could not be recorded',
+                details: {
+                  sessionId,
+                  workspaceId: executionWorkspace.workspaceId,
+                  preservedPath: executionWorkspace.path,
+                },
+              })
+            }
+          }
+        } else if (workspace !== undefined) {
           try {
             await workspace.attachSession(sessionId)
           } catch (error: unknown) {
@@ -2176,7 +2476,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // allowed and the row `session.list` serves for the same session.
         const created = ctx.agents.get(sessionId)
         const createdPreset = created === undefined ? undefined : resolveSessionPreset(created.session)
-        return ok(request, { sessionId, ...createdPreset === undefined ? {} : { agentPreset: createdPreset } })
+        return ok(request, {
+          sessionId,
+          ...createdPreset === undefined ? {} : { agentPreset: createdPreset },
+          ...executionWorkspace === undefined ? {} : { executionWorkspace },
+        })
       },
 
       async history(request) {
@@ -2998,6 +3302,167 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
     },
 
+    tasks: {
+      list(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) {
+          return Promise.resolve(err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: {} }))
+        }
+        return Promise.resolve(ok(request, tasks.snapshot()))
+      },
+
+      async define(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, goal, criteria, expectedSeq } = request.payload
+          return ok(request, await tasks.define(sessionId, { goal, criteria, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+
+      async updateCriterion(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, criterion, expectedSeq } = request.payload
+          return ok(request, await tasks.updateCriterion(sessionId, { criterion, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+
+      async recordRisk(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, risk, expectedSeq } = request.payload
+          return ok(request, await tasks.recordRisk(sessionId, { risk, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+
+      async review(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) return err(request, { code: 'task-unavailable', message: 'task projection service is not mounted', details: { sessionId: request.payload.sessionId } })
+        try {
+          const { sessionId, decision, expectedSeq } = request.payload
+          return ok(request, await tasks.review(sessionId, { decision, expectedSeq }))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
+
+      async reviewSummary(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        try {
+          return ok(request, await target.review.summarize({ assignment: target.assignment }, signal))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async reviewDiff(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        try {
+          return ok(request, await target.review.diff({
+            assignment: target.assignment,
+            path: request.payload.path,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+          }, signal))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async commit(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        const stale = taskDeliverySequenceError(request.payload.sessionId, target.task, request.payload.expectedSeq)
+        if (stale !== undefined) return err(request, stale)
+        if (target.task.status !== 'ready' || target.task.commitReceipt !== undefined || target.task.discardReceipt !== undefined) {
+          return err(request, {
+            code: 'task-invalid-review',
+            message: 'Commit requires a ready Task without an existing delivery receipt.',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        try {
+          const receipt = await target.review.commit({
+            assignment: target.assignment,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+            message: request.payload.message,
+          }, signal)
+          return ok(request, await target.tasks.recordCommit(request.payload.sessionId, {
+            receipt, expectedSeq: request.payload.expectedSeq,
+          }))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async apply(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        const stale = taskDeliverySequenceError(request.payload.sessionId, target.task, request.payload.expectedSeq)
+        if (stale !== undefined) return err(request, stale)
+        const committed = target.task.commitReceipt
+        if (committed === undefined || target.task.applyReceipt !== undefined || target.task.discardReceipt !== undefined
+          || committed.commit !== request.payload.commit
+          || committed.committedRevision !== request.payload.expectedRevision) {
+          return err(request, {
+            code: 'task-invalid-apply',
+            message: 'Apply requires the exact recorded Task commit without an existing apply or discard receipt.',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        try {
+          const receipt = await target.review.apply({
+            assignment: target.assignment,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+            expectedSourceHead: request.payload.expectedSourceHead,
+            commit: request.payload.commit,
+          }, signal)
+          return ok(request, await target.tasks.recordApply(request.payload.sessionId, {
+            receipt, expectedSeq: request.payload.expectedSeq,
+          }))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+
+      async discard(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        const stale = taskDeliverySequenceError(request.payload.sessionId, target.task, request.payload.expectedSeq)
+        if (stale !== undefined) return err(request, stale)
+        if (target.task.discardReceipt !== undefined
+          || target.task.status !== 'ready' && target.task.commitReceipt === undefined && target.task.applyReceipt === undefined) {
+          return err(request, {
+            code: 'task-invalid-discard',
+            message: 'Discard requires a ready or delivered Task whose worktree has not already been removed.',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        try {
+          const receipt = await target.review.discard({
+            assignment: target.assignment,
+            expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
+            confirmedUncommittedLoss: request.payload.confirmedUncommittedLoss,
+          }, signal)
+          return ok(request, await target.tasks.recordDiscard(request.payload.sessionId, {
+            receipt, expectedSeq: request.payload.expectedSeq,
+          }))
+        } catch (error: unknown) {
+          return taskReviewError(request, error, signal)
+        }
+      },
+    },
+
     agentPresets: {
       // A deployment with no roster answers with an empty list rather than an
       // error: composing no presets is a valid deployment, and the browser
@@ -3470,6 +3935,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       host(_request, signal) {
         const queue = new FrameQueue<RpcRequest<HostFrame>>()
+        const tasks = ctx.get('tasks')
         const committedWorkspaces = ctx.workspaceRegistry.list()
         const committedWorkspaceIds = new Set(
           committedWorkspaces.map(workspace => String(workspace.id)),
@@ -3551,6 +4017,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               workspace: changedWorkspaceView(change.key, change.value),
             }))
           }),
+          ...tasks === undefined ? [] : [tasks.onChanged((change) => {
+            queue.push(frame({ type: 'task/changed', ...change }))
+          })],
           // Allowlisted host events ride one verbatim wrapper frame each. The
           // allowlist is api-remotes', and `ctx.remote.$on` is the consumer
           // face; nothing here projects, redacts, or renames.

@@ -2,7 +2,7 @@
  * The outward sessions-service face — what `ctx.sessions` exposes to feature
  * packages and the renderer host, and therefore exactly what the test
  * runtime's sessions double must implement. Wire-pump entry points
- * (handleMuxEnvelope/handleConnected/refresh) and runtime internals stay on
+ * (handleMuxEnvelope/handleConnected) and runtime internals stay on
  * the concrete class; cross-domain consumers keep the narrower
  * [SessionsPort](./sessions-port.ts). Widening this interface is the
  * explicit act of widening what features may do to the sessions domain.
@@ -26,6 +26,12 @@ export type { AgentContext } from '../agents/scope.ts'
 export interface ISessions {
   /** The useSessions standard feed (list rows + current selection; read face — writes stay inside the domain). */
   readonly list: ObservableSnapshot<SessionListState>
+  /**
+   * Refresh list metadata through the runtime's single-flight request owner.
+   * Failures remain on the list snapshot and preserve existing rows.
+   * @returns completion of the active request in the current connection generation.
+   */
+  refresh(): Promise<void>
   /** Atomic current-session provide projection (the renderer host's `sessions.provideInfo` feed). */
   readonly currentProvideInfo: HostObservable<SessionMaybeProvideInfo>
   /**

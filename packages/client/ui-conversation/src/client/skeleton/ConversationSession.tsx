@@ -2,7 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react'
 import clsx from 'clsx'
-import type { SessionId, SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId, SessionListState, SessionSummary, TaskListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   ConversationSessionHeaderSlotProps, ConversationSessionSlotProps,
 } from '../contract/slots.ts'
@@ -21,6 +21,12 @@ interface Breadcrumb {
 }
 
 const DEFAULT_VIEW_ID = 'chat'
+const absentTasks = { getSnapshot: () => undefined, subscribe: () => () => {} }
+
+function useAbsentTasks<S>(_selector: (state: TaskListState) => S): S | undefined {
+  useSyncExternalStore(absentTasks.subscribe, absentTasks.getSnapshot, absentTasks.getSnapshot)
+  return undefined
+}
 
 /** Resolve by id and keep stale persisted selections on the stable Chat fallback. */
 function resolveActiveView(tabs: readonly ViewTab[], selectedId: string | null): ViewTab | undefined {
@@ -59,7 +65,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  * @returns the hidden blank-session header or visible title and tabs.
  */
 export function ConversationSessionHeader({
-  sessionId, useSession, useSessions, useStore, actions,
+  sessionId, useSession, useSessions, useTasks, useStore, actions,
   renderSlot, views, open, t,
 }: ConversationSessionHeaderProps) {
   useSyncExternalStore(views.subscribe, views.version)
@@ -67,6 +73,8 @@ export function ConversationSessionHeader({
   const selectedId = useStore(s => s.view)
   const active = resolveActiveView(tabs, selectedId)
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
+  const useTaskProjection = useTasks ?? useAbsentTasks
+  const executionWorkspace = useTaskProjection(state => state.byId[sessionId]?.executionWorkspace)
   const composerPhase = useSession(s => s.composerPhase)
   const blank = useSession(s => s.blank)
   const hideChrome = blank && composerPhase === 'blank'
@@ -99,6 +107,8 @@ export function ConversationSessionHeader({
                 })}
                 {ancestry.length === 0 && <span className={css.crumbCurrent}>{sessionId}</span>}
               </nav>
+              {executionWorkspace !== undefined && <span className={css.worktreeBadge}
+                title={executionWorkspace.path}>{t('session.worktree')}</span>}
               <div className={css.headerActions}>
                 {renderSlot('conversation.session.header.actions', {})}
               </div>

@@ -14,23 +14,48 @@
   "main": "lib/main.js",
   "files": [
     "lib/*.js",
-    "lib/*.cjs"
+    "lib/*.cjs",
+    "lib/*.html",
+    "lib/*.css"
   ],
   "scripts": {
-    "build": "tsc -b && tsdown",
+    "build": "node scripts/clean-built-assets.mjs && tsc -b && tsdown && node scripts/copy-startup-assets.mjs && node scripts/verify-built-assets.mjs",
+    "build:icon": "tsx ../../scripts/desktop/generate-icon.ts",
     "start": "electron .",
     "test": "vitest run --root ../.. apps/desktop/tests",
+    "test:built": "pnpm run build",
     "test:e2e": "vitest run --root ../.. --config vitest.desktop-e2e.config.ts",
     "typecheck": "tsc -p tsconfig.test.json --noEmit"
   },
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/dsh": "workspace:^"
+    "@deepseek-ai/cordis-plugin-group": "workspace:^",
+    "@deepseek-ai/dsh": "workspace:^",
+    "@deepseek-ai/dsh-anonymous-user-id": "workspace:^",
+    "@deepseek-ai/dsh-atomic-write": "workspace:^",
+    "@deepseek-ai/dsh-bash-local": "workspace:^",
+    "@deepseek-ai/dsh-code-runtime": "workspace:^",
+    "@deepseek-ai/dsh-compaction": "workspace:^",
+    "@deepseek-ai/dsh-fs": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-output-retention": "workspace:^",
+    "@deepseek-ai/dsh-sandbox": "workspace:^",
+    "@deepseek-ai/dsh-scope": "workspace:^",
+    "@deepseek-ai/dsh-session-telemetry": "workspace:^",
+    "@deepseek-ai/dsh-session-title-llm": "workspace:^",
+    "@deepseek-ai/dsh-shell": "workspace:^",
+    "@deepseek-ai/dsh-spill": "workspace:^",
+    "@deepseek-ai/dsh-subagent-in-process-driver": "workspace:^",
+    "@deepseek-ai/dsh-subprocess": "workspace:^",
+    "@deepseek-ai/dsh-timeout": "workspace:^",
+    "@deepseek-ai/dsh-workflow": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
     "electron": "43.4.0",
+    "electron-builder": "26.15.3",
     "playwright": "^1.49.0",
+    "sharp": "0.35.3",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

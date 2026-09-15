@@ -262,6 +262,21 @@ describe('healProfilesModuleFallback', () => {
     expect(readlinkSync(join(fallback, 'dsh-app'))).toContain('app')
   })
 
+  it('repoints dangling fallback links after an installation moves', () => {
+    const oldAnchor = stageInstallation({})
+    const home = tmp()
+    healProfilesModuleFallback(oldAnchor, home)
+    const link = join(home, 'profiles', 'node_modules', 'dsh-app')
+    const oldTarget = readlinkSync(link)
+    rmSync(join(oldAnchor, '..'), { recursive: true })
+
+    const newAnchor = stageInstallation({})
+    healProfilesModuleFallback(newAnchor, home)
+
+    expect(readlinkSync(link)).not.toBe(oldTarget)
+    expect(readlinkSync(link)).toBe(join(newAnchor, '..'))
+  })
+
   it('tolerates losing the concurrent-heal race to an identical link and rejects a different one', () => {
     // The EEXIST arm: a second process wrote the link between our lstat miss
     // and symlinkSync. Simulated by pre-creating the correct link and calling

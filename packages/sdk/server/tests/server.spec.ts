@@ -9,6 +9,10 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import type {
+  RecordTaskApplyRequest, RecordTaskCommitRequest, RecordTaskDiscardRequest, TaskSnapshot,
+} from '@deepseek-ai/dsh-task'
+import type { GetTaskFileDiffRequest } from '@deepseek-ai/dsh-task-review'
 import * as agentCore from '@deepseek-ai/dsh-agent-spine-demo'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
@@ -109,6 +113,92 @@ async function settleSubagent(
 }
 
 describe('HarnessSdkJsonRpcServer', () => {
+  it('projects Task baselines and commands through the SDK request loop', async () => {
+    const assignment = {
+      kind: 'git-worktree' as const, taskId: SessionId('root'), workspaceId: 'workspace' as never,
+      sourcePath: 'D:\\source', path: 'D:\\worktree', branch: 'dsh/task-0123456789abcdef01234567',
+      baseCommit: '0'.repeat(40), sourceHead: '0'.repeat(40), sourceDirty: false,
+      sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+    }
+    let row: TaskSnapshot = {
+      taskId: SessionId('root'), workspaceId: 'workspace' as never, executionWorkspace: assignment,
+      descendantSessionIds: [], status: 'reviewing' as const, freshness: 'live' as const,
+      attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+    }
+    const commitReceipt = {
+      kind: 'commit' as const, operationId: '00000000-0000-4000-8000-000000000001' as never,
+      taskId: SessionId('root'), workspaceId: 'workspace' as never, reviewRevision: 'b'.repeat(64) as never,
+      committedRevision: 'c'.repeat(64) as never, branch: assignment.branch, commit: '1'.repeat(40), committedAt: 2,
+    }
+    const applyReceipt = {
+      kind: 'apply' as const, operationId: '00000000-0000-4000-8000-000000000002' as never,
+      taskId: SessionId('root'), workspaceId: 'workspace' as never, reviewRevision: commitReceipt.committedRevision,
+      commit: commitReceipt.commit, sourceHeadBefore: '2'.repeat(40), sourceHeadAfter: '2'.repeat(40), appliedAt: 3,
+    }
+    const discardReceipt = {
+      kind: 'discard' as const, operationId: '00000000-0000-4000-8000-000000000003' as never,
+      taskId: SessionId('root'), workspaceId: 'workspace' as never, reviewRevision: commitReceipt.committedRevision,
+      branch: assignment.branch, branchPreserved: true as const, worktreeRemoved: true as const,
+      uncommittedChangesDiscarded: false, recoverableCommit: commitReceipt.commit, discardedAt: 4,
+    }
+    const tasks = {
+      snapshot: vi.fn(() => ({ generation: 2, tasks: [row] })),
+      define: vi.fn(async () => ({ ...row, definition: { goal: 'Ship', criteria: [] }, asOfSeq: 1 })),
+      updateCriterion: vi.fn(async () => ({ ...row, asOfSeq: 2 })),
+      recordRisk: vi.fn(async () => ({ ...row, asOfSeq: 3 })),
+      review: vi.fn(async () => {
+        row = { ...row, status: 'ready', reviewDecision: 'ready', asOfSeq: 4 }
+        return row
+      }),
+      recordCommit: vi.fn(async (_id: SessionId, request: RecordTaskCommitRequest) => ({ ...row, status: 'settled' as const, commitReceipt: request.receipt, asOfSeq: 5 })),
+      recordApply: vi.fn(async (_id: SessionId, request: RecordTaskApplyRequest) => ({ ...row, status: 'settled' as const, commitReceipt, applyReceipt: request.receipt, asOfSeq: 6 })),
+      recordDiscard: vi.fn(async (_id: SessionId, request: RecordTaskDiscardRequest) => ({ ...row, status: 'settled' as const, commitReceipt, applyReceipt, discardReceipt: request.receipt, asOfSeq: 7 })),
+    }
+    const review = {
+      summarize: vi.fn(async () => ({
+        taskId: SessionId('root'), workspaceId: 'workspace', revision: 'b'.repeat(64),
+        baseCommit: assignment.baseCommit, headCommit: assignment.baseCommit, sourceHead: assignment.sourceHead,
+        sourceDirty: false, branch: assignment.branch, dirty: true, truncated: false, files: [], additions: 0, deletions: 0,
+      })),
+      diff: vi.fn(async (request: GetTaskFileDiffRequest) => ({
+        taskId: SessionId('root'), workspaceId: 'workspace', revision: request.expectedRevision,
+        path: request.path, binary: false, truncated: false, patch: 'diff',
+      })),
+      commit: vi.fn(async () => commitReceipt),
+      apply: vi.fn(async () => applyReceipt),
+      discard: vi.fn(async () => discardReceipt),
+    }
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      get: (name: string) => name === 'tasks' ? tasks : name === 'taskReview' ? review : undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+
+    expect(await server.handleRequest('task/list', {})).toEqual({ generation: 2, tasks: [row] })
+    await server.handleRequest('task/define', { sessionId: 'root', goal: 'Ship', criteria: [], expectedSeq: 0 })
+    await server.handleRequest('task/updateCriterion', { sessionId: 'root', criterion: {}, expectedSeq: 1 })
+    await server.handleRequest('task/recordRisk', { sessionId: 'root', risk: {}, expectedSeq: 2 })
+    expect(await server.handleRequest('task/review', { sessionId: 'root', decision: 'ready', expectedSeq: 3 }))
+      .toMatchObject({ status: 'ready', reviewDecision: 'ready' })
+    expect(tasks.define).toHaveBeenCalledWith(SessionId('root'), { goal: 'Ship', criteria: [], expectedSeq: 0 })
+    expect(await server.handleRequest('task/reviewSummary', { sessionId: 'root' })).toMatchObject({ revision: 'b'.repeat(64) })
+    expect(await server.handleRequest('task/reviewDiff', {
+      sessionId: 'root', path: 'src/app.ts', expectedRevision: 'b'.repeat(64),
+    })).toMatchObject({ path: 'src/app.ts', patch: 'diff' })
+    expect(await server.handleRequest('task/commit', {
+      sessionId: 'root', expectedRevision: 'b'.repeat(64), message: 'feat: ship', expectedSeq: 4,
+    })).toMatchObject({ commitReceipt })
+    row = { ...row, status: 'settled', commitReceipt, asOfSeq: 5 }
+    expect(await server.handleRequest('task/apply', {
+      sessionId: 'root', expectedRevision: 'c'.repeat(64), expectedSourceHead: '2'.repeat(40),
+      commit: commitReceipt.commit, expectedSeq: 5,
+    })).toMatchObject({ applyReceipt })
+    row = { ...row, status: 'settled', commitReceipt, applyReceipt, asOfSeq: 6 }
+    expect(await server.handleRequest('task/discard', {
+      sessionId: 'root', expectedRevision: 'c'.repeat(64), confirmedUncommittedLoss: false, expectedSeq: 6,
+    })).toMatchObject({ discardReceipt })
+  })
+
   it('creates a harness agent and calls the configured OpenAI-compatible endpoint', { timeout: 15_000 }, async () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-'))
     const llmServer = await mockCompletionServer()

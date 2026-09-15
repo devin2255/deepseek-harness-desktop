@@ -46,13 +46,14 @@ interface Bench {
   sinks: ConnectionSinks | undefined
   /** Every `$dispatch` the runtime made, as `[event, ...args]`. */
   dispatched: unknown[][]
+  dispose(): void | Promise<void>
 }
 
 async function mount(): Promise<Bench> {
   const ctx = new Context()
   await ctx.plugin(TypertRegistry)
   const api = new FakeApiClient()
-  const bench: Bench = { ctx, sinks: undefined, dispatched: [] }
+  const bench: Bench = { ctx, sinks: undefined, dispatched: [], dispose: () => {} }
   // Stands in for api-gateway's Remote service: this spec owns the carrier's
   // handoff, not the fan-out behind it.
   ctx.reflect.provide('remote', {
@@ -75,11 +76,26 @@ async function mount(): Promise<Bench> {
   }
   ctx.reflect.provide('connection', handle)
   ctx.reflect.provide('remote.commands', fakeRemote().commands)
-  await ctx.plugin(RuntimeClient).await()
+  const runtime = ctx.plugin(RuntimeClient)
+  bench.dispose = () => runtime.dispose()
+  await runtime.await()
   return bench
 }
 
 describe('wire event bridge', () => {
+  it('invalidates both list baselines when the connection starts reconnecting', async () => {
+    const bench = await mount()
+    try {
+      await Promise.all([bench.ctx.sessions.refresh(), bench.ctx.workspaces.refresh()])
+      bench.sinks?.onStateChange?.('reconnecting')
+      await Promise.resolve()
+      expect(bench.ctx.sessions.list.getSnapshot()).toMatchObject({ phase: 'ready', state: 'loading' })
+      expect(bench.ctx.workspaces.list.getSnapshot()).toMatchObject({ phase: 'ready', state: 'loading' })
+    } finally {
+      await bench.dispose()
+    }
+  })
+
   it('republishes a forwarded host event verbatim, and routes no other host frame there', async () => {
     const bench = await mount()
     const seen = bench.dispatched

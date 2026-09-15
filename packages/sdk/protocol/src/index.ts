@@ -22,4 +22,9 @@ export type {
   SessionPromptResult,
   SubagentFinishedNotification,
   SubagentStartedNotification,
+  TaskApplyParams,
+  TaskCommitParams,
+  TaskDiscardParams,
+  TaskReviewDiffParams,
+  TaskReviewSummaryParams,
 } from './types.ts'

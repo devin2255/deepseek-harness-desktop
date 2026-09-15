@@ -11,7 +11,7 @@ Python SDK 的运行时载体包（分发名 `deepseek-harness-runtime-bin`，�
 - **exe（生产）**——单文件 Node 可执行程序 `dsh-jsonrpc-agent-pkg-<platform>-<arch>`（platform：`linux`/`macos`；arch：`x64`/`arm64`）。macOS 构建还会随附 `node-pty` 在该平台使用的原生 `-spawn-helper` 伴随文件。目标机器无需安装 Node。这是唯一随 wheel 包分发的载体；本包不发布 sdist。
 - **node（仅限开发）**——`runtime/node/` 下的完整部署闭包（`package.json` + `node_modules/`），在系统 Node >= 22.19 上以 `node runtime/node/node_modules/@deepseek-ai/dsh-sdk-jsonrpc-demo/lib/packaged-bin.js` 执行。它是当前检出的源码构建，仅用于仓库本地的开发与验证；不会被自动选中，也不进入分发物。
 
-两种载体承载相同的内容，且只定义一次：本包根目录的 [package.json](https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk-runtime/package.json) 是 single-exe 流水线的部署根目录——一份零代码的纯依赖 manifest，其依赖闭包既是编译进 exe 的插件集，也是物化到 `runtime/node/` 的文件树。往分发物里加插件，就是在那里加一行依赖再重新构建。
+两种载体承载相同的内容，且只定义一次：本包根目录的 [package.json](https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk-runtime/package.json) 是 single-exe 流水线的部署根目录——一份零代码的纯依赖 manifest，其依赖闭包既是编译进 exe 的插件集，也是物化到 `runtime/node/` 的文件树。往分发物里加插件，就是在那里加一行依赖再重新构建。`pnpm run verify-runtime-closure` 会在打包开始前同时检查必需工作区 peer，以及内置默认、完整和最小发布冒烟配置中命名的每个工作区插件。
 
 exe 缺失时抛出 `FileNotFoundError`，并写明两种获取途径：在 deepseek-harness 检出中经 `scripts/build-exe-for-python-sdk.ts` 构建，或安装 `build-exe-for-python-sdk` CI 工作流生成的对应平台运行时 wheel 包。仅限开发的 node 载体缺失时只提示构建脚本这一条途径。该工作流只保留 wheel 包，不保留独立 exe 归档。获取策略与查找接口刻意分离，之后可以换成按需下载而不改动任何调用方。
 

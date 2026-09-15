@@ -33,7 +33,7 @@ import { createScope, scopeOf as scopeTagOf } from '../agents/scope.ts'
 import type { ConversationRuntime } from './conversation-assembler.ts'
 import { SessionManager } from './manager.ts'
 import type { SessionRemotes } from './remotes.ts'
-import type { SessionListPhase, SessionSearchResultItem, SubagentCatalogSnapshot } from './manager.ts'
+import type { SessionListPhase, SessionListSnapshot, SessionSearchResultItem, SubagentCatalogSnapshot } from './manager.ts'
 import type { PendingInteractionStatus } from './pending.ts'
 import { SessionProvideChannel } from './provide.ts'
 import type { Session } from './session.ts'
@@ -83,8 +83,12 @@ export interface SessionListState {
   /** Host rows plus the current addressed subagent route used by navigation. */
   byId: Record<SessionId, SessionSummary>
   current: SessionId | undefined
-  /** Arrival lifecycle projected 1:1 from the manager snapshot (see SessionListPhase): empty-with-ready means "truly no sessions". */
+  /** First successful list arrival; stays ready during later requests, including failures. */
   phase: SessionListPhase
+  /** List synchronization status; loading also covers a disconnected baseline awaiting refresh. */
+  state: SessionListSnapshot['state']
+  /** Latest list request failure; cleared when another request starts or succeeds. */
+  error: SessionListSnapshot['error']
   /** Direct durable catalogs keyed by their selected parent address. */
   subagentsByParent: Readonly<Record<SessionId, SubagentCatalogSnapshot>>
   /**
@@ -300,7 +304,7 @@ export class SessionRuntime implements ISessions {
       conversation,
     )
     this.list = createSnapshotStore<SessionListState>({
-      ids: [], byId: {}, current: undefined, phase: 'pending',
+      ids: [], byId: {}, current: undefined, phase: 'pending', state: 'idle', error: null,
       subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
     })
     // The manager owns wire truth; the store is its projection. Manager
@@ -478,11 +482,16 @@ export class SessionRuntime implements ISessions {
    * draft hand-off) may address the scope synchronously, without waiting a
    * notifier flush. The synchronous projection below makes this structural
    * rather than an accident of microtask ordering.
-   * @param opts - target workspace or directory and an optional preallocated id.
+   * @param opts - target workspace or directory, optional preallocated id, and explicit isolation when requested.
    * @returns the new session id.
    * @throws {SessionCreateError} with the requested id.
    */
-  async create(opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {}): Promise<SessionId> {
+  async create(opts: {
+    workspaceId?: WorkspaceId
+    cwd?: string
+    sessionId?: SessionId
+    isolation?: 'direct' | 'worktree'
+  } = {}): Promise<SessionId> {
     const result = await this.manager.create(opts)
     if (!result.ok) throw new SessionCreateError(result.error, opts.sessionId)
     this.projectList()
@@ -659,7 +668,7 @@ export class SessionRuntime implements ISessions {
   /** Project the manager's list snapshot into the store (title derivation is display-only). */
   private projectList(): void {
     const {
-      items, current, phase, subagentsByParent, jobsBySession, currentAddress,
+      items, current, phase, state, error, subagentsByParent, jobsBySession, currentAddress,
     } = this.manager.getListSnapshot()
     const ids: SessionId[] = []
     const byId: Record<SessionId, SessionSummary> = {}
@@ -729,7 +738,7 @@ export class SessionRuntime implements ISessions {
         ...(currentAddress === undefined ? {} : { subagentAddress: currentAddress }),
       })
     }
-    this.list.set({ ids, byId, current, phase, subagentsByParent, jobsBySession, currentAddress })
+    this.list.set({ ids, byId, current, phase, state, error, subagentsByParent, jobsBySession, currentAddress })
     this.pruneScopes()
   }
 
