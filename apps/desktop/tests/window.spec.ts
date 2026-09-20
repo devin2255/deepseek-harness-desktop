@@ -137,7 +137,7 @@ function navigationEvent(url: string): FakeEvent {
 describe('createDesktopWindow', () => {
   it('returns only the native-window lifecycle controls', () => {
     expectTypeOf<keyof DesktopWindow>().toEqualTypeOf<
-      'focus' | 'hide' | 'isMinimized' | 'onClosed' | 'openSession' | 'restore' | 'show'
+      'focus' | 'hide' | 'isDestroyed' | 'isMinimized' | 'onClosed' | 'openSession' | 'restore' | 'show'
     >()
   })
 

@@ -19,9 +19,15 @@ pnpm --filter @deepseek-ai/dsh-desktop start
 
 ## 运行时生命周期
 
-Main 在应用就绪前启用 Chromium 沙箱并获取 Electron 单实例锁。`app.whenReady()` 完成后，持有锁的实例创建本地启动窗口，使用 `desktop` profile 在随机 loopback 端口启动且仅启动一个 Harness，并且只在经过认证的就绪检查通过后交接给已授权主窗口。原生窗口关闭后，Main 会清除窗口所有权，后续事件不会调用失效句柄。第二次启动会恢复并聚焦仍然存在的窗口，不会再启动 Harness；在 macOS 上，它会使用现有 Harness 授权重新创建并聚焦已关闭的窗口。
+Main 在应用就绪前启用 Chromium 沙箱并获取 Electron 单实例锁。`app.whenReady()` 完成后，持有锁的实例创建本地启动窗口，使用 `desktop` profile 在随机 loopback 端口启动且仅启动一个 Harness，并且只在经过认证的就绪检查通过后交接给已授权主窗口。原生窗口关闭时会先释放旧窗口的隔离 session 授权，之后托盘操作或第二次启动才能使用现有 Harness 授权重建并聚焦窗口；该过程不会再启动 Harness。
 
-第一次显式退出会中止尚未完成的 Harness 启动，等待启动资源归属完成结算，停止一次已就绪的 Harness，然后在退出锁存状态下再次调用 `app.quit()`。即使关闭失败被报告，应用仍会最终退出。在 Windows 和 Linux 上关闭最后一个窗口会退出；在 macOS 上激活应用会使用现有 Harness 授权重新创建缺失的窗口。
+在所有桌面平台上，关闭最后一个窗口后，Harness 与原生后台驻留仍会继续运行。显式退出时，如果没有活动 Task，应用会立即执行有界清理；如果仍有运行中的 Task 或无法取得活动状态，则显示原生选项：继续后台运行会隐藏当前窗口，停止并退出会先释放后台驻留再停止 Harness，取消则不做任何更改。并发退出请求共享同一次选择。安装器替换和启动恢复中的退出会跳过此提示，但仍执行有界清理。即使关闭失败被报告，应用仍会最终退出。
+
+## 后台任务与通知
+
+Electron Main 以串行的两秒间隔轮询经过认证的 `task.list` 和 `session.list` 投影，并为请求设置独立的十秒超时。第一次实时基线不会产生通知。后续值会更新唯一托盘摘要中的活动 Task、Agent 与注意事项数量；请求失败时会把新鲜度标记为不可用、保留最后的计数并继续重试，且不会让请求重叠。Main 只保存分离的展示值，不创建另一份持久 Task 记录。
+
+新增的可操作注意事项、失败状态转换，以及从运行中的任务树转为可以审查或已结束时，会创建原生通知。点击通知会恢复或重建已授权窗口，并打开其确切 owner Session，包括 subagent。Main 仅通过具名的单向 preload 事件发送非空且有长度上限的 Session id；客户端等待权威目录就绪后，使用与总览点击相同的 Task 导航控制器。目标缺失时会打开“任务”并显示可读错误，后续成功或替代该尝试的导航会清除错误。
 
 ## 安全
 
@@ -29,7 +35,7 @@ Main 在应用就绪前启用 Chromium 沙箱并获取 Electron 单实例锁。`
 
 - Main 为每次启动生成 32 字节 capability，并且只将其交给 Harness 进程和隔离的 Electron session。该 session 仅针对完成结算后的确切 HTTP 与 WebSocket origin，且仅为其拥有的 renderer 添加 `Authorization: Bearer <capability>`。
 - renderer 与 preload API、URL、DOM 状态、Web 存储、日志、设置和会话事件均不包含 capability。没有该 header 的直接 loopback 客户端会收到 `401`。
-- renderer 使用 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false` 和 `webSecurity: true`。冻结的 preload bridge 只公开 `deepseekDesktop.platform`，不公开通用 IPC、进程、文件系统、shell、环境或 capability 访问权。
+- renderer 使用 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false` 和 `webSecurity: true`。冻结的 preload bridge 只通过 Main 拥有且经过验证的事件公开 `deepseekDesktop.platform` 与 `onOpenSession(listener)`，不公开通用 IPC、进程、文件系统、shell、环境或 capability 访问权。
 - 导航与重定向仅限于完成结算后的 origin，所有新窗口请求都会被拒绝，renderer 权限检查与权限请求也默认拒绝。
 
 ## 失败
@@ -82,8 +88,7 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 ## 已知限制
 
-- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen。尚未实现自动更新。
-- **前台窗口生命周期** — 当前没有托盘驻留或感知任务的后台策略；在 Windows 和 Linux 上关闭最后一个窗口会退出。
+- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen。尚未实现自动更新，也未实现 macOS 打包、签名和公证。
 - **任务集成** — 任务总览、根任务 worktree 隔离、审查、提交、冲突安全的应用及感知可恢复性的丢弃已经可用。子写入 Agent 的 worktree、并行写入者之间的自动协调、Task 归档和 Harness Studio 尚未实现。
-- **原生集成** — 尚未实现深层链接、原生通知、外部链接处理和窗口位置持久化。
+- **原生集成** — 已提供感知任务的托盘驻留，以及完成或注意事项通知。尚未实现深层链接、外部链接处理和窗口位置持久化。
 - **崩溃恢复** — Main 会报告启动与关闭故障，但尚未提供感知任务的恢复，也不会在 Harness 运行时异常退出后将其重启。

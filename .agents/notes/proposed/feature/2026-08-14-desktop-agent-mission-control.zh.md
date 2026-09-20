@@ -16,13 +16,13 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 每个根任务拥有一个集成 worktree。只读子 Agent 可以共享它的快照，一个写 Agent 可以直接修改它。工作流需要多个写 Agent 并行时，每个写 Agent 使用从同一基准创建的子 worktree，并由显式 Integration 节点在审查前把结果合入任务 worktree。声明的路径范围只用于提前发现可能的重叠，不能替代 Git 合并与验证。
 
-已交付的桌面基础使用 Electron，因为 Host、PTY、插件运行时和客户端构建已经依赖 Node 与兼容 Chromium 的 Web API。Electron Main 监管一个运行桌面 profile 的 Node `utilityProcess`，以及一个运行现有插件组合 React 客户端的沙箱 Renderer。冻结的 preload 桥接只暴露当前平台标识。Renderer 启用上下文隔离与 Chromium 沙箱，不启用 Node 集成或通用 Electron IPC。
+已交付的桌面基础使用 Electron，因为 Host、PTY、插件运行时和客户端构建已经依赖 Node 与兼容 Chromium 的 Web API。Electron Main 监管一个运行桌面 profile 的 Node `utilityProcess`，以及一个运行现有插件组合 React 客户端的沙箱 Renderer。冻结的 preload 桥接只暴露当前平台标识，以及一个经过验证、由 Main 发往 Renderer 的 Session 目标订阅。Renderer 启用上下文隔离与 Chromium 沙箱，不启用 Node 集成或通用 Electron IPC。
 
-已交付的 Harness 进程监听由操作系统分配的回环端口，并要求每次 HTTP 和 WebSocket 连接携带本次启动生成的 Bearer 能力凭证。隔离的 Electron 会话只为该精确源注入能力凭证请求头；导航、重定向、新窗口和该源之外的权限请求都会被拒绝。该值不进入 Renderer 或 Preload API、URL、日志、设置或 Session 事件。Electron Main 当前只拥有单实例应用生命周期、一个窗口，以及受监管的 Harness 启动和停止；产品状态仍归 Cordis 插件所有。
+已交付的 Harness 进程监听由操作系统分配的回环端口，并要求每次 HTTP 和 WebSocket 连接携带本次启动生成的 Bearer 能力凭证。隔离的 Electron 会话只为该精确源注入能力凭证请求头；导航、重定向、新窗口和该源之外的权限请求都会被拒绝。该值不进入 Renderer 或 Preload API、URL、日志、设置或 Session 事件。Electron Main 负责单实例应用生命周期、可替换窗口、受监管的 Harness 启动与停止，以及从 Task 派生的原生展示；产品状态仍归 Cordis 插件所有。
 
-当前基础没有感知任务的托盘生命周期：在 Windows 和 Linux 上关闭最后一个窗口会退出，macOS 则保留应用并在激活时重建窗口。Mission Control 将让活动工作继续驻留系统托盘或 macOS 菜单栏，在显式退出时报告活动任务数量，并提供继续运行、停止后退出或取消选项。其恢复流程将根据已记录的事实报告 interrupted、failed 或 settled 状态，不重放未经确认的工具调用。
+已交付的感知任务后台生命周期会在最后一个窗口关闭后继续运行 Harness，并允许用户从原生托盘或第二次启动重建已授权窗口。Electron Main 轮询经过认证的 Task 与 Session 投影，只保留分离的展示值，并在唯一托盘摘要中报告实时或不可用的活动状态。新增的可操作注意事项、失败和完成状态转换会创建原生通知，其经过验证的 owner Session id 会通过现有客户端导航控制器处理。当活动任务仍在运行或状态不可用时，显式退出会提供继续后台运行、停止并退出或取消选项。更完整的恢复流程仍需在 Host 异常退出后根据已记录的事实报告 interrupted、failed 或 settled 状态，且不重放未经确认的工具调用。
 
-安全的桌面基础、持久 Task 总览和应用拥有的根任务 worktree 已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。[worktree 决策](../../implemented/feature/2026-09-09-application-owned-task-worktrees.md)记录默认隔离创建及其失败保证。完整审查工作区、子写入者整合、感知任务的托盘行为、更完整的 Mission Control UI、Harness Studio、签名和更新仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
+安全的桌面基础、持久 Task 总览、应用拥有的根任务 worktree、审查与交付工作区，以及感知任务的后台驻留已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。[worktree 决策](../../implemented/feature/2026-09-09-application-owned-task-worktrees.md)记录默认隔离创建及其失败保证。子写入者整合、Host 异常恢复、更完整的 Mission Control UI、Harness Studio、签名、更新和 macOS 分发仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
 
 ## 产品结构
 

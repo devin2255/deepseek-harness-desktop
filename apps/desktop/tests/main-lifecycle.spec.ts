@@ -69,6 +69,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly restore: Mock<DesktopWindow['restore']>
   readonly show: Mock<DesktopWindow['show']>
   readonly closeWindow: () => void
+  readonly destroyWindowWithoutCloseEvent: () => void
   readonly disposeClosed: Mock<() => void>
   readonly window: DesktopWindow
   readonly createWindow: DesktopMainDependencies['createWindow']
@@ -102,6 +103,8 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const show = vi.fn()
   const hide = vi.fn()
   const openSession = vi.fn((_sessionId: SessionId) => {})
+  let destroyed = false
+  const isDestroyed = vi.fn(() => destroyed)
   let closedListener: (() => void) | undefined
   const disposeClosed = vi.fn(() => {
     closedListener = undefined
@@ -109,6 +112,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const window: DesktopWindow = {
     focus,
     hide,
+    isDestroyed,
     isMinimized,
     openSession,
     onClosed(listener) {
@@ -187,9 +191,13 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     dependencies,
     harness,
     closeWindow() {
+      destroyed = true
       const listener = closedListener
       closedListener = undefined
       listener?.()
+    },
+    destroyWindowWithoutCloseEvent() {
+      destroyed = true
     },
     disposeClosed,
     focus,
@@ -969,6 +977,31 @@ describe('startDesktopMain', () => {
 
     expect(first.focus).not.toHaveBeenCalled()
     expect(first.restore).not.toHaveBeenCalled()
+    expect(createWindow).toHaveBeenCalledTimes(2)
+    expect(second.show).toHaveBeenCalledOnce()
+    expect(second.focus).toHaveBeenCalledOnce()
+  })
+
+  it('waits for delayed close cleanup before recreating a destroyed window', async () => {
+    const first = fixture()
+    const second = fixture()
+    const createWindow = vi.fn()
+      .mockResolvedValueOnce(first.window)
+      .mockResolvedValueOnce(second.window)
+    const setup = fixture({ createWindow })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    first.destroyWindowWithoutCloseEvent()
+    const actions = setup.createBackgroundPresence.mock.calls[0]?.[2]
+    if (actions === undefined) throw new Error('Expected background-presence actions')
+
+    await actions.openSession()
+
+    expect(first.show).not.toHaveBeenCalled()
+    expect(createWindow).toHaveBeenCalledOnce()
+    first.closeWindow()
+    await flushLifecycle()
+
     expect(createWindow).toHaveBeenCalledTimes(2)
     expect(second.show).toHaveBeenCalledOnce()
     expect(second.focus).toHaveBeenCalledOnce()

@@ -174,7 +174,17 @@ describe('desktop Electron acceptance', () => {
     // Electron reads appData through native shell folders on Windows, not APPDATA.
     const entry = join(temporaryRoot, 'isolated-entry.mjs')
     await writeFile(entry, [
-      "import { app } from 'electron'",
+      "import { app, dialog, Notification, Tray } from 'electron'",
+      "const nativeAcceptance = { dialogCalls: [], dialogResponses: [], notificationListeners: new Map(), notifications: [], tray: undefined, trayListeners: {}, trayToolTip: '' }",
+      'globalThis.__dshDesktopNativeAcceptance = nativeAcceptance',
+      'const trayOn = Tray.prototype.on',
+      'Tray.prototype.on = function (event, listener) { nativeAcceptance.tray = this; nativeAcceptance.trayListeners[event] = listener; return trayOn.call(this, event, listener) }',
+      'const setToolTip = Tray.prototype.setToolTip',
+      'Tray.prototype.setToolTip = function (value) { nativeAcceptance.tray = this; nativeAcceptance.trayToolTip = value; return setToolTip.call(this, value) }',
+      'const notificationOn = Notification.prototype.on',
+      'Notification.prototype.on = function (event, listener) { const listeners = nativeAcceptance.notificationListeners.get(this) ?? {}; listeners[event] = listener; nativeAcceptance.notificationListeners.set(this, listeners); return notificationOn.call(this, event, listener) }',
+      'Notification.prototype.show = function () { nativeAcceptance.notifications.push({ notification: this, listeners: nativeAcceptance.notificationListeners.get(this) ?? {}, title: this.title, body: this.body }) }',
+      "dialog.showMessageBox = async (...args) => { const options = args.at(-1); nativeAcceptance.dialogCalls.push(options); const response = nativeAcceptance.dialogResponses.shift(); if (response === undefined) throw new Error('desktop acceptance did not queue a quit decision'); return { response, checkboxChecked: false } }",
       `app.setPath('appData', ${JSON.stringify(environment.APPDATA)})`,
       `app.setPath('home', ${JSON.stringify(join(temporaryRoot, 'home'))})`,
       `await import(${JSON.stringify(pathToFileURL(join(DESKTOP_ROOT, 'lib', 'main.js')).href)})`,
@@ -201,8 +211,8 @@ describe('desktop Electron acceptance', () => {
       await writeFile(join(diagnostics, 'task-overview-startup.log'), log)
       throw error
     })
-    const page = mainWindow
-    if (page === undefined) throw new Error('The authorized desktop window did not open')
+    if (mainWindow === undefined) throw new Error('The authorized desktop window did not open')
+    let page: Page = mainWindow
     await page.waitForLoadState('load')
     await page.addInitScript({ content: HARNESS_SOCKET_PROBE })
     await page.reload({ waitUntil: 'load' })
@@ -211,7 +221,7 @@ describe('desktop Electron acceptance', () => {
     await expect.poll(async () => page.locator('#root').innerHTML(), { timeout: 10_000 })
       .not.toBe('')
 
-    const overview = page.getByRole('main', { name: /^(Tasks|任务)$/u })
+    let overview = page.getByRole('main', { name: /^(Tasks|任务)$/u })
     await overview.waitFor({ state: 'visible', timeout: 15_000 })
     const continueButton = page.getByRole('button', { name: /^(Continue|继续)$/u })
     await continueButton.click()
@@ -259,6 +269,54 @@ describe('desktop Electron acceptance', () => {
       { taskId: secondSession.sessionId, status: 'running' },
     ].sort((left, right) => left.taskId.localeCompare(right.taskId)))
     await expectBothWorkspacesRunning(overview)
+
+    await expect.poll(async () => (await nativeAcceptanceSnapshot(application!)).trayToolTip, { timeout: 15_000 })
+      .toMatch(/2 (?:tasks running|个任务运行中)/u)
+    await page.close()
+    await expect.poll(() => application?.windows().length, { timeout: 10_000 }).toBe(0)
+    await emitTrayClick(application)
+    let reopenedWindow: Page | undefined
+    await expect.poll(() => {
+      reopenedWindow = application?.windows().find(window => /^http:\/\/127\.0\.0\.1:\d+\//u.test(window.url()))
+      return reopenedWindow !== undefined
+    }, { timeout: 15_000 }).toBe(true).catch(async (error: unknown) => {
+      const native = await nativeAcceptanceSnapshot(application!)
+      const log = await readFile(join(environment.APPDATA!, 'DeepSeek Harness', 'logs', 'desktop.log'), 'utf8')
+      await writeFile(join(screenshots, 'task-tray-reopen.log'), `${JSON.stringify(native, null, 2)}\n${log}`)
+      throw error
+    })
+    if (reopenedWindow === undefined) throw new Error('Tray did not recreate the authorized desktop window')
+    page = reopenedWindow
+    await page.waitForLoadState('load')
+    await page.addInitScript({ content: HARNESS_SOCKET_PROBE })
+    await page.reload({ waitUntil: 'load' })
+    overview = page.getByRole('main', { name: /^(Tasks|任务)$/u })
+    if (!await overview.isVisible()) {
+      await page.getByRole('button', { name: /^(Tasks|任务)$/u }).click()
+    }
+    await overview.waitFor({ state: 'visible', timeout: 15_000 })
+    await expectBothWorkspacesRunning(overview).catch(async (error: unknown) => {
+      const projection = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+      await page.screenshot({ path: join(screenshots, 'task-tray-reopened.png') })
+      await writeFile(join(screenshots, 'task-tray-reopened.html'), await page.content())
+      await writeFile(join(screenshots, 'task-tray-reopened.json'), JSON.stringify({
+        native: await nativeAcceptanceSnapshot(application!),
+        projection,
+        overview: await overview.innerText(),
+      }, null, 2))
+      throw error
+    })
+
+    await requestQuitDecision(application, 2)
+    await expect.poll(() => harnessWindowVisible(application!), { timeout: 10_000 }).toBe(true)
+    await requestQuitDecision(application, 0)
+    await expect.poll(() => harnessWindowVisible(application!), { timeout: 10_000 }).toBe(false)
+    const hiddenProjection = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+    expect(hiddenProjection.tasks.filter(task => task.status === 'running').map(task => task.taskId))
+      .toEqual(expect.arrayContaining([firstSession.sessionId, secondSession.sessionId]))
+    await emitTrayClick(application)
+    await expect.poll(() => harnessWindowVisible(application!), { timeout: 10_000 }).toBe(true)
+    await overview.waitFor({ state: 'visible', timeout: 10_000 })
 
     const isolatedSource = join(temporaryRoot, 'isolated-source')
     await mkdir(isolatedSource)
@@ -563,11 +621,33 @@ describe('desktop Electron acceptance', () => {
     const reloadedNeedsYou = overview.getByRole('heading', { name: /^(Needs You|需要你处理)$/u }).locator('..')
     const reloadedChildQuestion = reloadedNeedsYou.getByRole('button', { name: DESCENDANT_QUESTION_NAME })
     await reloadedChildQuestion.waitFor({ state: 'visible', timeout: 20_000 })
-    await reloadedChildQuestion.click()
-    await overview.waitFor({ state: 'hidden' })
+    await page.evaluate(() => {
+      const target = globalThis as unknown as {
+        __dshObservedDesktopTarget?: string
+        deepseekDesktop: { onOpenSession(listener: (sessionId: string) => void): () => void }
+      }
+      target.deepseekDesktop.onOpenSession((sessionId) => { target.__dshObservedDesktopTarget = sessionId })
+    })
+    await expect.poll(async () => (await nativeAcceptanceSnapshot(application!)).notificationBodies, { timeout: 20_000 })
+      .toContain(DESCENDANT_QUESTION)
+    await emitNotificationClick(application, DESCENDANT_QUESTION)
+    await expect.poll(() => page.evaluate(() => (
+      globalThis as unknown as { __dshObservedDesktopTarget?: string }
+    ).__dshObservedDesktopTarget), { timeout: 10_000 }).toBe(afterAttention?.ownerSessionId)
+    await overview.waitFor({ state: 'hidden', timeout: 10_000 }).catch(async (error: unknown) => {
+      const diagnostics = {
+        native: await nativeAcceptanceSnapshot(application!),
+        overview: await overview.innerText(),
+        target: await page.evaluate(() => (
+          globalThis as unknown as { __dshObservedDesktopTarget?: string }
+        ).__dshObservedDesktopTarget),
+      }
+      const log = await readFile(join(environment.APPDATA!, 'DeepSeek Harness', 'logs', 'desktop.log'), 'utf8')
+      await writeFile(join(screenshots, 'task-notification-navigation.json'), JSON.stringify(diagnostics, null, 2))
+      await writeFile(join(screenshots, 'task-notification-navigation.log'), log)
+      throw error
+    })
     await page.getByText(DESCENDANT_QUESTION, { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
-
-    releaseProvider()
 
     const origin = new URL(page.url()).origin
     expect(origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u)
@@ -595,7 +675,7 @@ describe('desktop Electron acceptance', () => {
     const renderer = await inspectRenderer(page)
     expect(renderer.processType).toBe('undefined')
     expect(renderer.requireType).toBe('undefined')
-    expect(renderer.bridge).toEqual({ frozen: true, keys: ['platform'], platform: process.platform })
+    expect(renderer.bridge).toEqual({ frozen: true, keys: ['onOpenSession', 'platform'], platform: process.platform })
     expect(renderer.location).not.toContain(capability)
     expect(renderer.dom).not.toContain(capability)
     expect(renderer.globalStrings).not.toContain(capability)
@@ -604,8 +684,11 @@ describe('desktop Electron acceptance', () => {
     expect(JSON.stringify(renderer.bridge)).not.toContain(capability)
 
     const closing = application
-    await boundedClose(closing)
+    const closed = closing.waitForEvent('close')
+    await requestQuitDecision(closing, 1)
+    await closed
     application = undefined
+    releaseProvider()
   }, 120_000)
 })
 
@@ -865,7 +948,10 @@ async function inspectRenderer(page: Page): Promise<{
 }> {
   return page.evaluate(() => {
     const bridge = (globalThis as unknown as {
-      readonly deepseekDesktop: Readonly<{ readonly platform: string }>
+      readonly deepseekDesktop: Readonly<{
+        readonly platform: string
+        readonly onOpenSession: (listener: (sessionId: string) => void) => () => void
+      }>
     }).deepseekDesktop
     const globalStrings = Object.getOwnPropertyNames(globalThis).flatMap((key) => {
       const descriptor = Object.getOwnPropertyDescriptor(globalThis, key)
@@ -894,6 +980,86 @@ async function inspectRenderer(page: Page): Promise<{
   })
 }
 
+interface NativeAcceptanceSnapshot {
+  readonly dialogButtons: readonly (readonly string[])[]
+  readonly dialogCallCount: number
+  readonly notificationBodies: readonly string[]
+  readonly trayReady: boolean
+  readonly trayToolTip: string
+}
+
+async function nativeAcceptanceSnapshot(target: ElectronApplication): Promise<NativeAcceptanceSnapshot> {
+  return target.evaluate(() => {
+    const state = (globalThis as unknown as {
+      readonly __dshDesktopNativeAcceptance?: {
+        readonly dialogCalls: readonly { readonly buttons?: readonly string[] }[]
+        readonly notifications: readonly { readonly body: string }[]
+        readonly tray?: unknown
+        readonly trayToolTip: string
+      }
+    }).__dshDesktopNativeAcceptance
+    if (state === undefined) throw new Error('desktop native acceptance instrumentation is unavailable')
+    return {
+      dialogButtons: state.dialogCalls.map(call => call.buttons ?? []),
+      dialogCallCount: state.dialogCalls.length,
+      notificationBodies: state.notifications.map(notification => notification.body),
+      trayReady: state.tray !== undefined,
+      trayToolTip: state.trayToolTip,
+    }
+  })
+}
+
+async function emitTrayClick(target: ElectronApplication): Promise<void> {
+  await target.evaluate(() => {
+    const state = (globalThis as unknown as {
+      readonly __dshDesktopNativeAcceptance?: { readonly trayListeners: { readonly click?: () => void } }
+    }).__dshDesktopNativeAcceptance
+    if (state?.trayListeners.click === undefined) throw new Error('desktop tray click listener is unavailable')
+    state.trayListeners.click()
+  })
+}
+
+async function emitNotificationClick(target: ElectronApplication, body: string): Promise<void> {
+  await target.evaluate((_electron, expectedBody) => {
+    const state = (globalThis as unknown as {
+      readonly __dshDesktopNativeAcceptance?: {
+        readonly notifications: readonly { readonly body: string; readonly listeners: { readonly click?: () => void } }[]
+      }
+    }).__dshDesktopNativeAcceptance
+    const entry = state?.notifications.findLast(notification => notification.body === expectedBody)
+    if (entry === undefined) throw new Error(`desktop notification is unavailable: ${expectedBody}`)
+    if (entry.listeners.click === undefined) throw new Error(`desktop notification click listener is unavailable: ${expectedBody}`)
+    entry.listeners.click()
+  }, body)
+}
+
+async function requestQuitDecision(target: ElectronApplication, response: 0 | 1 | 2): Promise<void> {
+  const before = await nativeAcceptanceSnapshot(target)
+  await target.evaluate(({ app }, queuedResponse) => {
+    const state = (globalThis as unknown as {
+      readonly __dshDesktopNativeAcceptance?: { readonly dialogResponses: number[] }
+    }).__dshDesktopNativeAcceptance
+    if (state === undefined) throw new Error('desktop quit acceptance instrumentation is unavailable')
+    state.dialogResponses.push(queuedResponse)
+    app.quit()
+  }, response)
+  if (response === 1) return
+  await expect.poll(async () => (await nativeAcceptanceSnapshot(target)).dialogCallCount, { timeout: 10_000 })
+    .toBe(before.dialogCallCount + 1)
+  const after = await nativeAcceptanceSnapshot(target)
+  expect(after.dialogButtons.at(-1)).toEqual(expect.arrayContaining([
+    expect.stringMatching(/^(Continue in Background|继续后台运行)$/u),
+    expect.stringMatching(/^(Stop and Quit|停止并退出)$/u),
+    expect.stringMatching(/^(Cancel|取消)$/u),
+  ]))
+}
+
+async function harnessWindowVisible(target: ElectronApplication): Promise<boolean> {
+  return target.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => (
+    /^http:\/\/127\.0\.0\.1:\d+\//u.test(window.webContents.getURL()) && window.isVisible()
+  )))
+}
+
 async function isolatedEnvironment(root: string): Promise<Record<string, string>> {
   const environment = Object.fromEntries(Object.entries(process.env).flatMap(([key, value]) => {
     return value === undefined || SENSITIVE_ENVIRONMENT_KEY.test(key) ? [] : [[key, value]]
@@ -916,6 +1082,13 @@ async function isolatedEnvironment(root: string): Promise<Record<string, string>
 async function boundedClose(target: ElectronApplication): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
+    await target.evaluate(({ app }) => {
+      const state = (globalThis as unknown as {
+        readonly __dshDesktopNativeAcceptance?: { readonly dialogResponses: number[] }
+      }).__dshDesktopNativeAcceptance
+      state?.dialogResponses.push(1)
+      app.quit()
+    }).catch(() => {})
     await Promise.race([
       target.close(),
       new Promise<never>((_resolve, reject) => {

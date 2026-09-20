@@ -284,7 +284,8 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       }
       if (shutdownRequested()) return
       if (decision === 'continue-background') {
-        activeWindow?.hide()
+        const window = activeWindow
+        if (window !== undefined && !window.isDestroyed()) window.hide()
       } else if (decision === 'stop-and-quit') {
         await quitAfterCleanup()
       }
@@ -370,11 +371,19 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       }
       const handle = currentAttempt?.handle
       if (handle === undefined) return
+      const retainedWindow = activeWindow
+      // The closed event disposes the old partition authorization before a replacement may own it.
+      if (retainedWindow?.isDestroyed()) return
       const window = activeWindow ?? await createHarnessWindow(handle)
       if (shutdownRequested() || activeWindow !== window) return
       const target = pendingSessionTarget
-      focusWindow(window)
-      if (target !== undefined) window.openSession(target)
+      try {
+        focusWindow(window)
+        if (target !== undefined) window.openSession(target)
+      } catch (error: unknown) {
+        if (!window.isDestroyed()) throw error
+        return
+      }
       if (pendingSessionTarget === target) pendingSessionTarget = undefined
       pendingWindowOpen = pendingSessionTarget !== undefined
     }
@@ -386,6 +395,16 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       if (activeWindow !== window) return
       activeWindow = undefined
       disposeActiveWindowClosed = undefined
+      if (pendingWindowOpen && !shutdownRequested()) {
+        const inFlight = windowFocusRequest
+        const resume = (): void => {
+          if (pendingWindowOpen && !shutdownRequested()) {
+            void openLiveSession().catch((error: unknown) => { report('callback', error) })
+          }
+        }
+        if (inFlight === undefined) resume()
+        else void inFlight.then(resume, resume)
+      }
     })
   }
   function releaseActiveWindowClosed(): void {

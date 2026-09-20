@@ -43,6 +43,8 @@ export interface NavigationDetails {
 
 /** Native-window lifecycle controls returned after desktop startup succeeds. */
 export interface DesktopWindow {
+  /** Whether Electron has already destroyed this native window. */
+  isDestroyed(): boolean
   /** Whether the native window is minimized. */
   isMinimized(): boolean
   /** Restore a minimized native window. */
@@ -157,6 +159,7 @@ export async function createDesktopWindow(
     await desktopWindow.loadURL(endpoint.href)
     const loadedWindow = desktopWindow
     return {
+      isDestroyed: () => loadedWindow.isDestroyed(),
       focus: () => {
         loadedWindow.focus()
       },

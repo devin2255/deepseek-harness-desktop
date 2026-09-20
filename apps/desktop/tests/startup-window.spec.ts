@@ -106,6 +106,7 @@ describe('createStartupWindow', () => {
     const desktop = {
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
       hide: vi.fn(),
+      isDestroyed: () => false,
       isMinimized: () => false,
       onClosed: () => () => {},
       openSession: vi.fn(),
@@ -125,6 +126,7 @@ describe('createStartupWindow', () => {
     const desktop = {
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
       hide: vi.fn(),
+      isDestroyed: () => false,
       isMinimized: () => false,
       onClosed: () => () => {},
       openSession: vi.fn(),
@@ -148,6 +150,7 @@ describe('createStartupWindow', () => {
     const desktop = {
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
       hide: vi.fn(),
+      isDestroyed: () => false,
       isMinimized: () => false,
       onClosed: () => () => {},
       openSession: vi.fn(),

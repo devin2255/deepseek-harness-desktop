@@ -19,9 +19,15 @@ pnpm --filter @deepseek-ai/dsh-desktop start
 
 ## Runtime Lifecycle
 
-Main enables Chromium's sandbox before readiness and acquires Electron's single-instance lock. After `app.whenReady()`, the owning instance creates the local startup window, starts exactly one Harness with the `desktop` profile on a random loopback port, and hands off to the authorized main window only after authenticated readiness. Native close clears Main's window ownership so later events never call a stale handle. A second launch restores and focuses a live window without starting another Harness; on macOS, it recreates and focuses a closed window with the existing Harness authority.
+Main enables Chromium's sandbox before readiness and acquires Electron's single-instance lock. After `app.whenReady()`, the owning instance creates the local startup window, starts exactly one Harness with the `desktop` profile on a random loopback port, and hands off to the authorized main window only after authenticated readiness. Native close releases the old window's isolated-session authorization before a tray action or second launch recreates and focuses a window with the existing Harness authority; it never starts another Harness.
 
-The first explicit quit aborts pending Harness startup, waits for startup ownership to settle, stops a ready Harness once, and then repeats `app.quit()` under a latch. A shutdown failure is reported but cannot prevent the final quit. Closing the last window quits on Windows and Linux; on macOS, activation recreates a missing window with the existing Harness authority.
+Closing the last window leaves Harness and native background presence running on every desktop platform. An explicit quit with no active Task performs bounded cleanup immediately. Running Tasks or unavailable activity open a native choice: continue in the background hides the current window, stop and quit disposes background presence before stopping Harness, and cancel changes nothing. Concurrent quit requests share one decision. Installer replacement and startup-recovery exit bypass this prompt but retain bounded cleanup. A shutdown failure is reported but cannot prevent the final quit.
+
+## Background tasks and notifications
+
+Electron Main polls authenticated `task.list` and `session.list` projections in serialized two-second intervals with a separate ten-second request timeout. The first live baseline is silent. Later values update one tray summary with active Task, Agent, and attention counts; a failed request marks freshness unavailable, retains the last counts, and retries without overlapping requests. Main stores only detached presentation values, never another durable Task record.
+
+New actionable attention, failed transitions, and transitions from a running tree to ready or settled state create native notifications. Clicking a notification restores or recreates the authorized window and opens its exact owner Session, including a subagent. Main sends only a non-blank bounded Session id over the named one-way preload event; the client waits for its authoritative catalogs and uses the same Task navigation controller as an overview click. A missing target opens Tasks with a readable error, and a later successful or superseding navigation clears it.
 
 ## Security
 
@@ -29,7 +35,7 @@ The installer close helper uses the same Electron user-data directory as ordinar
 
 - Main generates a 32-byte per-launch capability and passes it only to the Harness process and the isolated Electron session. The session adds `Authorization: Bearer <capability>` only for the exact settled HTTP and WebSocket origin and only for the owned renderer.
 - The capability is absent from renderer and preload APIs, URLs, DOM state, Web storage, logs, settings, and Session events. Direct loopback clients without the header receive `401`.
-- The renderer runs with `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, and `webSecurity: true`. Its frozen preload bridge exposes only `deepseekDesktop.platform`; it exposes no generic IPC, process, filesystem, shell, environment, or capability access.
+- The renderer runs with `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, and `webSecurity: true`. Its frozen preload bridge exposes only `deepseekDesktop.platform` and `onOpenSession(listener)` over the validated Main-owned event; it exposes no generic IPC, process, filesystem, shell, environment, or capability access.
 - Navigation and redirects stay on the settled origin, every new-window request is denied, and renderer permission checks and requests deny by default.
 
 ## Failures
@@ -82,8 +88,7 @@ The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) 
 
 ## Known Limitations
 
-- **Installer qualification** — Windows lifecycle qualification is required before distribution; unsigned local builds can trigger SmartScreen. Automatic updates are not implemented.
-- **Foreground window lifecycle** — there is no tray persistence or task-aware background policy; closing the last window exits on Windows and Linux.
+- **Installer qualification** — Windows lifecycle qualification is required before distribution; unsigned local builds can trigger SmartScreen. Automatic updates and macOS packaging, signing, and notarization are not implemented.
 - **Task integration** — task overview, root-task worktree isolation, review, Commit, conflict-safe Apply, and recoverability-aware Discard are available. Child-writer worktrees, automatic reconciliation between concurrent writers, Task archival, and Harness Studio are not implemented.
-- **Native integration** — deep links, native notifications, external-link handling, and persisted window placement are not implemented.
+- **Native integration** — task-aware tray presence and completion or attention notifications are available. Deep links, external-link handling, and persisted window placement are not implemented.
 - **Crash recovery** — Main reports startup and shutdown failures but does not yet present task-aware recovery or restart the Harness after an abnormal runtime exit.
