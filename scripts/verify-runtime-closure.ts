@@ -111,7 +111,7 @@ async function configuredWorkspacePackages(
 ): Promise<string[]> {
   const expression = new yaml.Type('tag:yaml.org,2002:js', {
     kind: 'scalar',
-    construct: data => data,
+    construct: (data: unknown): unknown => data,
   })
   const document: unknown = yaml.load(await readFile(resolve(root, configPath), 'utf8'), {
     schema: yaml.JSON_SCHEMA.extend(expression),
