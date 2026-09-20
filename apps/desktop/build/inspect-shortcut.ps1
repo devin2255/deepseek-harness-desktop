@@ -3,6 +3,15 @@ $ErrorActionPreference = 'Stop'
 $shell = $null
 $shortcut = $null
 $status = 2
+
+function Resolve-DshPathIdentity([string] $path) {
+  $fullPath = [IO.Path]::GetFullPath($path)
+  if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+    return (Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop).FullName
+  }
+  return $fullPath
+}
+
 try {
   $shortcutPath = $env:DSH_INSTALLER_SHORTCUT
   $targetPaths = @($env:DSH_INSTALLER_OLD_TARGET_EXE, $env:DSH_INSTALLER_NEW_TARGET_EXE) |
@@ -14,8 +23,9 @@ try {
   } else {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcutTarget = Resolve-DshPathIdentity $shortcut.TargetPath
     $owned = @($targetPaths | Where-Object {
-      [String]::Equals($shortcut.TargetPath, $_, [StringComparison]::OrdinalIgnoreCase)
+      [String]::Equals($shortcutTarget, (Resolve-DshPathIdentity $_), [StringComparison]::OrdinalIgnoreCase)
     }).Count -gt 0
     $status = $(if ($owned) { 0 } else { 11 })
   }

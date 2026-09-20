@@ -231,9 +231,7 @@ async function removeGeneratedFallbackLinks(productRoot: string, packageRoots: r
       throw new Error('Uninstall cleanup refuses an unsafe fallback package root')
     }
     await assertOrdinaryDirectoryChain(resolvedRoot)
-    const canonicalRoot = await realpath(resolvedRoot)
-    if (canonicalRoot !== resolvedRoot) throw new Error('Uninstall cleanup refuses a redirected fallback package root')
-    return canonicalRoot
+    return realpath(resolvedRoot)
   }))
   for (const link of links) {
     const relativeLink = relative(fallbackRoot, link)

@@ -1,7 +1,7 @@
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { lstat, open, rmdir, unlink, utimes, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, parse, sep } from 'node:path'
+import { dirname, join, parse, sep, toNamespacedPath } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   isUninstallCleanupInvocation,
@@ -539,6 +539,23 @@ describe('runUninstallCleanup', () => {
     symlinkSync(runtimePackage, join(fallback, 'package'), process.platform === 'win32' ? 'junction' : 'dir')
 
     await expect(invoke(appData, undefined, TOKEN, [runtimeRoot])).resolves.toBe(true)
+
+    expect(() => lstatSync(product)).toThrow()
+    expect(readFileSync(join(runtimePackage, 'sentinel.txt'), 'utf8')).toBe('keep')
+  })
+
+  it.runIf(process.platform === 'win32')('accepts an ordinary fallback root through an equivalent Windows namespace spelling', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-fallback-namespace-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const fallback = join(product, 'Harness', 'profiles', 'node_modules', '@scope')
+    const runtimeRoot = mkdtempSync(join(tmpdir(), 'dsh-cleanup-runtime-namespace-'))
+    const runtimePackage = join(runtimeRoot, 'package')
+    mkdirSync(fallback, { recursive: true })
+    mkdirSync(runtimePackage)
+    writeFileSync(join(runtimePackage, 'sentinel.txt'), 'keep')
+    symlinkSync(runtimePackage, join(fallback, 'package'), 'junction')
+
+    await expect(invoke(appData, undefined, TOKEN, [toNamespacedPath(runtimeRoot)])).resolves.toBe(true)
 
     expect(() => lstatSync(product)).toThrow()
     expect(readFileSync(join(runtimePackage, 'sentinel.txt'), 'utf8')).toBe('keep')

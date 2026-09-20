@@ -121,7 +121,7 @@ describe('desktop production staging', () => {
     )
 
     await expect(resolveBundleManifest('@deepseek-ai/dsh-base', join(logicalDsh, 'package.json'), stage))
-      .resolves.toBe(join(bundle, 'package.json'))
+      .resolves.toBe(realpathSync(join(bundle, 'package.json')))
   })
 
   it('rejects a bundle manifest resolved only from ancestor node_modules', async () => {

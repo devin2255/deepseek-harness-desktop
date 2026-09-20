@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -97,6 +98,22 @@ async function queryInstalledProcess(target: string): Promise<string> {
   return runRestrictedCommand(powerShellCommands.QUERY_INSTALLED_PROCESS, {
     ...process.env, DSH_INSTALLER_TARGET_EXE: target,
   })
+}
+
+async function shortWindowsPath(path: string): Promise<string> {
+  const result = await execFileAsync('cmd.exe', ['/d', '/c', `for %I in ("${path}") do @echo %~sI`], {
+    windowsVerbatimArguments: true,
+  })
+  const shortPath = result.stdout.trim()
+  if (shortPath === '') throw new Error(`Windows did not return a short path for ${path}`)
+  return shortPath
+}
+
+async function gitInstallationRoot(): Promise<string> {
+  const { stdout } = await execFileAsync('where.exe', ['git.exe'])
+  const git = stdout.split(/\r?\n/u).find(path => path.trim() !== '')?.trim()
+  if (git === undefined) throw new Error('Git is unavailable')
+  return dirname(dirname(git))
 }
 
 async function inspectShortcut(shortcut: string, target: string): Promise<number> {
@@ -338,6 +355,12 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       await expect(inspectShortcut(join(directory, 'missing.lnk'), target)).resolves.toBe(10)
       await expect(inspectShortcut(shortcut, '')).resolves.toBe(2)
       await expect(inspectShortcut('relative.lnk', target)).resolves.toBe(2)
+      const gitBash = join(await gitInstallationRoot(), 'bin', 'bash.exe')
+      const shortGitBash = await shortWindowsPath(gitBash)
+      await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
+        env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: gitBash },
+      })
+      await expect(inspectShortcut(shortcut, shortGitBash)).resolves.toBe(0)
       const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
       const newTarget = target
       for (const [target, expected] of [[oldTarget, 0], [newTarget, 0], [foreignTarget, 11]] as const) {
@@ -348,6 +371,27 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       }
     } finally {
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('finds a running executable through its equivalent Windows short path', { timeout: 20_000 }, async () => {
+    const bash = join(await gitInstallationRoot(), 'bin', 'bash.exe')
+    const shortBash = await shortWindowsPath(bash)
+    const child = spawn(bash, ['-c', 'sleep 30'], { stdio: 'ignore', windowsHide: true })
+    await once(child, 'spawn')
+    try {
+      let state = 'stopped'
+      const deadline = Date.now() + 5_000
+      while (state !== 'running' && Date.now() < deadline) {
+        state = await queryInstalledProcess(shortBash)
+        if (state !== 'running') await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      expect(state).toBe('running')
+    } finally {
+      if (child.exitCode === null) {
+        child.kill()
+        await once(child, 'exit')
+      }
     }
   })
 
