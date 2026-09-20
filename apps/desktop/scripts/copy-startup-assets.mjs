@@ -1,6 +1,3 @@
-import { copyFile } from 'node:fs/promises'
+import { copyBuiltAssets } from './built-asset-copy.mjs'
 
-await Promise.all([
-  copyFile(new URL('../src/startup.html', import.meta.url), new URL('../lib/startup.html', import.meta.url)),
-  copyFile(new URL('../src/startup.css', import.meta.url), new URL('../lib/startup.css', import.meta.url)),
-])
+await copyBuiltAssets(new URL('../', import.meta.url))

@@ -16,7 +16,9 @@
     "lib/*.js",
     "lib/*.cjs",
     "lib/*.html",
-    "lib/*.css"
+    "lib/*.css",
+    "lib/*.ico",
+    "lib/*.png"
   ],
   "scripts": {
     "build": "node scripts/clean-built-assets.mjs && tsc -b && tsdown && node scripts/copy-startup-assets.mjs && node scripts/verify-built-assets.mjs",

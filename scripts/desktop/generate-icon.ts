@@ -1,4 +1,4 @@
-/** Reproduce the Windows icon from the website's canonical SVG mark. */
+/** Reproduce desktop application and native tray art from the canonical SVG mark. */
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -36,4 +36,15 @@ for (const [index, image] of images.entries()) {
   image.copy(icon, offset)
   offset += image.length
 }
-await writeFile(join(REPOSITORY_ROOT, 'apps/desktop/build/icon.ico'), icon)
+const templateSource = Buffer.from(source.toString('utf8').replaceAll('#4D6BFE', '#000000'))
+const [template, templateRetina] = await Promise.all([
+  sharp(templateSource).resize(16, 16).png({ compressionLevel: 9 }).toBuffer(),
+  sharp(templateSource).resize(32, 32).png({ compressionLevel: 9 }).toBuffer(),
+])
+const buildRoot = join(REPOSITORY_ROOT, 'apps/desktop/build')
+await Promise.all([
+  writeFile(join(buildRoot, 'icon.ico'), icon),
+  writeFile(join(buildRoot, 'tray.ico'), icon),
+  writeFile(join(buildRoot, 'trayTemplate.png'), template),
+  writeFile(join(buildRoot, 'trayTemplate@2x.png'), templateRetina),
+])

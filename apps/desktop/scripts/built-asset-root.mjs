@@ -1,8 +1,16 @@
 import { lstat, unlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const generatedAssets = ['startup-preload.cjs', 'startup-renderer.js', 'startup.html', 'startup.css']
+const generatedAssets = [
+  'startup-preload.cjs',
+  'startup-renderer.js',
+  'startup.html',
+  'startup.css',
+  'tray.ico',
+  'trayTemplate.png',
+  'trayTemplate@2x.png',
+]
 
 /**
  * Guard and remove generated startup assets below one trusted desktop source root.
@@ -71,6 +79,42 @@ async function resolveGuardedAssetRoot(desktopRoot, allowMissingLib) {
     throw error
   }
   return paths
+}
+
+/**
+ * Resolve the protected directories required by a built-asset copy.
+ * @param {URL} desktopRoot - Trusted file URL for the desktop package directory.
+ * @returns {Promise<{ desktop: string, lib: string }>} Ordinary desktop and lib directories.
+ * @throws {Error} When the URL is not local or either directory is absent, linked, or not a directory.
+ */
+export async function resolveBuiltAssetCopyRoot(desktopRoot) {
+  return resolveGuardedAssetRoot(desktopRoot, false)
+}
+
+/**
+ * Recheck protected directories and resolve one absent or ordinary-file write target.
+ * @param {{ desktop: string, lib: string }} paths - Previously guarded desktop paths.
+ * @param {string} name - Fixed direct child name below the lib directory.
+ * @returns {Promise<string>} Absolute destination path after the current filesystem checks.
+ * @throws {Error} When the name is not a direct child or a protected path is linked or has the wrong type.
+ */
+export async function resolveBuiltAssetWriteTarget(paths, name) {
+  if (name.length === 0 || basename(name) !== name) {
+    throw new Error(`Desktop build asset name must be a direct child: ${name}`)
+  }
+  await assertGuardedAssetRoot(paths)
+  const target = join(paths.lib, name)
+  let metadata
+  try {
+    metadata = await lstat(target)
+  } catch (error) {
+    if (isMissing(error)) return target
+    throw error
+  }
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`Desktop build asset write target must be an ordinary file: ${name}`)
+  }
+  return target
 }
 
 /** Recheck both owned directories immediately before each asset operation. */
