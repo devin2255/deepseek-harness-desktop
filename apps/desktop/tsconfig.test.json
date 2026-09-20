@@ -10,5 +10,16 @@
   "include": [
     "src/**/*.ts",
     "tests/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/core/session"
+    },
+    {
+      "path": "../../packages/host/apiproxy"
+    },
+    {
+      "path": "../../packages/task/task"
+    }
   ]
 }
