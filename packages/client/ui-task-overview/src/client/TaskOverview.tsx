@@ -51,13 +51,15 @@ function attentionOwnerTitle(entry: TaskRow['attention'][number], attention: Tas
 
 /** Overview page with task groups and metadata health. */
 export function TaskOverview({
-  useSessions, useWorkspaces, useTasks, useHostDescription, openTask, openReview, startTask, refresh, t,
+  useSessions, useWorkspaces, useTasks, useHostDescription, useDesktopNavigationFailure,
+  openTask, openReview, startTask, refresh, t,
 }: TaskOverviewProps) {
   const sessions = useSessions(value => value)
   const workspaces = useWorkspaces(value => value)
   const useTaskProjection = useTasks ?? useAbsentTasks
   const tasks = useTaskProjection(value => value)
   const connected = useHostDescription(value => value !== undefined)
+  const desktopNavigationFailure = useDesktopNavigationFailure(value => value)
   const taskRows = useMemo(
     () => tasks === undefined ? undefined : selectTasks(tasks, sessions, workspaces),
     [sessions, tasks, workspaces],
@@ -163,8 +165,10 @@ export function TaskOverview({
               onClick={() => { start(recovery.workspaceId, 'direct') }}>{t('useDirect')}</button>
           </div>
         </div>}
-        {recovery === undefined && (failure !== undefined || requestErrors.length > 0) &&
-          <div role="alert" className={css.error}>{[failure, ...requestErrors].filter(Boolean).join('\n')}</div>}
+        {recovery === undefined && (failure !== undefined || desktopNavigationFailure !== undefined || requestErrors.length > 0) &&
+          <div role="alert" className={css.error}>
+            {[failure, desktopNavigationFailure, ...requestErrors].filter(Boolean).join('\n')}
+          </div>}
         {synchronized && rowCount === 0 && <p className={css.empty}>{t('empty')}</p>}
         {(['needs-you', 'running', 'other'] as const).map((group) => {
           const groupedTasks = taskRows?.filter(row => row.group === group) ?? []

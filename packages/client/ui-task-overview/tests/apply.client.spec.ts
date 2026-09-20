@@ -9,14 +9,14 @@ async function bench() {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
-  const sessions = { refresh: vi.fn(async () => {}), open: vi.fn(), list: { getSnapshot: () => ({ state: 'idle', byId: { root: { id: 'root' }, child: { id: 'child', origin: 'subagent', parentId: 'root' } }, subagentsByParent: {} }) }, subagentAddress: vi.fn(), refreshSubagents: vi.fn(async () => {}), openSubagent: vi.fn() }
+  const sessions = { refresh: vi.fn(async () => {}), open: vi.fn(), list: { getSnapshot: () => ({ state: 'idle', phase: 'ready', byId: { root: { id: 'root' }, child: { id: 'child', origin: 'subagent', parentId: 'root' } }, subagentsByParent: {} }), subscribe: vi.fn(() => () => {}) }, subagentAddress: vi.fn(), refreshSubagents: vi.fn(async () => {}), openSubagent: vi.fn() }
   const workspaces = {
     refresh: vi.fn(async () => {}), startSession: vi.fn(), connectWorkspace: vi.fn(async () => 'isolated'),
     list: { getSnapshot: () => ({ state: 'idle' }) },
   }
   const tasks = { refresh: vi.fn(async () => {}), openReview: vi.fn(async () => {}), list: { getSnapshot: () => ({ state: 'idle' }) } }
   const layout = { showHome: vi.fn(), showConversation: vi.fn(), showReview: vi.fn() }
-  const hostDescription = { getSnapshot: () => ({}), subscribe: () => () => {} }
+  const hostDescription = { getSnapshot: () => ({}), subscribe: vi.fn(() => () => {}) }
   const locale = new LocaleRuntime(ctx)
   ctx.provide('sessions', sessions as never)
   ctx.provide('workspaces', workspaces as never)
@@ -29,7 +29,49 @@ async function bench() {
   return { ctx, slots, sessions, workspaces, tasks, layout, hostDescription, locale, declare, face }
 }
 
+function installDesktopBridge(
+  onOpenSession: (listener: (sessionId: never) => void) => () => void,
+): () => void {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'deepseekDesktop')
+  Object.defineProperty(globalThis, 'deepseekDesktop', {
+    configurable: true,
+    value: { onOpenSession },
+  })
+  return () => {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'deepseekDesktop')
+    else Object.defineProperty(globalThis, 'deepseekDesktop', original)
+  }
+}
+
 describe('overview composition', () => {
+  it('consumes an early desktop target, presents failure on Home, and disposes the bridge listener', async () => {
+    let listener: ((sessionId: never) => void) | undefined
+    const release = vi.fn(() => { listener = undefined })
+    const restore = installDesktopBridge((next) => {
+      listener = next
+      next('root' as never)
+      return release
+    })
+    try {
+      const b = await bench()
+      b.declare()
+      const fiber = b.ctx.plugin({ inject, apply })
+      await fiber.await()
+      await vi.waitFor(() => { expect(b.sessions.open).toHaveBeenCalledWith('root') })
+
+      listener?.('missing' as never)
+      await vi.waitFor(() => { expect(b.layout.showHome).toHaveBeenCalledOnce() })
+      expect(b.face().hooks.desktopNavigationFailure.getSnapshot()).toContain('no longer available')
+      listener?.('root' as never)
+      expect(b.face().hooks.desktopNavigationFailure.getSnapshot()).toBeUndefined()
+      await fiber.dispose()
+      expect(release).toHaveBeenCalledOnce()
+      expect(listener).toBeUndefined()
+    } finally {
+      restore()
+    }
+  })
+
   it.each(['home', 'conversation', 'review'] as const)('abandons child lookup after explicit navigation to %s', async (page) => {
     const b = await bench()
     b.declare()

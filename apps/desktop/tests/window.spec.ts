@@ -166,6 +166,7 @@ describe('createDesktopWindow', () => {
     actual.show()
     actual.hide()
     actual.openSession('target-session' as SessionId)
+    expect(() => { actual.openSession('' as SessionId) }).toThrow('non-blank and bounded')
     actual.focus()
     expect(fixture.steps).toContain('restore')
     expect(fixture.steps).toContain('show')

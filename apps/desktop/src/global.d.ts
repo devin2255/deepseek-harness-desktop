@@ -1,10 +1,13 @@
 /** Renderer-visible declarations for the isolated desktop preload bridge. */
+type DesktopSessionId = import('@deepseek-ai/dsh-session/types').SessionId
 
 interface Window {
   /** Immutable desktop metadata exposed through Electron context isolation. */
   readonly deepseekDesktop: Readonly<{
     /** Operating-system platform name reported by the sandboxed preload. */
     readonly platform: string
+    /** Subscribe to validated Main-owned Session targets and return an idempotent disposer. */
+    readonly onOpenSession: (listener: (sessionId: DesktopSessionId) => void) => () => void
   }>
   /** Immutable startup recovery operations exposed through context isolation. */
   readonly deepseekStartup: Readonly<{

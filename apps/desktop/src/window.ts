@@ -4,7 +4,7 @@ import { BrowserWindow } from 'electron'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { fileURLToPath } from 'node:url'
 import { configureAuthorizedSession, DESKTOP_SESSION_PARTITION, type AuthorizedSession } from './authorized-session.ts'
-import { DESKTOP_OPEN_SESSION_CHANNEL } from './desktop-ipc.ts'
+import { DESKTOP_OPEN_SESSION_CHANNEL, parseDesktopSessionId } from './desktop-ipc.ts'
 
 /** BrowserWindow options owned by the desktop shell. */
 export interface DesktopWindowOptions {
@@ -165,7 +165,9 @@ export async function createDesktopWindow(
         loadedWindow.hide()
       },
       openSession: (sessionId) => {
-        loadedWindow.webContents.send(DESKTOP_OPEN_SESSION_CHANNEL, sessionId)
+        const target = parseDesktopSessionId(sessionId)
+        if (target === undefined) throw new Error('Desktop Session navigation target must be non-blank and bounded')
+        loadedWindow.webContents.send(DESKTOP_OPEN_SESSION_CHANNEL, target)
       },
       onClosed(listener) {
         let listening = true

@@ -1,10 +1,12 @@
 /** Desktop overview composition; all business state comes from the runtime. */
-import type { ClientContext, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, ObservableSnapshot, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConnectionHandle, HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { en, zh, type TaskOverviewKey } from './locales.ts'
+import { createDesktopNavigation, resolveDesktopNavigationBridge } from './desktop-navigation.ts'
+import { disposeTogether, subscribeTogether } from './lifecycle.ts'
 import { createTaskNavigation } from './navigation.ts'
 import { TaskOverview } from './TaskOverview.tsx'
 import { TasksAction } from './TasksAction.tsx'
@@ -22,7 +24,10 @@ export type OverviewInjected = {
   openReview(id: SessionId): Promise<void>
   startTask(workspaceId: WorkspaceId | undefined, isolation: 'direct' | 'worktree'): Promise<void>
   refresh(): Promise<void>
-  hooks: { hostDescription: HostDescriptionSource }
+  hooks: {
+    hostDescription: HostDescriptionSource
+    desktopNavigationFailure: ObservableSnapshot<string | undefined>
+  }
 }
 
 /** Services consumed by the desktop overview. */
@@ -37,7 +42,27 @@ export function apply(ctx: ClientContext): void {
   const tasks = ctx.get('tasks')
   const navigation = createTaskNavigation(ctx.sessions, ctx.layout)
   const lifetime = new AbortController()
-  ctx.effect(() => () => { lifetime.abort(); navigation.dispose() }, 'ui-task-overview: navigation lifetime')
+  const desktopNavigation = createDesktopNavigation({
+    bridge: resolveDesktopNavigationBridge(),
+    readiness: {
+      isReady: () => {
+        const sessions = ctx.sessions.list.getSnapshot()
+        return connection.hostDescription.getSnapshot() !== undefined
+          && sessions.phase === 'ready' && sessions.state !== 'loading'
+      },
+      subscribe: listener => subscribeTogether([
+        () => connection.hostDescription.subscribe(listener),
+        () => ctx.sessions.list.subscribe(listener),
+      ], 'Desktop navigation readiness disposal failed'),
+    },
+    navigate: id => navigation.open(id),
+    showHome: () => { ctx.layout.showHome() },
+  })
+  ctx.effect(() => disposeTogether([
+    () => { lifetime.abort() },
+    () => { desktopNavigation.dispose() },
+    () => { navigation.dispose() },
+  ], 'Task overview navigation disposal failed'), 'ui-task-overview: navigation lifetime')
   ctx.on('layout/navigate', () => { navigation.cancel() })
   ctx.effect(() => ctx.locale.register('taskOverview', { zh, en }), 'ui-task-overview: dictionaries')
   const ready = () => !lifetime.signal.aborted
@@ -46,9 +71,10 @@ export function apply(ctx: ClientContext): void {
     && ctx.workspaces.list.getSnapshot().state !== 'loading'
     && tasks?.list.getSnapshot().state !== 'loading'
   const injected = (): OverviewInjected => ({
-    openTask: id => navigation.open(id),
+    openTask: (id) => { desktopNavigation.supersede(); return navigation.open(id) },
     openReview: async (id) => {
       if (!ready() || tasks === undefined) return
+      desktopNavigation.supersede()
       navigation.cancel()
       await tasks.openReview(id)
       if (lifetime.signal.aborted) return
@@ -56,6 +82,7 @@ export function apply(ctx: ClientContext): void {
     },
     startTask: async (workspaceId, isolation) => {
       if (!ready()) return
+      desktopNavigation.supersede()
       navigation.cancel()
       if (workspaceId === undefined) {
         ctx.workspaces.startSession()
@@ -73,7 +100,10 @@ export function apply(ctx: ClientContext): void {
         ctx.sessions.refresh(), ctx.workspaces.refresh(), ...(tasks === undefined ? [] : [tasks.refresh()]),
       ])
     },
-    hooks: { hostDescription: connection.hostDescription },
+    hooks: {
+      hostDescription: connection.hostDescription,
+      desktopNavigationFailure: desktopNavigation.failure,
+    },
   })
   ctx.slots.inject('shell.home', () => ctx.slots.register({
     name: 'shell.home', locale: 'taskOverview', inject: injected,

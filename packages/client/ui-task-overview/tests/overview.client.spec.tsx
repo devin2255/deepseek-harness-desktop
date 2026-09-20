@@ -50,12 +50,22 @@ function props(): TaskOverviewProps {
     useSessions: selector => selector(list), useWorkspaces: selector => selector(workspaces),
     useTasks: selector => selector(tasks),
     useHostDescription: selector => selector({} as never),
+    useDesktopNavigationFailure: selector => selector(undefined),
     openTask: vi.fn(async () => {}), openReview: vi.fn(async () => {}),
     startTask: vi.fn(async () => {}), refresh: vi.fn(async () => {}), t,
   }
 }
 
 describe('TaskOverview', () => {
+  it('renders a desktop notification navigation failure in the overview alert', () => {
+    const p = props()
+    p.useDesktopNavigationFailure = selector => selector('Notification target is unavailable')
+
+    const view = render(<TaskOverview {...p} />)
+
+    expect(view.getByRole('alert').textContent).toContain('Notification target is unavailable')
+  })
+
   it('renders durable outcome, readiness, freshness, and every attention owner', async () => {
     const p = props()
     const view = render(<TaskOverview {...p} />)
