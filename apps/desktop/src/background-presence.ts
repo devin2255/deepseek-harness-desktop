@@ -64,6 +64,8 @@ export interface BackgroundPresenceOptions {
 
 /** Owned native resources and authoritative Task observer. */
 export interface BackgroundPresence {
+  /** Return the latest detached observer value, initially unavailable until the first poll. */
+  currentState(): TaskObserverState
   /** Stop all callbacks and release each native resource exactly once. */
   dispose(): Promise<void>
 }
@@ -129,6 +131,13 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
   let observer: TaskObserver
   let disposal: Promise<void> | undefined
   let openSessionFlight: Promise<void> | undefined
+  let currentState: TaskObserverState = Object.freeze({
+    activeTaskCount: 0,
+    activeAgentCount: 0,
+    attentionCount: 0,
+    notifications: Object.freeze([]),
+    freshness: 'unavailable',
+  })
 
   function reportFailure(error: unknown): void {
     if (disposed) return
@@ -178,6 +187,7 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
 
   function render(state: TaskObserverState): void {
     if (disposed) return
+    currentState = state
     const summary = state.freshness === 'live' ? copy.live(state) : copy.unavailable
     try {
       tray.setToolTip(summary)
@@ -238,6 +248,7 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
   }
 
   return {
+    currentState: () => currentState,
     dispose() {
       if (disposal !== undefined) return disposal
       disposed = true

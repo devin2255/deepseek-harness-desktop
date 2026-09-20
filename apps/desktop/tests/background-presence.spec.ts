@@ -131,8 +131,14 @@ describe('background presence', () => {
     const f = fixture()
     expect(f.createTray).toHaveBeenCalledOnce()
     expect(f.createTray).toHaveBeenCalledWith('tray.ico')
+    expect(f.presence.currentState()).toEqual(expect.objectContaining({
+      activeTaskCount: 0,
+      freshness: 'unavailable',
+    }))
 
-    f.emit(liveState())
+    const state = liveState()
+    f.emit(state)
+    expect(f.presence.currentState()).toBe(state)
     expect(f.tray.toolTips.at(-1)).toBe('2 tasks running · 3 agents · 1 needs attention')
     const menu = f.templates.at(-1)!
     expect(menu.map(item => item.label ?? item.type)).toEqual([

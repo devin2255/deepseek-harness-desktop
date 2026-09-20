@@ -1,10 +1,13 @@
 /** Coordinates Electron application events with retryable, attempt-owned Harness startup. */
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { BackgroundPresence, BackgroundPresenceActions } from './background-presence.ts'
 import type { DesktopLog, DesktopLogEvent } from './desktop-log.ts'
 import type { ApplicationMutexHandle } from './application-mutex.ts'
 import type { HarnessHandle, HarnessLaunchSpec, HarnessStartOptions } from './harness-supervisor.ts'
 import { createStartupState, reduceStartup, type DesktopStartupState } from './startup-state.ts'
 import type { StartupWindow, StartupWindowActions } from './startup-window.ts'
 import { classifyInstallerCloseIntent, isInstallerCloseNotification } from './installer-close-intent.ts'
+import type { TaskObserverState } from './task-observer.ts'
 import type { DesktopWindow } from './window.ts'
 
 const DESKTOP_APP_USER_MODEL_ID = 'ai.deepseek.harness.desktop'
@@ -14,6 +17,9 @@ export interface DesktopQuitEvent {
   /** Cancel the current quit attempt while owned cleanup runs. */
   preventDefault(): void
 }
+
+/** User decision returned by the native quit-protection dialog. */
+export type DesktopQuitDecision = 'continue-background' | 'stop-and-quit' | 'cancel'
 
 /** Electron application operations owned by the desktop lifecycle. */
 export interface DesktopApp {
@@ -49,6 +55,14 @@ export interface DesktopMainDependencies {
   readonly startHarness: (launchSpec: HarnessLaunchSpec, options: HarnessStartOptions) => Promise<HarnessHandle>
   /** Create the authorized main window after Harness readiness. */
   readonly createWindow: (endpoint: URL, capability: string) => Promise<DesktopWindow>
+  /** Create native background presence for one authenticated Harness attempt. */
+  readonly createBackgroundPresence: (
+    endpoint: URL,
+    capability: string,
+    actions: BackgroundPresenceActions,
+  ) => BackgroundPresence
+  /** Ask the user how to handle an explicit quit while Task activity may remain. */
+  readonly confirmQuit: (state: TaskObserverState) => Promise<DesktopQuitDecision>
   /** Create the immediate local recovery window. */
   readonly createStartupWindow: (actions: StartupWindowActions) => Promise<StartupWindow>
   /** Product-owned diagnostic log. */
@@ -75,8 +89,10 @@ interface StartupAttempt {
   readonly id: number
   readonly controller: AbortController
   handle?: HarnessHandle
+  presence?: BackgroundPresence
   settled: Promise<void>
   stopTask?: Promise<void>
+  stopFailure?: unknown
   superseded: boolean
 }
 
@@ -98,11 +114,15 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   let retryTask: Promise<void> | undefined
   let windowCreation: Promise<DesktopWindow> | undefined
   let windowFocusRequest: Promise<void> | undefined
+  let pendingWindowOpen = false
+  let pendingSessionTarget: SessionId | undefined
   let shutdownTask: Promise<void> | undefined
+  let quitConfirmationTask: Promise<void> | undefined
   let resolveShutdown!: () => void
   const shutdown = new Promise<void>((resolve) => { resolveShutdown = resolve })
   let quitLatched = false
   let applicationMutex: ApplicationMutexHandle | undefined
+  const shutdownRequested = (): boolean => shutdownTask !== undefined || quitLatched
 
   const report = (phase: 'startup' | 'shutdown' | 'callback', error: unknown): void => {
     try { dependencies.reportFailure(phase, error) } catch { /* Reporting must not escape Electron dispatch. */ }
@@ -130,7 +150,16 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     attempt.superseded || currentAttempt !== attempt || shutdownTask !== undefined
   )
   const stopAttempt = (attempt: StartupAttempt): Promise<void> => {
-    attempt.stopTask ??= attempt.handle?.stop() ?? Promise.resolve()
+    attempt.stopTask ??= (async () => {
+      const failures: unknown[] = []
+      try { await attempt.presence?.dispose() } catch (error: unknown) { failures.push(error) }
+      try { await attempt.handle?.stop() } catch (error: unknown) { failures.push(error) }
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) throw new AggregateError(failures, 'Desktop background presence and Harness cleanup failed', { cause: failures[0] })
+    })().catch((error: unknown) => {
+      attempt.stopFailure = error
+      throw error
+    })
     return attempt.stopTask
   }
   const runAttempt = (attempt: StartupAttempt): Promise<void> => (async () => {
@@ -150,6 +179,11 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
         await stopAttempt(attempt)
         return
       }
+      attempt.presence = dependencies.createBackgroundPresence(
+        attempt.handle.endpoint,
+        attempt.handle.capability,
+        backgroundActions,
+      )
       const recovery = startupWindow
       if (recovery === undefined) throw new Error('Desktop startup window is unavailable for handoff')
       await recovery.handoffTo(desktopWindow, (error) => {
@@ -161,6 +195,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       }
       startupWindow = undefined
       trackActiveWindow(desktopWindow)
+      if (pendingWindowOpen) void openLiveSession().catch((error: unknown) => { report('callback', error) })
       writeLog('startup-handoff', `attempt=${attempt.id}`)
     } catch (error: unknown) {
       if (!attemptIsInactive(attempt)) {
@@ -179,10 +214,10 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
         }
       }
       try { await stopAttempt(attempt) } catch (stopError: unknown) {
-        report(shutdownTask === undefined ? 'startup' : 'shutdown', stopError)
+        if (shutdownTask === undefined) report('startup', stopError)
       }
       if (attemptIsInactive(attempt)) {
-        if (!isAbortError(error) && shutdownTask !== undefined) report('shutdown', error)
+        if (!isAbortError(error) && shutdownTask !== undefined && error !== attempt.stopFailure) report('shutdown', error)
         return
       }
     }
@@ -233,23 +268,52 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     })()
     return shutdownTask
   }
+  const requestUserQuit = (): Promise<void> => {
+    if (shutdownRequested()) return shutdownTask ?? Promise.resolve()
+    const presence = currentAttempt?.presence
+    if (presence === undefined) return quitAfterCleanup()
+    const state = presence.currentState()
+    if (state.freshness === 'live' && state.activeTaskCount === 0) return quitAfterCleanup()
+    quitConfirmationTask ??= (async () => {
+      let decision: DesktopQuitDecision
+      try {
+        decision = await dependencies.confirmQuit(state)
+      } catch (error: unknown) {
+        report('callback', error)
+        return
+      }
+      if (shutdownRequested()) return
+      if (decision === 'continue-background') {
+        activeWindow?.hide()
+      } else if (decision === 'stop-and-quit') {
+        await quitAfterCleanup()
+      }
+    })().finally(() => { quitConfirmationTask = undefined })
+    return quitConfirmationTask
+  }
   const actions: StartupWindowActions = { retry, openLogs, exit: quitAfterCleanup }
-  const focusLiveWindow = (): void => {
-    if (shutdownTask !== undefined || quitLatched) return
-    if (startupWindow !== undefined) { startupWindow.focus(); return }
-    if (activeWindow !== undefined) { focusWindow(activeWindow); return }
-    if (dependencies.platform !== 'darwin' || currentAttempt?.handle === undefined) return
-    windowFocusRequest ??= createHarnessWindow(currentAttempt.handle)
-      .then((window) => { if (shutdownTask === undefined && activeWindow === window) focusWindow(window) })
-      .catch((error: unknown) => { report('callback', error) })
-      .finally(() => { windowFocusRequest = undefined })
+  const openLiveSession = (sessionId?: SessionId): Promise<void> => {
+    if (shutdownRequested()) return Promise.resolve()
+    pendingWindowOpen = true
+    if (sessionId !== undefined) pendingSessionTarget = sessionId
+    windowFocusRequest ??= drainWindowOpenRequests().finally(() => { windowFocusRequest = undefined })
+    return windowFocusRequest
+  }
+  const backgroundActions: BackgroundPresenceActions = {
+    openSession: openLiveSession,
+    requestQuit: () => { app.quit() },
+    reportFailure: (error) => { report('callback', error) },
   }
 
   app.setAppUserModelId(DESKTOP_APP_USER_MODEL_ID)
   app.enableSandbox()
   const ownsInstance = app.requestSingleInstanceLock()
   app.on('before-quit', (event) => {
-    try { if (quitLatched) return; event.preventDefault(); void quitAfterCleanup() } catch (error: unknown) {
+    try {
+      if (quitLatched) return
+      event.preventDefault()
+      void requestUserQuit().catch((error: unknown) => { report('callback', error) })
+    } catch (error: unknown) {
       report('callback', error); void quitAfterCleanup()
     }
   })
@@ -257,13 +321,17 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     try {
       const installerCloseIntent = classifyInstallerCloseIntent(commandLine?.slice(1) ?? [])
       if (isInstallerCloseNotification(additionalData)) void quitAfterCleanup()
-      else if (installerCloseIntent === 'none') focusLiveWindow()
+      else if (installerCloseIntent === 'none') void openLiveSession().catch((error: unknown) => { report('callback', error) })
     } catch (error: unknown) { report('callback', error) }
   })
   app.on('window-all-closed', () => {
-    try { if (dependencies.platform !== 'darwin') app.quit() } catch (error: unknown) { report('callback', error) }
+    // The authenticated Harness and tray remain alive until an explicit quit decision.
   })
-  app.on('activate', () => { try { if (dependencies.platform === 'darwin') focusLiveWindow() } catch (error: unknown) { report('callback', error) } })
+  app.on('activate', () => {
+    try {
+      if (dependencies.platform === 'darwin') void openLiveSession().catch((error: unknown) => { report('callback', error) })
+    } catch (error: unknown) { report('callback', error) }
+  })
 
   const startup = ownsInstance ? startOwnedInstance() : stopRejectedInstance()
   return { startup, shutdown }
@@ -293,6 +361,24 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       .finally(() => { windowCreation = undefined })
     return windowCreation
   }
+  async function drainWindowOpenRequests(): Promise<void> {
+    while (pendingWindowOpen && !shutdownRequested()) {
+      if (startupWindow !== undefined) {
+        startupWindow.focus()
+        if (pendingSessionTarget === undefined) pendingWindowOpen = false
+        return
+      }
+      const handle = currentAttempt?.handle
+      if (handle === undefined) return
+      const window = activeWindow ?? await createHarnessWindow(handle)
+      if (shutdownRequested() || activeWindow !== window) return
+      const target = pendingSessionTarget
+      focusWindow(window)
+      if (target !== undefined) window.openSession(target)
+      if (pendingSessionTarget === target) pendingSessionTarget = undefined
+      pendingWindowOpen = pendingSessionTarget !== undefined
+    }
+  }
   function trackActiveWindow(window: DesktopWindow): void {
     releaseActiveWindowClosed()
     activeWindow = window
@@ -310,7 +396,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   }
 }
 
-function focusWindow(window: DesktopWindow): void { if (window.isMinimized()) window.restore(); window.focus() }
+function focusWindow(window: DesktopWindow): void { window.show(); if (window.isMinimized()) window.restore(); window.focus() }
 function isAbortError(error: unknown): boolean { return error instanceof Error && error.name === 'AbortError' }
 function assertPositiveTimeout(timeoutMs: number): void {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('Desktop cleanupTimeoutMs must be a positive integer')

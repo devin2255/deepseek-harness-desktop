@@ -1,7 +1,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { MessageBoxOptions } from 'electron'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
+import type { BackgroundPresence, BackgroundPresenceOptions } from '../src/background-presence.ts'
+import type { DesktopMainDependencies } from '../src/main-lifecycle.ts'
+import type { TaskObserver, TaskObserverOptions, TaskObserverState } from '../src/task-observer.ts'
 import { UNINSTALL_CLEANUP_ENVIRONMENT_KEY } from '../src/uninstall-cleanup.ts'
 
 const TOKEN = 'abcdefghijklmnopqrstuvwxyzABCDEFGH012345678'
@@ -132,6 +136,160 @@ describe('desktop Main installer close entry', () => {
     assertNormalCompositionUnused(setup)
   })
 })
+
+describe('desktop Main background-presence composition', () => {
+  it('wires the authenticated observer, native tray adapters, and conservative unavailable quit copy', async () => {
+    const setup = prepareNormalEntry()
+
+    await import('../src/main.ts')
+
+    expect(setup.startDesktopMain).toHaveBeenCalledOnce()
+    const dependencies = setup.startDesktopMain.mock.calls[0]?.[0]
+    if (dependencies === undefined) throw new Error('Expected desktop lifecycle dependencies')
+    const actions = {
+      openSession: vi.fn(async () => {}),
+      requestQuit: vi.fn(),
+      reportFailure: vi.fn(),
+    }
+    dependencies.createBackgroundPresence(new URL('http://127.0.0.1:4312'), 'capability', actions)
+    const options = setup.createBackgroundPresence.mock.calls[0]?.[0]
+    if (options === undefined) throw new Error('Expected background-presence options')
+    expect(options.actions).toBe(actions)
+    expect(options.assets.windowsIconPath).toMatch(/tray\.ico$/u)
+    expect(options.assets.macTemplateIconPath).toMatch(/trayTemplate\.png$/u)
+    options.native.createTray('tray.ico')
+    options.native.createNotification({ title: 'Done', body: 'Ready' })
+    const menu = options.native.buildMenu([{ label: 'Open', enabled: true }])
+    expect(setup.Tray).toHaveBeenCalledWith('tray.ico')
+    expect(setup.Notification).toHaveBeenCalledWith({ title: 'Done', body: 'Ready' })
+    expect(setup.buildFromTemplate).toHaveBeenCalledWith([{ label: 'Open', enabled: true }])
+    expect(menu).toEqual([{ label: 'Open', enabled: true }])
+    const callbacks = { onState: vi.fn(), reportError: vi.fn() }
+    options.createObserver(callbacks)
+    expect(setup.createTaskObserver).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: new URL('http://127.0.0.1:4312'),
+      capability: 'capability',
+      pollIntervalMs: 2_000,
+      requestTimeoutMs: 10_000,
+      ...callbacks,
+    }))
+
+    setup.showMessageBox.mockResolvedValueOnce({ response: 0 })
+    await expect(dependencies.confirmQuit({
+      activeTaskCount: 9,
+      activeAgentCount: 12,
+      attentionCount: 1,
+      notifications: [],
+      freshness: 'unavailable',
+    })).resolves.toBe('continue-background')
+    const unavailableDialog = setup.showMessageBox.mock.calls[0]?.[0]
+    expect(unavailableDialog?.buttons).toEqual(['Continue in Background', 'Stop and Quit', 'Cancel'])
+    expect(unavailableDialog?.cancelId).toBe(2)
+    expect(unavailableDialog?.defaultId).toBe(0)
+    expect(unavailableDialog?.detail).toContain('cannot be confirmed')
+    expect(unavailableDialog?.detail).not.toContain('9')
+
+    setup.showMessageBox.mockResolvedValueOnce({ response: 1 })
+    await expect(dependencies.confirmQuit({
+      activeTaskCount: 1,
+      activeAgentCount: 1,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })).resolves.toBe('stop-and-quit')
+    expect(setup.showMessageBox.mock.calls[1]?.[0].detail).toContain('1 task still running')
+
+    setup.getLocale.mockReturnValue('zh-CN')
+    setup.showMessageBox.mockResolvedValueOnce({ response: 2 })
+    await expect(dependencies.confirmQuit({
+      activeTaskCount: 2,
+      activeAgentCount: 2,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })).resolves.toBe('cancel')
+    const chineseDialog = setup.showMessageBox.mock.calls[2]?.[0]
+    expect(chineseDialog?.buttons).toEqual(['继续后台运行', '停止并退出', '取消'])
+    expect(chineseDialog?.detail).toContain('2 个任务')
+  })
+})
+
+function prepareNormalEntry(): {
+  readonly buildFromTemplate: Mock<(template: readonly unknown[]) => unknown>
+  readonly createBackgroundPresence: Mock<(options: BackgroundPresenceOptions) => BackgroundPresence>
+  readonly createTaskObserver: Mock<(options: TaskObserverOptions) => TaskObserver>
+  readonly getLocale: Mock<() => string>
+  readonly Notification: ReturnType<typeof vi.fn>
+  readonly showMessageBox: Mock<(options: MessageBoxOptions) => Promise<{ readonly response: number }>>
+  readonly startDesktopMain: Mock<(dependencies: DesktopMainDependencies) => void>
+  readonly Tray: ReturnType<typeof vi.fn>
+} {
+  const appData = mkdtempSync(join(tmpdir(), 'dsh-main-normal-'))
+  const resourcesPath = mkdtempSync(join(tmpdir(), 'dsh-main-normal-resources-'))
+  Object.defineProperty(process, 'resourcesPath', { configurable: true, value: resourcesPath })
+  process.argv = ['DeepSeek Harness.exe']
+  process.env.APPDATA = appData
+  const showMessageBox = vi.fn<(options: MessageBoxOptions) => Promise<{ readonly response: number }>>()
+  const startDesktopMain = vi.fn<(dependencies: DesktopMainDependencies) => void>()
+  const initialState: TaskObserverState = Object.freeze({
+    activeTaskCount: 0,
+    activeAgentCount: 0,
+    attentionCount: 0,
+    notifications: Object.freeze([]),
+    freshness: 'unavailable',
+  })
+  const createBackgroundPresence = vi.fn<(options: BackgroundPresenceOptions) => BackgroundPresence>(() => ({
+    currentState: () => initialState,
+    dispose: vi.fn(async () => {}),
+  }))
+  const createTaskObserver = vi.fn<(options: TaskObserverOptions) => TaskObserver>(() => ({ dispose: vi.fn(async () => {}) }))
+  const buildFromTemplate = vi.fn<(template: readonly unknown[]) => unknown>(template => template)
+  const Tray = vi.fn(function Tray() {})
+  const Notification = vi.fn(function Notification() {})
+  const desktopLog = { append: vi.fn(), currentPath: vi.fn(() => join(appData, 'desktop.log')) }
+  const desktopRequire = Object.assign(vi.fn(), { resolve: vi.fn(() => 'cli-entry') })
+  const getLocale = vi.fn(() => 'en-US')
+  const app = {
+    isPackaged: true,
+    getLocale,
+  }
+  vi.doMock('electron', () => ({
+    app,
+    dialog: { showMessageBox },
+    Menu: { buildFromTemplate },
+    Notification,
+    shell: { openPath: vi.fn() },
+    Tray,
+  }))
+  vi.doMock('node:module', () => ({ createRequire: vi.fn(() => desktopRequire) }))
+  vi.doMock('../src/runtime-context.ts', () => ({
+    resolveRuntimeContext: vi.fn(() => ({
+      cliEntry: 'cli-entry',
+      cwd: appData,
+      environment: {},
+      logs: appData,
+    })),
+  }))
+  vi.doMock('../src/desktop-log.ts', () => ({
+    DesktopLog: vi.fn(function DesktopLog() { return desktopLog }),
+  }))
+  vi.doMock('../src/main-lifecycle.ts', () => ({ startDesktopMain }))
+  vi.doMock('../src/background-presence.ts', () => ({ createBackgroundPresence }))
+  vi.doMock('../src/task-observer.ts', () => ({ createTaskObserver }))
+  vi.doMock('../src/harness-supervisor.ts', () => ({ startHarness: vi.fn() }))
+  vi.doMock('../src/startup-window.ts', () => ({ createStartupWindow: vi.fn() }))
+  vi.doMock('../src/window.ts', () => ({ createDesktopWindow: vi.fn() }))
+  return {
+    buildFromTemplate,
+    createBackgroundPresence,
+    createTaskObserver,
+    getLocale,
+    Notification,
+    showMessageBox,
+    startDesktopMain,
+    Tray,
+  }
+}
 
 function prepareEntry(argv: readonly string[], environmentToken: string): {
   readonly appData: string

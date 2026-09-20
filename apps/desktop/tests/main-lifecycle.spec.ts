@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { describe, expect, it, vi, type Mock } from 'vitest'
+import type { BackgroundPresence } from '../src/background-presence.ts'
 import {
   startDesktopMain,
   type DesktopApp,
@@ -13,6 +15,7 @@ import {
   type HarnessStartOptions,
 } from '../src/harness-supervisor.ts'
 import type { StartupWindow, StartupWindowActions } from '../src/startup-window.ts'
+import type { TaskObserverState } from '../src/task-observer.ts'
 import type { DesktopWindow } from '../src/window.ts'
 
 function deferred<T>(): {
@@ -60,8 +63,11 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly dependencies: DesktopMainDependencies
   readonly harness: HarnessHandle
   readonly focus: Mock<DesktopWindow['focus']>
+  readonly hide: Mock<DesktopWindow['hide']>
   readonly isMinimized: Mock<DesktopWindow['isMinimized']>
+  readonly openSession: Mock<DesktopWindow['openSession']>
   readonly restore: Mock<DesktopWindow['restore']>
+  readonly show: Mock<DesktopWindow['show']>
   readonly closeWindow: () => void
   readonly disposeClosed: Mock<() => void>
   readonly window: DesktopWindow
@@ -77,6 +83,10 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly reportFailure: DesktopMainDependencies['reportFailure']
   readonly startHarness: Mock<DesktopMainDependencies['startHarness']>
   readonly stop: HarnessHandle['stop']
+  readonly confirmQuit: Mock<DesktopMainDependencies['confirmQuit']>
+  readonly createBackgroundPresence: Mock<DesktopMainDependencies['createBackgroundPresence']>
+  readonly disposeBackgroundPresence: Mock<BackgroundPresence['dispose']>
+  readonly setTaskState: (state: TaskObserverState) => void
 } {
   const app = new FakeApp()
   const acquireApplicationMutex = vi.fn(async () => ({ release: vi.fn(async () => {}) }))
@@ -89,18 +99,24 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const isMinimized = vi.fn(() => false)
   const restore = vi.fn()
   const focus = vi.fn()
+  const show = vi.fn()
+  const hide = vi.fn()
+  const openSession = vi.fn((_sessionId: SessionId) => {})
   let closedListener: (() => void) | undefined
   const disposeClosed = vi.fn(() => {
     closedListener = undefined
   })
   const window: DesktopWindow = {
     focus,
+    hide,
     isMinimized,
+    openSession,
     onClosed(listener) {
       closedListener = listener
       return disposeClosed
     },
     restore,
+    show,
   }
   const startHarness = vi.fn<DesktopMainDependencies['startHarness']>(async (_launchSpec, options) => {
     for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
@@ -131,6 +147,19 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     currentPath: vi.fn(() => 'C:\\Users\\tester\\AppData\\Roaming\\DeepSeek Harness\\logs\\desktop.log'),
   }
   const reportFailure = vi.fn()
+  let taskState: TaskObserverState = Object.freeze({
+    activeTaskCount: 0,
+    activeAgentCount: 0,
+    attentionCount: 0,
+    notifications: Object.freeze([]),
+    freshness: 'live',
+  })
+  const disposeBackgroundPresence = vi.fn(async () => {})
+  const createBackgroundPresence = vi.fn<DesktopMainDependencies['createBackgroundPresence']>(() => ({
+    currentState: () => taskState,
+    dispose: disposeBackgroundPresence,
+  }))
+  const confirmQuit = vi.fn<DesktopMainDependencies['confirmQuit']>(async () => 'cancel')
   const launchSpec: HarnessLaunchSpec = {
     cliEntry: 'C:\\Program Files\\DeepSeek Harness\\resources\\app\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
     cwd: 'C:\\Users\\tester',
@@ -143,6 +172,8 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     platform: 'win32',
     startHarness,
     createWindow,
+    createBackgroundPresence,
+    confirmQuit,
     createStartupWindow,
     desktopLog,
     openPath,
@@ -162,8 +193,11 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     },
     disposeClosed,
     focus,
+    hide,
     isMinimized,
+    openSession,
     restore,
+    show,
     window,
     createWindow: dependencies.createWindow,
     createStartupWindow: dependencies.createStartupWindow,
@@ -180,6 +214,10 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     reportFailure,
     startHarness: vi.mocked(dependencies.startHarness),
     stop,
+    confirmQuit: vi.mocked(dependencies.confirmQuit),
+    createBackgroundPresence: vi.mocked(dependencies.createBackgroundPresence),
+    disposeBackgroundPresence,
+    setTaskState(state) { taskState = state },
   }
 }
 
@@ -427,6 +465,26 @@ describe('startDesktopMain', () => {
     expect(setup.focus).toHaveBeenCalledTimes(1)
   })
 
+  it('retains an exact notification target received during startup handoff', async () => {
+    const handoff = deferred<undefined>()
+    const setup = fixture()
+    setup.handoffTo.mockReturnValue(handoff.promise)
+    const desktop = startDesktopMain(setup.dependencies)
+    await flushLifecycle()
+    const actions = setup.createBackgroundPresence.mock.calls[0]?.[2]
+    if (actions === undefined) throw new Error('Expected background-presence actions')
+
+    const opening = actions.openSession('during-handoff' as SessionId)
+    await opening
+    expect(setup.startupFocus).toHaveBeenCalledOnce()
+    expect(setup.openSession).not.toHaveBeenCalled()
+
+    handoff.resolve(undefined)
+    await desktop.startup
+    await flushLifecycle()
+    expect(setup.openSession).toHaveBeenCalledWith('during-handoff')
+  })
+
   it('keeps Harness and the main window after a post-destroy handoff cleanup error', async () => {
     const failure = new Error('post-destroy handler cleanup failed')
     const setup = fixture()
@@ -613,6 +671,23 @@ describe('startDesktopMain', () => {
     expect(app.quit).toHaveBeenCalledTimes(1)
   })
 
+  it('reports a stop failure once when shutdown overtakes pending window creation', async () => {
+    const pendingWindow = deferred<DesktopWindow>()
+    const failure = new Error('stop failed during window creation')
+    const setup = fixture({ createWindow: vi.fn(() => pendingWindow.promise) })
+    vi.mocked(setup.stop).mockRejectedValue(failure)
+    const desktop = startDesktopMain(setup.dependencies)
+    await flushLifecycle()
+
+    setup.app.emitBeforeQuit()
+    pendingWindow.resolve(setup.window)
+    await desktop.shutdown
+
+    expect(setup.reportFailure).toHaveBeenCalledTimes(1)
+    expect(setup.reportFailure).toHaveBeenCalledWith('shutdown', failure)
+    expect(setup.stop).toHaveBeenCalledOnce()
+  })
+
   it('reports main-window startup failure, stops the attempt Harness, and keeps recovery open', async () => {
     const failure = new Error('window setup failed')
     const { app, dependencies, reportFailure, showFailure, stop } = fixture({
@@ -644,39 +719,284 @@ describe('startDesktopMain', () => {
     expect(app.quit).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['win32', true],
-    ['linux', true],
-    ['darwin', false],
-  ] as const)('handles the last closed window on %s without duplicate cleanup', async (platform, quits) => {
+  it.each(['win32', 'linux', 'darwin'] as const)('retains Harness and background presence after the last window closes on %s', async (platform) => {
     const { app, dependencies, stop } = fixture({ platform })
     const desktop = startDesktopMain(dependencies)
     await desktop.startup
 
     app.emit('window-all-closed')
     await flushLifecycle()
-    if (quits) {
-      expect(app.quit).toHaveBeenCalledTimes(1)
-      app.emitBeforeQuit()
-      await desktop.shutdown
-      expect(stop).toHaveBeenCalledTimes(1)
-    } else {
-      expect(app.quit).not.toHaveBeenCalled()
-      expect(stop).not.toHaveBeenCalled()
-    }
+
+    expect(app.quit).not.toHaveBeenCalled()
+    expect(stop).not.toHaveBeenCalled()
   })
 
-  it('clears a natively closed window before handling a second instance', async () => {
-    const { app, closeWindow, dependencies, createWindow, focus, restore } = fixture()
+  it('continues in the background without stopping a running Task', async () => {
+    const setup = fixture()
+    setup.setTaskState({
+      activeTaskCount: 2,
+      activeAgentCount: 3,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })
+    setup.confirmQuit.mockResolvedValue('continue-background')
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    const event = setup.app.emitBeforeQuit()
+    await flushLifecycle()
+
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+    expect(setup.confirmQuit).toHaveBeenCalledWith(expect.objectContaining({ activeTaskCount: 2, freshness: 'live' }))
+    expect(setup.hide).toHaveBeenCalledOnce()
+    expect(setup.disposeBackgroundPresence).not.toHaveBeenCalled()
+    expect(setup.stop).not.toHaveBeenCalled()
+    expect(setup.app.quit).not.toHaveBeenCalled()
+  })
+
+  it('quits immediately without confirmation when the live observer reports no running Task', async () => {
+    const setup = fixture()
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emitBeforeQuit()
+    await desktop.shutdown
+
+    expect(setup.confirmQuit).not.toHaveBeenCalled()
+    expect(setup.disposeBackgroundPresence).toHaveBeenCalledOnce()
+    expect(setup.stop).toHaveBeenCalledOnce()
+  })
+
+  it('contains a background-hide failure from the asynchronous quit decision', async () => {
+    const failure = new Error('hide failed')
+    const setup = fixture()
+    setup.setTaskState({
+      activeTaskCount: 1,
+      activeAgentCount: 1,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })
+    setup.confirmQuit.mockResolvedValue('continue-background')
+    setup.hide.mockImplementation(() => { throw failure })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    expect(() => setup.app.emitBeforeQuit()).not.toThrow()
+    await flushLifecycle()
+
+    expect(setup.reportFailure).toHaveBeenCalledWith('callback', failure)
+    expect(setup.stop).not.toHaveBeenCalled()
+  })
+
+  it('cancels an explicit quit without changing the visible window or owned services', async () => {
+    const setup = fixture()
+    setup.setTaskState({
+      activeTaskCount: 0,
+      activeAgentCount: 0,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'unavailable',
+    })
+    setup.confirmQuit.mockResolvedValue('cancel')
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emitBeforeQuit()
+    await flushLifecycle()
+
+    expect(setup.confirmQuit).toHaveBeenCalledOnce()
+    expect(setup.hide).not.toHaveBeenCalled()
+    expect(setup.stop).not.toHaveBeenCalled()
+    expect(setup.app.quit).not.toHaveBeenCalled()
+  })
+
+  it('treats a failed quit confirmation as Cancel and reports it', async () => {
+    const failure = new Error('dialog failed')
+    const setup = fixture()
+    setup.setTaskState({
+      activeTaskCount: 1,
+      activeAgentCount: 1,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })
+    setup.confirmQuit.mockRejectedValue(failure)
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emitBeforeQuit()
+    await flushLifecycle()
+
+    expect(setup.reportFailure).toHaveBeenCalledWith('callback', failure)
+    expect(setup.hide).not.toHaveBeenCalled()
+    expect(setup.stop).not.toHaveBeenCalled()
+  })
+
+  it('disposes background presence before stopping Harness after Stop and Quit', async () => {
+    const order: string[] = []
+    const setup = fixture()
+    setup.setTaskState({
+      activeTaskCount: 1,
+      activeAgentCount: 1,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })
+    setup.confirmQuit.mockResolvedValue('stop-and-quit')
+    setup.disposeBackgroundPresence.mockImplementation(async () => { order.push('presence') })
+    vi.mocked(setup.stop).mockImplementation(async () => { order.push('harness') })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emitBeforeQuit()
+    await desktop.shutdown
+
+    expect(order).toEqual(['presence', 'harness'])
+    expect(setup.app.quit).toHaveBeenCalledOnce()
+  })
+
+  it('still stops Harness when background-presence disposal fails', async () => {
+    const failure = new Error('presence disposal failed')
+    const setup = fixture()
+    setup.disposeBackgroundPresence.mockRejectedValue(failure)
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emitBeforeQuit()
+    await desktop.shutdown
+
+    expect(setup.disposeBackgroundPresence).toHaveBeenCalledOnce()
+    expect(setup.stop).toHaveBeenCalledOnce()
+    expect(setup.reportFailure).toHaveBeenCalledWith('shutdown', failure)
+    expect(setup.app.quit).toHaveBeenCalledOnce()
+  })
+
+  it('aggregates background-presence and Harness stop failures without skipping either cleanup', async () => {
+    const presenceFailure = new Error('presence disposal failed')
+    const harnessFailure = new Error('harness stop failed')
+    const setup = fixture()
+    setup.disposeBackgroundPresence.mockRejectedValue(presenceFailure)
+    vi.mocked(setup.stop).mockRejectedValue(harnessFailure)
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emitBeforeQuit()
+    await desktop.shutdown
+
+    expect(setup.reportFailure).toHaveBeenCalledWith('shutdown', expect.objectContaining({
+      errors: [presenceFailure, harnessFailure],
+    }))
+    expect(setup.disposeBackgroundPresence).toHaveBeenCalledOnce()
+    expect(setup.stop).toHaveBeenCalledOnce()
+  })
+
+  it('wires background actions to native quit and contained callback reporting', async () => {
+    const failure = new Error('background callback failed')
+    const setup = fixture()
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    const actions = setup.createBackgroundPresence.mock.calls[0]?.[2]
+    if (actions === undefined) throw new Error('Expected background-presence actions')
+
+    actions.reportFailure(failure)
+    actions.requestQuit()
+
+    expect(setup.reportFailure).toHaveBeenCalledWith('callback', failure)
+    expect(setup.app.quit).toHaveBeenCalledOnce()
+  })
+
+  it('shares one pending quit confirmation across concurrent quit attempts', async () => {
+    const decision = deferred<'cancel'>()
+    const setup = fixture()
+    setup.setTaskState({
+      activeTaskCount: 1,
+      activeAgentCount: 1,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })
+    setup.confirmQuit.mockReturnValue(decision.promise)
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    const first = setup.app.emitBeforeQuit()
+    const second = setup.app.emitBeforeQuit()
+    expect(first.preventDefault).toHaveBeenCalledOnce()
+    expect(second.preventDefault).toHaveBeenCalledOnce()
+    expect(setup.confirmQuit).toHaveBeenCalledOnce()
+
+    decision.resolve('cancel')
+    await flushLifecycle()
+    expect(setup.stop).not.toHaveBeenCalled()
+  })
+
+  it('bypasses confirmation for an authenticated installer close request', async () => {
+    const setup = fixture()
+    setup.setTaskState({
+      activeTaskCount: 1,
+      activeAgentCount: 1,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'live',
+    })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close'], '', {
+      type: 'deepseek-harness:installer-close',
+    })
+    await desktop.shutdown
+
+    expect(setup.confirmQuit).not.toHaveBeenCalled()
+    expect(setup.stop).toHaveBeenCalledOnce()
+  })
+
+  it('recreates and shows a natively closed Windows window for a second instance', async () => {
+    const first = fixture()
+    const second = fixture()
+    const createWindow = vi.fn()
+      .mockResolvedValueOnce(first.window)
+      .mockResolvedValueOnce(second.window)
+    const { app, dependencies } = fixture({ createWindow })
     const desktop = startDesktopMain(dependencies)
     await desktop.startup
 
-    closeWindow()
+    first.closeWindow()
     app.emit('second-instance')
+    await flushLifecycle()
 
-    expect(focus).not.toHaveBeenCalled()
-    expect(restore).not.toHaveBeenCalled()
-    expect(createWindow).toHaveBeenCalledTimes(1)
+    expect(first.focus).not.toHaveBeenCalled()
+    expect(first.restore).not.toHaveBeenCalled()
+    expect(createWindow).toHaveBeenCalledTimes(2)
+    expect(second.show).toHaveBeenCalledOnce()
+    expect(second.focus).toHaveBeenCalledOnce()
+  })
+
+  it('queues only the latest Session target until a replacement window has loaded', async () => {
+    const first = fixture()
+    const second = fixture()
+    const replacement = deferred<DesktopWindow>()
+    const createWindow = vi.fn()
+      .mockResolvedValueOnce(first.window)
+      .mockReturnValueOnce(replacement.promise)
+    const setup = fixture({ createWindow })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    first.closeWindow()
+    const actions = setup.createBackgroundPresence.mock.calls[0]?.[2]
+    if (actions === undefined) throw new Error('Expected background-presence actions')
+
+    const openingFirst = actions.openSession('first' as SessionId)
+    const openingLatest = actions.openSession('latest' as SessionId)
+    expect(createWindow).toHaveBeenCalledTimes(2)
+    replacement.resolve(second.window)
+    await Promise.all([openingFirst, openingLatest])
+
+    expect(second.show).toHaveBeenCalledOnce()
+    expect(second.openSession).toHaveBeenCalledOnce()
+    expect(second.openSession).toHaveBeenCalledWith('latest')
   })
 
   it('recreates and focuses one macOS window after native close and activation', async () => {

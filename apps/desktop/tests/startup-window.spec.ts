@@ -105,9 +105,12 @@ describe('createStartupWindow', () => {
     const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
     const desktop = {
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
+      hide: vi.fn(),
       isMinimized: () => false,
       onClosed: () => () => {},
+      openSession: vi.fn(),
       restore: vi.fn(),
+      show: vi.fn(),
     }
 
     const handoff = startup.handoffTo(desktop, vi.fn())
@@ -121,9 +124,12 @@ describe('createStartupWindow', () => {
     const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
     const desktop = {
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
+      hide: vi.fn(),
       isMinimized: () => false,
       onClosed: () => () => {},
+      openSession: vi.fn(),
       restore: vi.fn(),
+      show: vi.fn(),
     }
 
     const handoff = startup.handoffTo(desktop, vi.fn())
@@ -141,9 +147,12 @@ describe('createStartupWindow', () => {
     const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
     const desktop = {
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
+      hide: vi.fn(),
       isMinimized: () => false,
       onClosed: () => () => {},
+      openSession: vi.fn(),
       restore: vi.fn(),
+      show: vi.fn(),
     }
     const reportFailure = vi.fn()
 

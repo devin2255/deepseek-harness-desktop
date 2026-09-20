@@ -1,8 +1,10 @@
 /** Creates the sole sandboxed desktop window after the Harness endpoint is ready. */
 
 import { BrowserWindow } from 'electron'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { fileURLToPath } from 'node:url'
 import { configureAuthorizedSession, DESKTOP_SESSION_PARTITION, type AuthorizedSession } from './authorized-session.ts'
+import { DESKTOP_OPEN_SESSION_CHANNEL } from './desktop-ipc.ts'
 
 /** BrowserWindow options owned by the desktop shell. */
 export interface DesktopWindowOptions {
@@ -47,6 +49,12 @@ export interface DesktopWindow {
   restore(): void
   /** Focus the native window. */
   focus(): void
+  /** Show a hidden native window. */
+  show(): void
+  /** Hide the native window while background Tasks continue. */
+  hide(): void
+  /** Deliver one validated Session navigation target to the authorized renderer. */
+  openSession(sessionId: SessionId): void
   /** Subscribe to native close and return an idempotent disposer for this subscription. */
   onClosed(listener: () => void): () => void
 }
@@ -59,6 +67,10 @@ interface DesktopWindowStartupHandle {
   restore(): void
   /** Focus the native window. */
   focus(): void
+  /** Show a hidden native window. */
+  show(): void
+  /** Hide the native window. */
+  hide(): void
   /** Renderer controls associated with this browser window. */
   readonly webContents: {
     /** Electron's opaque renderer identity. */
@@ -67,6 +79,8 @@ interface DesktopWindowStartupHandle {
     on(event: 'will-navigate' | 'will-redirect', listener: (details: NavigationDetails) => void): void
     /** Deny every renderer request to open a second browser window. */
     setWindowOpenHandler(handler: (details: unknown) => { readonly action: 'deny' }): void
+    /** Send one named event into the isolated preload bridge. */
+    send(channel: string, sessionId: SessionId): void
   }
   /** Load the already authorized loopback page. */
   loadURL(url: string): Promise<void>
@@ -147,6 +161,12 @@ export async function createDesktopWindow(
         loadedWindow.focus()
       },
       isMinimized: () => loadedWindow.isMinimized(),
+      hide: () => {
+        loadedWindow.hide()
+      },
+      openSession: (sessionId) => {
+        loadedWindow.webContents.send(DESKTOP_OPEN_SESSION_CHANNEL, sessionId)
+      },
       onClosed(listener) {
         let listening = true
         const notifyClosed = (): void => {
@@ -169,6 +189,9 @@ export async function createDesktopWindow(
       },
       restore: () => {
         loadedWindow.restore()
+      },
+      show: () => {
+        loadedWindow.show()
       },
     }
   } catch (error: unknown) {
