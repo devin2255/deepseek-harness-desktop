@@ -1,8 +1,8 @@
 /** Desktop production staging behavior and path-safety tests. */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync as systemMkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { lstat as lstatAsync, mkdtemp, rename, rm, unlink } from 'node:fs/promises'
-import { tmpdir as systemTmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -29,7 +29,7 @@ const rootManifest = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'
   readonly scripts?: Record<string, string>
 }
 const temporaryDirectories: string[] = []
-const tmpdir = () => realpathSync(systemTmpdir())
+const mkdtempSync = (prefix: string) => realpathSync(systemMkdtempSync(prefix))
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true })
