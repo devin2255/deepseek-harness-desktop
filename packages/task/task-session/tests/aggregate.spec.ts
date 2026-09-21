@@ -160,6 +160,23 @@ describe('aggregateTasks', () => {
     expect(settled).toMatchObject({ status: 'settled', attention: [] })
   })
 
+  it('projects a crash-repaired interrupted turn as a durable Task failure', () => {
+    const interrupted = event('turn/end', 0, 7, { turn: 3, reason: { kind: 'interrupted' } })
+    const failed = aggregateTasks({ generation: 1, sessions: [input('root', {}, [interrupted])] }).tasks[0]
+
+    expect(failed).toMatchObject({
+      status: 'failed',
+      attention: [{
+        ownerSessionId: sid('root'),
+        kind: 'run-failure',
+        severity: 'error',
+        sourceId: 'turn:3',
+        summary: 'This Task was interrupted before the turn completed. Review the last tool result before continuing.',
+        actionable: false,
+      }],
+    })
+  })
+
   it('reports failed activity below actionable attention and above running activity', () => {
     const running: LiveTaskFact = { kind: 'activity', taskId: sid('root'), ownerSessionId: sid('root'), sourceId: 'run', state: 'running', createdAt: 2 }
     const failed: LiveTaskFact = { ...running, sourceId: 'failed', state: 'failed' }

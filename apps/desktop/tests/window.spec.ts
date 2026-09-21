@@ -54,6 +54,7 @@ function desktopWindow(): {
           return Promise.resolve()
         },
         destroy() {
+          steps.push('destroy')
           wasDestroyed = true
         },
         focus() {
@@ -137,7 +138,7 @@ function navigationEvent(url: string): FakeEvent {
 describe('createDesktopWindow', () => {
   it('returns only the native-window lifecycle controls', () => {
     expectTypeOf<keyof DesktopWindow>().toEqualTypeOf<
-      'focus' | 'hide' | 'isDestroyed' | 'isMinimized' | 'onClosed' | 'openSession' | 'restore' | 'show'
+      'destroy' | 'focus' | 'hide' | 'isDestroyed' | 'isMinimized' | 'onClosed' | 'openSession' | 'restore' | 'show'
     >()
   })
 
@@ -173,6 +174,17 @@ describe('createDesktopWindow', () => {
     expect(fixture.steps).toContain('hide')
     expect(fixture.steps).toContain('send:deepseek-harness:desktop-open-session:target-session')
     expect(fixture.steps).toContain('focus')
+  })
+
+  it('destroys a loaded window at most once through the lifecycle handle', async () => {
+    const fixture = desktopWindow()
+    const actual = await createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
+
+    actual.destroy()
+    actual.destroy()
+
+    expect(fixture.destroyed()).toBe(true)
+    expect(fixture.steps.filter(step => step === 'destroy')).toHaveLength(1)
   })
 
   it('allows only same-origin navigation and redirects, and denies all new windows', async () => {

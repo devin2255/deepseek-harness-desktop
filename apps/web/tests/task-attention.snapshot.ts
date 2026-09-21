@@ -23,6 +23,7 @@ describe('web snapshot: durable Task attention lifecycle', () => {
   let tripwire: ReturnType<typeof watchConsole>
   const readyId = SessionId('task-ready')
   const failedId = SessionId('task-failed')
+  const interruptedId = SessionId('task-interrupted')
   const childId = SessionId('task-ready-child')
   const approvalId = ApprovalRequestId('review-desktop-output')
 
@@ -73,6 +74,10 @@ describe('web snapshot: durable Task attention lifecycle', () => {
       reason: { kind: 'error', error: { message: 'Upgrade recovery validation failed', code: 'VALIDATION_FAILED' } },
     })
 
+    const interrupted = scaffold.ctx.sessions.create(interruptedId, { meta: { cwd: scaffold.workspaceCwd } })
+    interrupted.append('session/title', { title: 'Interrupted desktop task', messageSeqs: [], source: { kind: 'user' } })
+    interrupted.append('turn/end', { turn: 1, reason: { kind: 'interrupted' } })
+
     browser = await chromium.launch().catch(async (error: unknown) => {
       if (process.platform !== 'win32'
         || !(error instanceof Error)
@@ -97,6 +102,7 @@ describe('web snapshot: durable Task attention lifecycle', () => {
     const overview = page.getByRole('main', { name: 'Tasks' })
     await expect.poll(() => overview.innerText()).toContain('Review the descendant installer output')
     await expect.poll(() => overview.innerText()).toContain('Upgrade recovery validation failed')
+    await expect.poll(() => overview.innerText()).toContain('This Task was interrupted before the turn completed')
     const initial = await overview.innerText()
 
     const child = scaffold.ctx.sessions.get(childId)

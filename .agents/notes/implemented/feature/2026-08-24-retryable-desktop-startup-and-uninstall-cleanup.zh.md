@@ -16,6 +16,8 @@ Status: implemented
 
 Electron 在 `app.whenReady()` 完成之后、启动 Harness 之前创建本地启动窗口。Main 拥有单调递增的尝试记录，每条记录包含一个 `AbortController`、一个最终 Harness 句柄和一个完成 Promise。Supervisor 在运行时文件验证、规范端点发现和认证探针成功各自真正提交时报告里程碑；Main 只把这些回调投影为启动状态，并忽略过期尝试的回调。Retry 只在失败状态接受，它把该尝试标记为过期、中止它、等待其子进程清理，然后只启动一个替代尝试。原生恢复窗口销毁会提交 handoff，在此之前启动窗口一直是单实例事件的当前聚焦目标，提交后 Main 才把已就绪的桌面窗口安装为当前目标。销毁前错误会拒绝 handoff；销毁后的 IPC 清理或报告错误只作为 callback 失败上报，不撤销主窗口所有权，也不停止 Harness。
 
+就绪后的 utility process 退出由[桌面 Host 崩溃恢复决策](../bug-fix/2026-09-21-desktop-host-crash-recovery.md)负责；它保留这套尝试所有权，同时撤销陈旧的 Renderer 与后台权限。
+
 启动状态和固定生命周期事实追加到产品拥有的桌面日志。恢复渲染器只能请求三个由 Main 拥有的操作：串行重试、`shell.openPath(DesktopLog.currentPath())` 和有时限的应用退出。原始启动诊断绝不进入渲染器状态。Harness supervisor 保留自己的子进程关闭期限，同时 Main 为完整退出等待设置显式期限，使 Electron 能在子进程违反取消约定后终止。
 
 卸载清理在正常运行时解析、单实例锁、Harness 启动或窗口创建之前选定。它只接受一个 `--uninstall-delete-user-data=<token>` 参数，并要求 `DSH_UNINSTALL_CLEANUP_TOKEN` 中存在相同的 256 位无填充 base64url token；格式验证先于恒定时间比较，失败信息绝不回显任一值。安装程序是两个通道唯一的预期生产者，环境通道只由该清理子进程继承。

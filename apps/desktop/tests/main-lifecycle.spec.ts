@@ -10,6 +10,7 @@ import {
 } from '../src/main-lifecycle.ts'
 import {
   HarnessShutdownTimeoutError,
+  type HarnessExit,
   type HarnessHandle,
   type HarnessLaunchSpec,
   type HarnessStartOptions,
@@ -68,6 +69,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly openSession: Mock<DesktopWindow['openSession']>
   readonly restore: Mock<DesktopWindow['restore']>
   readonly show: Mock<DesktopWindow['show']>
+  readonly destroy: Mock<DesktopWindow['destroy']>
   readonly closeWindow: () => void
   readonly destroyWindowWithoutCloseEvent: () => void
   readonly disposeClosed: Mock<() => void>
@@ -76,6 +78,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly createStartupWindow: DesktopMainDependencies['createStartupWindow']
   readonly startupActions: () => StartupWindowActions
   readonly startupFocus: Mock<StartupWindow['focus']>
+  readonly startupDestroy: Mock<StartupWindow['destroy']>
   readonly publish: Mock<StartupWindow['publish']>
   readonly showFailure: Mock<StartupWindow['showFailure']>
   readonly handoffTo: Mock<StartupWindow['handoffTo']>
@@ -84,6 +87,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   readonly reportFailure: DesktopMainDependencies['reportFailure']
   readonly startHarness: Mock<DesktopMainDependencies['startHarness']>
   readonly stop: HarnessHandle['stop']
+  readonly exitHarness: (code: number) => void
   readonly confirmQuit: Mock<DesktopMainDependencies['confirmQuit']>
   readonly createBackgroundPresence: Mock<DesktopMainDependencies['createBackgroundPresence']>
   readonly disposeBackgroundPresence: Mock<BackgroundPresence['dispose']>
@@ -92,9 +96,11 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const app = new FakeApp()
   const acquireApplicationMutex = vi.fn(async () => ({ release: vi.fn(async () => {}) }))
   const stop = vi.fn(async () => {})
+  const harnessExit = deferred<HarnessExit>()
   const harness: HarnessHandle = {
     endpoint: new URL('http://127.0.0.1:4312'),
     capability: 'private-capability',
+    exited: harnessExit.promise,
     stop,
   }
   const isMinimized = vi.fn(() => false)
@@ -109,7 +115,15 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const disposeClosed = vi.fn(() => {
     closedListener = undefined
   })
+  const destroy = vi.fn(() => {
+    if (destroyed) return
+    destroyed = true
+    const listener = closedListener
+    closedListener = undefined
+    listener?.()
+  })
   const window: DesktopWindow = {
+    destroy,
     focus,
     hide,
     isDestroyed,
@@ -133,8 +147,10 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
   const publish = vi.fn()
   const showFailure = vi.fn()
   const handoffTo = vi.fn(async () => {})
+  const destroyStartupWindow = vi.fn()
   const startupWindow: StartupWindow = {
     closed: new Promise(() => {}),
+    destroy: destroyStartupWindow,
     focus: startupFocus,
     publish,
     showFailure,
@@ -206,6 +222,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     openSession,
     restore,
     show,
+    destroy,
     window,
     createWindow: dependencies.createWindow,
     createStartupWindow: dependencies.createStartupWindow,
@@ -214,6 +231,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
       return capturedStartupActions
     },
     startupFocus,
+    startupDestroy: destroyStartupWindow,
     publish,
     showFailure,
     handoffTo,
@@ -222,6 +240,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     reportFailure,
     startHarness: vi.mocked(dependencies.startHarness),
     stop,
+    exitHarness(code) { harnessExit.resolve(Object.freeze({ code })) },
     confirmQuit: vi.mocked(dependencies.confirmQuit),
     createBackgroundPresence: vi.mocked(dependencies.createBackgroundPresence),
     disposeBackgroundPresence,
@@ -377,6 +396,252 @@ describe('startDesktopMain', () => {
         return `attempt=${state.attempt} phase=${state.phase} status=${state.status}`
       }),
     )
+  })
+
+  it('revokes the ready renderer and background presence after an unexpected Harness exit', async () => {
+    const setup = fixture()
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.exitHarness(23)
+    await flushLifecycle()
+    await flushLifecycle()
+
+    expect(setup.disposeClosed).toHaveBeenCalledOnce()
+    expect(setup.destroy).toHaveBeenCalledOnce()
+    expect(setup.disposeBackgroundPresence).toHaveBeenCalledOnce()
+    expect(setup.stop).toHaveBeenCalledOnce()
+    expect(setup.createStartupWindow).toHaveBeenCalledTimes(2)
+    expect(setup.showFailure).toHaveBeenLastCalledWith({
+      attempt: 1,
+      phase: 'failed',
+      status: 'failed',
+      error: {
+        code: 'service-exited',
+        action: 'Retry startup. If the problem continues, open the desktop log.',
+      },
+    })
+    expect(setup.app.quit).not.toHaveBeenCalled()
+    expect(vi.mocked(setup.desktopLog.append)).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'harness-exit',
+      message: 'attempt=1 code=23',
+    }))
+  })
+
+  it('starts a fresh capability only after explicit Retry from runtime-exit recovery', async () => {
+    const first = fixture()
+    const second = fixture()
+    const startHarness = vi.fn<DesktopMainDependencies['startHarness']>()
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return first.harness
+      })
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return second.harness
+      })
+    const createWindow = vi.fn<DesktopMainDependencies['createWindow']>()
+      .mockResolvedValueOnce(first.window)
+      .mockResolvedValueOnce(second.window)
+    const setup = fixture({ createWindow, startHarness })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    first.exitHarness(7)
+    await flushLifecycle()
+    await flushLifecycle()
+    expect(startHarness).toHaveBeenCalledOnce()
+
+    await setup.startupActions().retry()
+
+    expect(startHarness).toHaveBeenCalledTimes(2)
+    expect(first.stop).toHaveBeenCalledOnce()
+    expect(createWindow).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows one recovery window when Harness exits after the Task window was already closed', async () => {
+    const setup = fixture()
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    setup.closeWindow()
+
+    setup.exitHarness(11)
+    setup.exitHarness(12)
+    await flushLifecycle()
+    await flushLifecycle()
+
+    expect(setup.destroy).not.toHaveBeenCalled()
+    expect(setup.createStartupWindow).toHaveBeenCalledTimes(2)
+    expect(setup.showFailure).toHaveBeenCalledOnce()
+  })
+
+  it('shows recovery while the authorized Task window is still being created', async () => {
+    const pendingWindow = deferred<DesktopWindow>()
+    const setup = fixture({ createWindow: vi.fn(() => pendingWindow.promise) })
+    const desktop = startDesktopMain(setup.dependencies)
+    await flushLifecycle()
+
+    setup.exitHarness(13)
+    await flushLifecycle()
+    await flushLifecycle()
+
+    expect(setup.stop).toHaveBeenCalledOnce()
+    expect(setup.createStartupWindow).toHaveBeenCalledOnce()
+    expect(setup.showFailure).toHaveBeenCalledOnce()
+    const startupSettled = vi.fn()
+    void desktop.startup.then(startupSettled)
+    await flushLifecycle()
+    expect(startupSettled).toHaveBeenCalledOnce()
+
+    pendingWindow.resolve(setup.window)
+    await desktop.startup
+
+    expect(setup.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('retries without waiting for a stale Task window creation to settle', async () => {
+    const first = fixture()
+    const second = fixture()
+    const staleWindow = deferred<DesktopWindow>()
+    const startHarness = vi.fn<DesktopMainDependencies['startHarness']>()
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return first.harness
+      })
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return second.harness
+      })
+    const createWindow = vi.fn<DesktopMainDependencies['createWindow']>()
+      .mockReturnValueOnce(staleWindow.promise)
+      .mockResolvedValueOnce(second.window)
+    const setup = fixture({ createWindow, startHarness })
+    const desktop = startDesktopMain(setup.dependencies)
+    await flushLifecycle()
+
+    first.exitHarness(15)
+    await flushLifecycle()
+    await flushLifecycle()
+    await setup.startupActions().retry()
+
+    expect(startHarness).toHaveBeenCalledTimes(2)
+    expect(createWindow).toHaveBeenCalledTimes(2)
+    expect(second.destroy).not.toHaveBeenCalled()
+
+    staleWindow.resolve(first.window)
+    await desktop.startup
+
+    expect(first.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('replaces a startup window whose handoff was overtaken by Harness exit', async () => {
+    const pendingHandoff = deferred<undefined>()
+    const setup = fixture()
+    setup.handoffTo.mockReturnValue(pendingHandoff.promise)
+    const desktop = startDesktopMain(setup.dependencies)
+    await flushLifecycle()
+
+    setup.exitHarness(17)
+    await flushLifecycle()
+    await flushLifecycle()
+
+    expect(setup.disposeBackgroundPresence).toHaveBeenCalledOnce()
+    expect(setup.createStartupWindow).toHaveBeenCalledTimes(2)
+    expect(setup.showFailure).toHaveBeenCalledOnce()
+
+    pendingHandoff.resolve(undefined)
+    await desktop.startup
+
+    expect(setup.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('destroys a delayed recovery window when Quit overtakes its creation', async () => {
+    const initial = fixture()
+    const late = fixture()
+    const lateRecovery = deferred<StartupWindow>()
+    const lateWindow = await late.createStartupWindow({
+      retry: async () => {},
+      openLogs: async () => {},
+      exit: async () => {},
+    })
+    const createStartupWindow = vi.fn<DesktopMainDependencies['createStartupWindow']>()
+      .mockImplementationOnce(actions => initial.createStartupWindow(actions))
+      .mockImplementationOnce(() => lateRecovery.promise)
+    const setup = fixture({ createStartupWindow })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.exitHarness(19)
+    await flushLifecycle()
+    expect(createStartupWindow).toHaveBeenCalledTimes(2)
+
+    setup.app.emitBeforeQuit()
+    lateRecovery.resolve(lateWindow)
+    await desktop.shutdown
+    await flushLifecycle()
+
+    expect(late.startupDestroy).toHaveBeenCalledOnce()
+    expect(setup.app.quit).toHaveBeenCalledOnce()
+  })
+
+  it('contains recovery-window creation failure without resurrecting the stale renderer', async () => {
+    const initial = fixture()
+    const recoveryFailure = new Error('recovery window failed')
+    const createStartupWindow = vi.fn<DesktopMainDependencies['createStartupWindow']>()
+      .mockImplementationOnce(actions => initial.createStartupWindow(actions))
+      .mockRejectedValueOnce(recoveryFailure)
+    const setup = fixture({ createStartupWindow })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.exitHarness(21)
+    await flushLifecycle()
+    await flushLifecycle()
+
+    expect(setup.destroy).toHaveBeenCalledOnce()
+    expect(createStartupWindow).toHaveBeenCalledTimes(2)
+    expect(setup.reportFailure).toHaveBeenCalledWith('startup', recoveryFailure)
+    expect(setup.app.quit).not.toHaveBeenCalled()
+  })
+
+  it('ignores a delayed exit result from a superseded failed attempt', async () => {
+    const old = fixture()
+    const current = fixture()
+    const startHarness = vi.fn<DesktopMainDependencies['startHarness']>()
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return old.harness
+      })
+      .mockImplementationOnce(async (_launchSpec, options) => {
+        for (const milestone of ['runtime-loaded', 'profile-validated', 'service-started', 'service-ready'] as const) {
+          options.onMilestone?.(milestone)
+        }
+        return current.harness
+      })
+    const createWindow = vi.fn<DesktopMainDependencies['createWindow']>()
+      .mockRejectedValueOnce(new Error('first window failed'))
+      .mockResolvedValueOnce(current.window)
+    const setup = fixture({ createWindow, startHarness })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    await setup.startupActions().retry()
+    const recoveryWindows = vi.mocked(setup.createStartupWindow).mock.calls.length
+
+    old.exitHarness(29)
+    await flushLifecycle()
+
+    expect(setup.createStartupWindow).toHaveBeenCalledTimes(recoveryWindows)
+    expect(current.destroy).not.toHaveBeenCalled()
   })
 
   it('contains startup-window state sink exceptions without changing attempt ownership', async () => {

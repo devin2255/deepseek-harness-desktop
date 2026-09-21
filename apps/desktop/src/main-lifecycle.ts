@@ -3,7 +3,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { BackgroundPresence, BackgroundPresenceActions } from './background-presence.ts'
 import type { DesktopLog, DesktopLogEvent } from './desktop-log.ts'
 import type { ApplicationMutexHandle } from './application-mutex.ts'
-import type { HarnessHandle, HarnessLaunchSpec, HarnessStartOptions } from './harness-supervisor.ts'
+import type { HarnessExit, HarnessHandle, HarnessLaunchSpec, HarnessStartOptions } from './harness-supervisor.ts'
 import { createStartupState, reduceStartup, type DesktopStartupState } from './startup-state.ts'
 import type { StartupWindow, StartupWindowActions } from './startup-window.ts'
 import { classifyInstallerCloseIntent, isInstallerCloseNotification } from './installer-close-intent.ts'
@@ -89,8 +89,14 @@ interface StartupAttempt {
   readonly id: number
   readonly controller: AbortController
   handle?: HarnessHandle
+  handoffInProgress: boolean
   presence?: BackgroundPresence
+  readonly recoveryVisible: Promise<void>
+  recoveryTask?: Promise<void>
+  readonly resolveRecoveryVisible: () => void
+  recovering: boolean
   settled: Promise<void>
+  stopping: boolean
   stopTask?: Promise<void>
   stopFailure?: unknown
   superseded: boolean
@@ -147,9 +153,13 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     publish(reduceStartup(currentState, event))
   }
   const attemptIsInactive = (attempt: StartupAttempt): boolean => (
-    attempt.superseded || currentAttempt !== attempt || shutdownTask !== undefined
+    attempt.recovering || attempt.superseded || currentAttempt !== attempt || shutdownTask !== undefined
+  )
+  const recoveryIsObsolete = (attempt: StartupAttempt): boolean => (
+    attempt.superseded || currentAttempt !== attempt || shutdownRequested()
   )
   const stopAttempt = (attempt: StartupAttempt): Promise<void> => {
+    attempt.stopping = true
     attempt.stopTask ??= (async () => {
       const failures: unknown[] = []
       try { await attempt.presence?.dispose() } catch (error: unknown) { failures.push(error) }
@@ -162,6 +172,58 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     })
     return attempt.stopTask
   }
+  const destroyWindow = (window: DesktopWindow): void => {
+    if (!window.isDestroyed()) window.destroy()
+  }
+  const recoverUnexpectedExit = (attempt: StartupAttempt, exit: HarnessExit): Promise<void> => {
+    if (
+      attempt.stopping
+      || attempt.recovering
+      || attempt.superseded
+      || currentAttempt !== attempt
+      || shutdownTask !== undefined
+    ) return Promise.resolve()
+    attempt.recovering = true
+    attempt.recoveryTask = (async () => {
+      report('startup', new Error(`Harness exited after readiness with code ${exit.code}`))
+      writeLog('harness-exit', `attempt=${attempt.id} code=${exit.code}`)
+      publishEvent(attempt, { type: 'service-exited', attempt: attempt.id })
+
+      const window = activeWindow
+      if (window !== undefined) {
+        releaseActiveWindowClosed()
+        try { destroyWindow(window) } catch (error: unknown) { report('callback', error) }
+      }
+      try { await stopAttempt(attempt) } catch (error: unknown) { report('startup', error) }
+      if (recoveryIsObsolete(attempt)) return
+
+      let recovery = attempt.handoffInProgress ? undefined : startupWindow
+      if (recovery === undefined) {
+        try {
+          recovery = await dependencies.createStartupWindow(actions)
+        } catch (error: unknown) {
+          report('startup', error)
+          return
+        }
+      }
+      if (recoveryIsObsolete(attempt)) {
+        try { recovery.destroy() } catch (error: unknown) { report('callback', error) }
+        return
+      }
+      startupWindow = recovery
+      if (currentState?.status === 'failed') {
+        try { recovery.showFailure(currentState) } catch (error: unknown) { report('callback', error) }
+      }
+      attempt.resolveRecoveryVisible()
+    })()
+    void attempt.recoveryTask.catch((error: unknown) => { report('callback', error) })
+    return attempt.recoveryTask
+  }
+  const observeRuntimeExit = (attempt: StartupAttempt, handle: HarnessHandle): void => {
+    void handle.exited.then(exit => recoverUnexpectedExit(attempt, exit)).catch((error: unknown) => {
+      report('callback', error)
+    })
+  }
   const runAttempt = (attempt: StartupAttempt): Promise<void> => (async () => {
     try {
       attempt.handle = await dependencies.startHarness(dependencies.launchSpec, {
@@ -170,12 +232,14 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
           publishEvent(attempt, { type: milestone, attempt: attempt.id })
         },
       })
+      observeRuntimeExit(attempt, attempt.handle)
       if (attemptIsInactive(attempt)) {
         await stopAttempt(attempt)
         return
       }
       const desktopWindow = await dependencies.createWindow(attempt.handle.endpoint, attempt.handle.capability)
       if (attemptIsInactive(attempt)) {
+        try { destroyWindow(desktopWindow) } catch (error: unknown) { report('callback', error) }
         await stopAttempt(attempt)
         return
       }
@@ -186,14 +250,20 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       )
       const recovery = startupWindow
       if (recovery === undefined) throw new Error('Desktop startup window is unavailable for handoff')
-      await recovery.handoffTo(desktopWindow, (error) => {
-        report('callback', error)
-      })
+      attempt.handoffInProgress = true
+      try {
+        await recovery.handoffTo(desktopWindow, (error) => {
+          report('callback', error)
+        })
+      } finally {
+        attempt.handoffInProgress = false
+      }
+      if (startupWindow === recovery) startupWindow = undefined
       if (attemptIsInactive(attempt)) {
+        try { destroyWindow(desktopWindow) } catch (error: unknown) { report('callback', error) }
         await stopAttempt(attempt)
         return
       }
-      startupWindow = undefined
       trackActiveWindow(desktopWindow)
       if (pendingWindowOpen) void openLiveSession().catch((error: unknown) => { report('callback', error) })
       writeLog('startup-handoff', `attempt=${attempt.id}`)
@@ -223,8 +293,11 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     }
   })()
   const beginAttempt = (): StartupAttempt => {
+    let resolveRecoveryVisible!: () => void
+    const recoveryVisible = new Promise<void>((resolve) => { resolveRecoveryVisible = resolve })
     const attempt: StartupAttempt = {
-      id: nextAttemptId++, controller: new AbortController(), settled: Promise.resolve(), superseded: false,
+      id: nextAttemptId++, controller: new AbortController(), handoffInProgress: false, recovering: false,
+      recoveryVisible, resolveRecoveryVisible, settled: Promise.resolve(), stopping: false, superseded: false,
     }
     currentAttempt = attempt
     currentState = createStartupState(attempt.id)
@@ -237,11 +310,13 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     retryTask ??= (async () => {
       const previous = currentAttempt
       if (previous === undefined || currentState?.status !== 'failed') return
+      if (previous.recoveryTask !== undefined) await previous.recoveryTask
       previous.superseded = true
       previous.controller.abort()
-      await previous.settled
+      if (!previous.recovering) await previous.settled
       if (shutdownTask !== undefined || quitLatched || startupWindow === undefined) return
-      await beginAttempt().settled
+      const attempt = beginAttempt()
+      await Promise.race([attempt.settled, attempt.recoveryVisible])
     })().finally(() => { retryTask = undefined })
     return retryTask
   }
@@ -344,7 +419,8 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       applicationMutex = await mutexTask
       if (readinessController.signal.aborted) { await applicationMutex.release(); return }
       startupWindow = await dependencies.createStartupWindow(actions)
-      await beginAttempt().settled
+      const attempt = beginAttempt()
+      await Promise.race([attempt.settled, attempt.recoveryVisible])
     } catch (error: unknown) {
       if (readinessController.signal.aborted) return
       report('startup', error)

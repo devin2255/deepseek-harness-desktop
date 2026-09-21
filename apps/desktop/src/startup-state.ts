@@ -17,6 +17,7 @@ export interface DesktopStartupError {
     | 'profile-invalid'
     | 'service-start-failed'
     | 'service-unreachable'
+    | 'service-exited'
     | 'unexpected-startup-failure'
   /** Short recovery instruction that contains no internal diagnostic details. */
   readonly action: string
@@ -47,6 +48,7 @@ export type DesktopStartupEvent =
   | { readonly type: 'profile-validated'; readonly attempt: number }
   | { readonly type: 'service-started'; readonly attempt: number }
   | { readonly type: 'service-ready'; readonly attempt: number }
+  | { readonly type: 'service-exited'; readonly attempt: number }
   | { readonly type: 'failed'; readonly attempt: number; readonly error: unknown }
   | { readonly type: 'retry'; readonly attempt: number }
 
@@ -94,6 +96,18 @@ export function reduceStartup(state: DesktopStartupState, event: DesktopStartupE
     case 'service-ready':
       return state.phase === 'probing-service'
         ? { attempt: state.attempt, phase: 'ready', status: 'ready' }
+        : state
+    case 'service-exited':
+      return state.phase === 'ready'
+        ? {
+          attempt: state.attempt,
+          phase: 'failed',
+          status: 'failed',
+          error: {
+            code: 'service-exited',
+            action: 'Retry startup. If the problem continues, open the desktop log.',
+          },
+        }
         : state
     case 'failed':
       return state.phase === 'failed'

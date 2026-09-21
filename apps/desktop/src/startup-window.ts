@@ -52,6 +52,8 @@ export interface StartupWindowActions {
 export interface StartupWindow {
   /** Settles after the native window has closed and its IPC handlers are removed. */
   readonly closed: Promise<void>
+  /** Destroy the local recovery window and remove its IPC handlers. */
+  destroy(): void
   /** Restore and focus the native startup window. */
   focus(): void
   /** Publish one renderer-safe lifecycle state. */
@@ -204,6 +206,12 @@ export async function createStartupWindow(
 
   return {
     closed: closedPromise,
+    destroy() {
+      const errors = terminate()
+      if (errors.length > 0) {
+        throw new AggregateError([...errors], 'Startup window destruction failed', { cause: errors[0] })
+      }
+    },
     focus() {
       if (nativeWindow.isDestroyed()) return
       if (nativeWindow.isMinimized()) nativeWindow.restore()

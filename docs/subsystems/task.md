@@ -16,6 +16,8 @@ Evidence identifies one exact `(sessionId, seq)` event. This package validates i
 
 The current status precedence is `needs-attention`, `failed`, `running`, a durable delivery receipt producing `settled`, `reviewing`, explicitly proven `ready`, then idle `settled`. Idle state alone never implies readiness. A disconnected or unavailable runtime remains explicit through `freshness` instead of being presented as current information.
 
+Cold Session repair closes an unfinished turn with an `interrupted` reason and synthetic results for unmatched tool calls. The Task projection presents that marker as a non-actionable run failure owned by the exact Session; process-local question attention is not reconstructed and the tool call is not replayed.
+
 ## Service behavior
 
 [`TaskService`](../../packages/task/task/src/service.ts) is the definition consumed by Host APIs and implemented by a Session-backed Provider. `assignWorktree` also verifies that the assignment names the target root, its source Workspace still exists, and its source path matches that Workspace. `recordCommit`, `recordApply`, and `recordDiscard` accept only complete Provider receipts and reject while the Task tree has active work. Every durable mutation carries `expectedSeq`; the Provider compares it with the root Session's next sequence immediately before appending exactly one validated event. Subscribers receive detached whole-row changes and must be isolated from one another by the Provider.

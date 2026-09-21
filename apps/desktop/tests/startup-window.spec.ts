@@ -12,7 +12,7 @@ import {
 
 describe('createStartupWindow', () => {
   it('exposes only the startup lifecycle surface', () => {
-    expectTypeOf<keyof StartupWindow>().toEqualTypeOf<'closed' | 'focus' | 'publish' | 'showFailure' | 'handoffTo'>()
+    expectTypeOf<keyof StartupWindow>().toEqualTypeOf<'closed' | 'destroy' | 'focus' | 'publish' | 'showFailure' | 'handoffTo'>()
   })
 
   it('immediately creates a visible sandboxed window and loads only the local startup file', async () => {
@@ -104,6 +104,7 @@ describe('createStartupWindow', () => {
     const fixture = startupFixture()
     const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
     const desktop = {
+      destroy: vi.fn(),
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
       hide: vi.fn(),
       isDestroyed: () => false,
@@ -124,6 +125,7 @@ describe('createStartupWindow', () => {
     const fixture = startupFixture(undefined, { cancelClose: true })
     const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
     const desktop = {
+      destroy: vi.fn(),
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
       hide: vi.fn(),
       isDestroyed: () => false,
@@ -148,6 +150,7 @@ describe('createStartupWindow', () => {
     const fixture = startupFixture(undefined, { removeHandlerFailure: cleanupFailure })
     const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
     const desktop = {
+      destroy: vi.fn(),
       focus: vi.fn(() => fixture.steps.push('desktop-focus')),
       hide: vi.fn(),
       isDestroyed: () => false,
@@ -165,6 +168,22 @@ describe('createStartupWindow', () => {
     expect(reportFailure).toHaveBeenCalledWith(expect.objectContaining({
       message: 'Startup window IPC cleanup failed',
     }))
+  })
+
+  it('destroys a recovery window and removes its action handlers once', async () => {
+    const fixture = startupFixture()
+    const startup = await createStartupWindow(fixture.actions, fixture.dependencies)
+
+    startup.destroy()
+    startup.destroy()
+    await startup.closed
+
+    expect(fixture.destroyed()).toBe(true)
+    expect(fixture.removedChannels).toEqual([
+      'dsh-startup:retry',
+      'dsh-startup:open-logs',
+      'dsh-startup:exit',
+    ])
   })
 
   it('destroys after a failed load, disposes every handler once, and settles closure', async () => {

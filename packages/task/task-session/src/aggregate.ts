@@ -75,7 +75,9 @@ function durableAttention(taskId: SessionId, session: TaskSessionInput): Attenti
     } else if (event.type === 'approval/decided') {
       openApprovals.delete(event.data.id)
     } else if (event.type === 'turn/end') {
-      lastFailure = event.data.reason.kind === 'error' ? event : undefined
+      lastFailure = event.data.reason.kind === 'error' || event.data.reason.kind === 'interrupted'
+        ? event
+        : undefined
     }
   }
   const items = [...openApprovals].map(([sourceId, asked]): AttentionItem => ({
@@ -89,15 +91,18 @@ function durableAttention(taskId: SessionId, session: TaskSessionInput): Attenti
     sourceId,
     actionable: true,
   }))
-  if (lastFailure !== undefined && lastFailure.data.reason.kind === 'error') {
+  if (lastFailure !== undefined) {
     const sourceId = `turn:${lastFailure.data.turn}`
+    const reason = lastFailure.data.reason
     items.push({
       id: AttentionItemId(`${session.header.id}:failure:${sourceId}`),
       taskId,
       ownerSessionId: session.header.id,
       kind: 'run-failure',
       severity: 'error',
-      summary: lastFailure.data.reason.error.message,
+      summary: reason.kind === 'error'
+        ? reason.error.message
+        : 'This Task was interrupted before the turn completed. Review the last tool result before continuing.',
       createdAt: lastFailure.time,
       sourceId,
       actionable: false,

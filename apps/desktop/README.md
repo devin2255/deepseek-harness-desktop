@@ -42,6 +42,8 @@ The installer close helper uses the same Electron user-data directory as ordinar
 
 A Harness startup error, readiness timeout, or initial-window failure keeps the local recovery window available for retry, opening the desktop log, or exit. Each attempt allows 60 seconds for module loading, endpoint discovery, and authenticated readiness together; first reads after installation can be substantially slower than later launches. This is a failure-detection limit, not a fixed startup delay. Timeout logs include a bounded, redacted child-stderr suffix; raw diagnostics never enter the recovery renderer. Startup cancellation and Harness shutdown each have bounded process waits. An `AbortError` caused by requested startup cancellation is silent; a child-exit timeout or other failure discovered after cancellation is reported once as a shutdown failure. Session-handler cleanup and close-subscriber failures are reported without escaping Electron's callback; diagnostic reporting failures are also contained.
 
+An unexpected Harness exit after readiness revokes the old Renderer authorization, destroys any authorized Task window, disposes native background presence, and presents the local recovery window. Main never restarts the Host automatically. Retry starts one new Harness with a new launch capability; cold Session recovery closes an interrupted turn and Task projection exposes the interruption as a durable, non-actionable failure instead of replaying an unconfirmed tool call.
+
 ## Model Experience
 
 The Electron application adds no model-visible content. The desktop profile's [`@deepseek-ai/dsh-desktop-app`](../../packages/bundle/desktop-app/README.md) overlay disables the Web-surface prompt section and owns the loopback authorization guard.
@@ -91,4 +93,4 @@ The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) 
 - **Installer qualification** — Windows lifecycle qualification is required before distribution; unsigned local builds can trigger SmartScreen. Automatic updates and macOS packaging, signing, and notarization are not implemented.
 - **Task integration** — task overview, root-task worktree isolation, review, Commit, conflict-safe Apply, and recoverability-aware Discard are available. Child-writer worktrees, automatic reconciliation between concurrent writers, Task archival, and Harness Studio are not implemented.
 - **Native integration** — task-aware tray presence and completion or attention notifications are available. Deep links, external-link handling, and persisted window placement are not implemented.
-- **Crash recovery** — Main reports startup and shutdown failures but does not yet present task-aware recovery or restart the Harness after an abnormal runtime exit.
+- **Crash recovery** — runtime exit recovery is explicit and local. The application does not relaunch itself after a machine restart or power loss; the next ordinary launch performs cold Session repair.

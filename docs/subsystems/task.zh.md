@@ -16,6 +16,8 @@ Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个�
 
 当前状态优先级依次为 `needs-attention`、`failed`、`running`、由持久交付收据产生的 `settled`、`reviewing`、经明确证明的 `ready`，最后是空闲 `settled`。仅处于空闲状态绝不代表已经就绪。运行时断开或不可用会通过 `freshness` 明确表达，不会伪装成当前信息。
 
+冷态 Session 修复会用 `interrupted` 原因关闭未完成轮次，并为未配对的工具调用补充合成结果。Task 投影把该标记显示为由确切 Session 所属、不可直接操作的运行故障；进程内的问题注意事项不会被重建，工具调用也不会被重放。
+
 ## 服务行为
 
 [`TaskService`](../../packages/task/task/src/service.ts) 是 Host API 使用、由 Session Provider 实现的服务定义。`assignWorktree` 还会校验分配指向目标根 Task、源 Workspace 仍然存在且源路径与该 Workspace 一致。`recordCommit`、`recordApply` 和 `recordDiscard` 只接受完整 Provider 收据，并在 Task 树仍有活动工作时拒绝操作。每个持久变更都携带 `expectedSeq`；Provider 在追加一个经过校验的事件前，立即将其与根 Session 的下一序号比较。Provider 必须向订阅者发送分离的全行变更，并隔离各订阅者的故障。

@@ -24,7 +24,7 @@ A durable worktree assignment supersedes transient Workspace membership when pro
 
 Status precedence is actionable attention, unresolved failure, running activity, durable delivery, review in progress, explicitly proven readiness, then settled. Readiness requires a `ready` decision, every criterion satisfied or waived, and every risk resolved. A valid commit, apply, or discard receipt produces settled state. Idle state never implies completion.
 
-Pending durable approvals and the latest unresolved turn failure become attention items whose identity comes from the source request or event, not display text. Live facts name both the root and exact owner Session; facts with missing or foreign owners are ignored.
+Pending durable approvals and the latest unresolved error or crash-repaired interrupted turn become attention items whose identity comes from the source request or event, not display text. An interrupted turn is a non-actionable run failure; it replaces process-local question attention after a Host crash and never reissues the unconfirmed tool call. Live facts name both the root and exact owner Session; facts with missing or foreign owners are ignored.
 
 ## Model Experience
 
@@ -45,6 +45,6 @@ Independent of live requests: this Provider never assembles or mutates a request
 ## Known Limitations and Deferred Work
 
 - Live activity and question attention depend on a Consumer publishing one complete generation through `replaceLiveGeneration`; the desktop Host owns that publication from its Agent and pending-question registries.
-- Persistent attention currently derives from approval audit pairs and terminal turn failures. Validation, merge, and review systems must publish their supported attention facts when their owning capabilities are integrated.
+- Persistent attention currently derives from approval audit pairs plus terminal error and interrupted turns. Validation, merge, and review systems must publish their supported attention facts when their owning capabilities are integrated.
 - External persistence changes are observed at startup or when a live Session lifecycle crosses this process; cross-process log mutation does not yet have a watch feed.
 - Removing a live Session that never materialized in persistence removes its Task row because no durable source remains.

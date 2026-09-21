@@ -5,9 +5,17 @@ Workspace for new task
 Current workspace or choose a directory
 New Task
 
-Tasks run directly in their selected directories; there is no automatic worktree isolation.
+New tasks run in isolated Git worktrees by default and leave the project directory unchanged.
 
 Needs You
+Interrupted desktop task
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/0
+0 unresolved risk(s)
+Live
+Interrupted desktop task — Run failure: This Task was interrupted before the turn completed. Review the last tool result before continuing.
 Verify upgrade recovery
 Unassigned
 Failed
@@ -38,9 +46,17 @@ Workspace for new task
 Current workspace or choose a directory
 New Task
 
-Tasks run directly in their selected directories; there is no automatic worktree isolation.
+New tasks run in isolated Git worktrees by default and leave the project directory unchanged.
 
 Needs You
+Interrupted desktop task
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/0
+0 unresolved risk(s)
+Live
+Interrupted desktop task — Run failure: This Task was interrupted before the turn completed. Review the last tool result before continuing.
 Verify upgrade recovery
 Unassigned
 Failed
@@ -68,9 +84,17 @@ Workspace for new task
 Current workspace or choose a directory
 New Task
 
-Tasks run directly in their selected directories; there is no automatic worktree isolation.
+New tasks run in isolated Git worktrees by default and leave the project directory unchanged.
 
 Needs You
+Interrupted desktop task
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/0
+0 unresolved risk(s)
+Last known before disconnect
+Interrupted desktop task — Run failure: This Task was interrupted before the turn completed. Review the last tool result before continuing.
 Verify upgrade recovery
 Unassigned
 Failed

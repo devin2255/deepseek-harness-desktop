@@ -448,6 +448,19 @@ describe('startHarness', () => {
     expect(child.stderr.listenerCount('data')).toBe(0)
   })
 
+  it('publishes one immutable runtime exit result after readiness', async () => {
+    const { child, dependencies } = harness()
+    const start = startHarness(dependencies)
+    child.stdout.write('dsh web: http://127.0.0.1:4303\n')
+    const handle = await start
+
+    child.exit(23)
+
+    await expect(handle.exited).resolves.toEqual({ code: 23 })
+    await expect(handle.exited).resolves.toEqual({ code: 23 })
+    expect(child.listenerCount('exit')).toBe(0)
+  })
+
   it('kills exactly once and shares the in-flight stop promise until the child exits', async () => {
     const { child, dependencies } = harness()
     const start = startHarness(dependencies)

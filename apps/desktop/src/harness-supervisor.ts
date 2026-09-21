@@ -80,12 +80,20 @@ export interface HarnessStartOptions {
   readonly onMilestone?: (milestone: HarnessStartupMilestone) => void
 }
 
+/** Immutable completion of a Harness process that reached authenticated readiness. */
+export interface HarnessExit {
+  /** Native utility-process exit code. */
+  readonly code: number
+}
+
 /** A ready desktop Harness endpoint and its private capability. */
 export interface HarnessHandle {
   /** Loopback URL discovered from the child's canonical stdout line. */
   readonly endpoint: URL
   /** Per-process bearer capability; callers must not log or serialize it. */
   readonly capability: string
+  /** Settles once when the ready utility process exits; it never rejects. */
+  readonly exited: Promise<HarnessExit>
   /** Request shutdown and wait for exit; rejects on timeout while the process may remain alive. */
   stop(): Promise<void>
 }
@@ -168,6 +176,10 @@ export function startHarness(
   const exitedPromise = new Promise<void>((resolve) => {
     resolveExit = resolve
   })
+  let resolveRuntimeExit: ((result: HarnessExit) => void) | undefined
+  const runtimeExit = new Promise<HarnessExit>((resolve) => {
+    resolveRuntimeExit = resolve
+  })
   let stopPromise: Promise<void> | undefined
   let completeStartup: ((handle: HarnessHandle) => void) | undefined
   let rejectStartup: ((reason: Error) => void) | undefined
@@ -247,10 +259,11 @@ export function startHarness(
     failStartup(new Error(`Harness exited before readiness (exit code ${code})${tail}`))
   }
 
-  const onRuntimeExit = (): void => {
+  const onRuntimeExit = (code: number): void => {
     exited = true
     child.off('exit', onRuntimeExit)
     resolveExit?.()
+    resolveRuntimeExit?.(Object.freeze({ code }))
   }
 
   const stop = (): Promise<void> => {
@@ -279,7 +292,7 @@ export function startHarness(
     }).then(() => {
       if (startupSettled || startupFailure !== undefined) return
       notifyMilestone(options, 'service-ready')
-      finishStartup({ endpoint, capability, stop })
+      finishStartup({ endpoint, capability, exited: runtimeExit, stop })
     }, (error: unknown) => {
       beginStartupFailure(error instanceof Error ? error : new Error('Desktop readiness validation failed'))
     })

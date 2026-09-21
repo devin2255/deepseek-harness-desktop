@@ -80,4 +80,22 @@ describe('desktop startup state', () => {
     })
     expect(JSON.stringify(failed)).not.toMatch(/stack|capability|sk-secret|Bearer|vibe_coding/iu)
   })
+
+  it('projects a ready service exit without exposing its diagnostic result', () => {
+    const failed = reduceStartup(
+      { attempt: 4, phase: 'ready', status: 'ready' },
+      { type: 'service-exited', attempt: 4 },
+    )
+
+    expect(failed).toEqual({
+      attempt: 4,
+      phase: 'failed',
+      status: 'failed',
+      error: {
+        code: 'service-exited',
+        action: 'Retry startup. If the problem continues, open the desktop log.',
+      },
+    })
+    expect(reduceStartup(failed, { type: 'service-exited', attempt: 4 })).toBe(failed)
+  })
 })

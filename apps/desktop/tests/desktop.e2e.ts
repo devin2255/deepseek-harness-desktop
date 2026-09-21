@@ -46,7 +46,9 @@ interface TaskIdentitySnapshot {
     readonly attention: readonly {
       readonly id: string
       readonly ownerSessionId: string
+      readonly kind: string
       readonly summary: string
+      readonly sourceId: string
     }[]
     readonly commitReceipt?: {
       readonly committedRevision: string
@@ -105,6 +107,7 @@ describe('desktop Electron acceptance', () => {
     const pendingProviderResponses: ServerResponse[] = []
     let observedParentPrompt = false
     let observedChildPrompt = false
+    let descendantQuestionDispatchCount = 0
     let providerReleased = false
     const finishProviderResponse = (response: ServerResponse): void => {
       sendProviderEvents(response, textCompletionEvents('desktop task complete'))
@@ -122,6 +125,7 @@ describe('desktop Electron acceptance', () => {
             sendProviderEvents(response, textCompletionEvents('desktop child answered'))
             return
           }
+          descendantQuestionDispatchCount += 1
           sendProviderEvents(response, toolCallEvents('desktop-child-question', 'ask_user_question', {
             questions: [{
               id: 'desktop-child-question',
@@ -174,11 +178,15 @@ describe('desktop Electron acceptance', () => {
     // Electron reads appData through native shell folders on Windows, not APPDATA.
     const entry = join(temporaryRoot, 'isolated-entry.mjs')
     await writeFile(entry, [
-      "import { app, dialog, Notification, Tray } from 'electron'",
-      "const nativeAcceptance = { dialogCalls: [], dialogResponses: [], notificationListeners: new Map(), notifications: [], tray: undefined, trayListeners: {}, trayToolTip: '' }",
+      "import { app, dialog, Notification, Tray, utilityProcess } from 'electron'",
+      "const nativeAcceptance = { activeTrays: new Set(), dialogCalls: [], dialogResponses: [], harnessProcesses: [], notificationListeners: new Map(), notifications: [], tray: undefined, trayListeners: {}, trayToolTip: '' }",
       'globalThis.__dshDesktopNativeAcceptance = nativeAcceptance',
+      'const harnessFork = utilityProcess.fork.bind(utilityProcess)',
+      'utilityProcess.fork = (...args) => { const child = harnessFork(...args); nativeAcceptance.harnessProcesses.push(child); return child }',
       'const trayOn = Tray.prototype.on',
-      'Tray.prototype.on = function (event, listener) { nativeAcceptance.tray = this; nativeAcceptance.trayListeners[event] = listener; return trayOn.call(this, event, listener) }',
+      'Tray.prototype.on = function (event, listener) { nativeAcceptance.activeTrays.add(this); nativeAcceptance.tray = this; nativeAcceptance.trayListeners[event] = listener; return trayOn.call(this, event, listener) }',
+      'const trayDestroy = Tray.prototype.destroy',
+      'Tray.prototype.destroy = function () { nativeAcceptance.activeTrays.delete(this); return trayDestroy.call(this) }',
       'const setToolTip = Tray.prototype.setToolTip',
       'Tray.prototype.setToolTip = function (value) { nativeAcceptance.tray = this; nativeAcceptance.trayToolTip = value; return setToolTip.call(this, value) }',
       'const notificationOn = Notification.prototype.on',
@@ -683,13 +691,88 @@ describe('desktop Electron acceptance', () => {
     expect(renderer.sessionStorage).not.toContain(capability)
     expect(JSON.stringify(renderer.bridge)).not.toContain(capability)
 
+    const durableBeforeCrash = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+    const taskIdsBeforeCrash = durableBeforeCrash.tasks.map(task => task.taskId).sort()
+    const targetAttentionBeforeCrash = durableBeforeCrash.tasks
+      .find(task => task.taskId === thirdSession.sessionId)?.attention.map(attention => attention.id).sort()
+    if (beforeAttention === undefined || targetAttentionBeforeCrash === undefined) {
+      throw new Error('Expected the descendant question to remain pending before the Host crash')
+    }
+    expect(targetAttentionBeforeCrash).toEqual([beforeAttention.id])
+    const questionDispatchesBeforeCrash = descendantQuestionDispatchCount
+    const launchesBeforeCrash = (await nativeAcceptanceSnapshot(application)).harnessLaunchCount
+    expect(launchesBeforeCrash).toBe(1)
+
+    await terminateCurrentHarness(application)
+    const recovery = await waitForWindow(application, window => window.url().startsWith('file:'))
+    await recovery.waitForLoadState('load')
+    await recovery.getByText('Retry startup. If the problem continues, open the desktop log.').waitFor({
+      state: 'visible',
+      timeout: 15_000,
+    })
+    await new Promise(resolve => setTimeout(resolve, 500))
+    expect((await nativeAcceptanceSnapshot(application)).harnessLaunchCount).toBe(launchesBeforeCrash)
+
+    await recovery.getByRole('button', { name: 'Retry' }).click()
+    page = await waitForWindow(application, window => /^http:\/\/127\.0\.0\.1:\d+\//u.test(window.url()))
+    await page.waitForLoadState('load')
+    await expect.poll(async () => page.locator('#root').innerHTML(), { timeout: 15_000 }).not.toBe('')
+    expect((await nativeAcceptanceSnapshot(application)).harnessLaunchCount).toBe(launchesBeforeCrash + 1)
+
+    const recoveredAuthorization = captureAuthorization(page)
+    await page.evaluate(async () => {
+      await fetch('/api/host.describe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      })
+    })
+    expect(await recoveredAuthorization).not.toBe(bearer)
+    const durableAfterCrash = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+    const taskIdsAfterCrash = durableAfterCrash.tasks.map(task => task.taskId)
+    for (const taskId of taskIdsBeforeCrash) expect(taskIdsAfterCrash).toContain(taskId)
+    await expect.poll(async () => (await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})).tasks
+      .find(task => task.taskId === thirdSession.sessionId)?.attention.find(attention => (
+        attention.ownerSessionId === beforeAttention.ownerSessionId && attention.kind === 'run-failure'
+      )), {
+      timeout: 15_000,
+    }).toMatchObject({
+      kind: 'run-failure',
+      ownerSessionId: beforeAttention.ownerSessionId,
+      summary: 'This Task was interrupted before the turn completed. Review the last tool result before continuing.',
+    })
+    expect((await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})).tasks
+      .find(task => task.taskId === thirdSession.sessionId)?.attention.map(attention => attention.id))
+      .not.toContain(targetAttentionBeforeCrash[0])
+    expect(descendantQuestionDispatchCount).toBe(questionDispatchesBeforeCrash)
+
+    await page.close()
+    await expect.poll(() => application?.windows().length, { timeout: 10_000 }).toBe(0)
+    const nativeBeforeBackgroundCrash = await nativeAcceptanceSnapshot(application)
+    await terminateCurrentHarness(application)
+    const backgroundRecovery = await waitForWindow(application, window => window.url().startsWith('file:'))
+    await backgroundRecovery.getByRole('button', { name: 'Retry' }).waitFor({ state: 'visible', timeout: 15_000 })
+    const nativeAfterBackgroundCrash = await nativeAcceptanceSnapshot(application)
+    expect(nativeAfterBackgroundCrash.harnessLaunchCount).toBe(launchesBeforeCrash + 1)
+    expect(nativeAfterBackgroundCrash.notificationBodies).toEqual(nativeBeforeBackgroundCrash.notificationBodies)
+    expect(nativeAfterBackgroundCrash.trayReady).toBe(false)
+
+    await backgroundRecovery.getByRole('button', { name: 'Retry' }).click()
+    page = await waitForWindow(application, window => /^http:\/\/127\.0\.0\.1:\d+\//u.test(window.url()))
+    await page.waitForLoadState('load')
+    await expect.poll(async () => page.locator('#root').innerHTML(), { timeout: 15_000 }).not.toBe('')
+    expect((await nativeAcceptanceSnapshot(application)).harnessLaunchCount).toBe(launchesBeforeCrash + 2)
+    const taskIdsAfterBackgroundCrash = (await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})).tasks
+      .map(task => task.taskId)
+    for (const taskId of taskIdsBeforeCrash) expect(taskIdsAfterBackgroundCrash).toContain(taskId)
+
     const closing = application
     const closed = closing.waitForEvent('close')
     await requestQuitDecision(closing, 1)
     await closed
     application = undefined
     releaseProvider()
-  }, 120_000)
+  }, 180_000)
 })
 
 function git(cwd: string, args: readonly string[]): string {
@@ -980,9 +1063,33 @@ async function inspectRenderer(page: Page): Promise<{
   })
 }
 
+async function waitForWindow(target: ElectronApplication, predicate: (window: Page) => boolean): Promise<Page> {
+  let matched: Page | undefined
+  await expect.poll(() => {
+    matched = target.windows().find(predicate)
+    return matched !== undefined
+  }, { timeout: 75_000 }).toBe(true)
+  if (matched === undefined) throw new Error('Expected Electron window did not open')
+  return matched
+}
+
+async function terminateCurrentHarness(target: ElectronApplication): Promise<void> {
+  await target.evaluate(() => {
+    const state = (globalThis as unknown as {
+      readonly __dshDesktopNativeAcceptance?: {
+        readonly harnessProcesses: readonly { kill(): boolean }[]
+      }
+    }).__dshDesktopNativeAcceptance
+    const child = state?.harnessProcesses.at(-1)
+    if (child === undefined) throw new Error('desktop Harness utility process is unavailable')
+    if (!child.kill()) throw new Error('desktop Harness utility process rejected termination')
+  })
+}
+
 interface NativeAcceptanceSnapshot {
   readonly dialogButtons: readonly (readonly string[])[]
   readonly dialogCallCount: number
+  readonly harnessLaunchCount: number
   readonly notificationBodies: readonly string[]
   readonly trayReady: boolean
   readonly trayToolTip: string
@@ -992,7 +1099,9 @@ async function nativeAcceptanceSnapshot(target: ElectronApplication): Promise<Na
   return target.evaluate(() => {
     const state = (globalThis as unknown as {
       readonly __dshDesktopNativeAcceptance?: {
+        readonly activeTrays: ReadonlySet<unknown>
         readonly dialogCalls: readonly { readonly buttons?: readonly string[] }[]
+        readonly harnessProcesses: readonly unknown[]
         readonly notifications: readonly { readonly body: string }[]
         readonly tray?: unknown
         readonly trayToolTip: string
@@ -1002,8 +1111,9 @@ async function nativeAcceptanceSnapshot(target: ElectronApplication): Promise<Na
     return {
       dialogButtons: state.dialogCalls.map(call => call.buttons ?? []),
       dialogCallCount: state.dialogCalls.length,
+      harnessLaunchCount: state.harnessProcesses.length,
       notificationBodies: state.notifications.map(notification => notification.body),
-      trayReady: state.tray !== undefined,
+      trayReady: state.activeTrays.size > 0,
       trayToolTip: state.trayToolTip,
     }
   })
