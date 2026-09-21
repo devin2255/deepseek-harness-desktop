@@ -14,13 +14,23 @@ try {
   if ([String]::IsNullOrWhiteSpace($target) -or -not [IO.Path]::IsPathRooted($target)) { exit 2 }
   $target = Resolve-DshPathIdentity $target
   $processName = [IO.Path]::GetFileNameWithoutExtension($target)
-  $running = @(Get-Process -Name $processName -ErrorAction SilentlyContinue | Where-Object {
-    try {
-      $_.Path -and [String]::Equals((Resolve-DshPathIdentity $_.Path), $target, [StringComparison]::OrdinalIgnoreCase)
-    } catch {
-      $false
+  $running = $false
+  $processes = [Diagnostics.Process]::GetProcessesByName($processName)
+  try {
+    foreach ($process in $processes) {
+      try {
+        $candidate = $process.MainModule.FileName
+        if ($candidate -and [String]::Equals((Resolve-DshPathIdentity $candidate), $target, [StringComparison]::OrdinalIgnoreCase)) {
+          $running = $true
+          break
+        }
+      } catch {
+        # A process can exit or deny image-path access between enumeration and inspection.
+      }
     }
-  }).Count -gt 0
+  } finally {
+    foreach ($process in $processes) { $process.Dispose() }
+  }
   [Console]::Out.Write($(if ($running) { 'running' } else { 'stopped' }))
 } catch {
   exit 2

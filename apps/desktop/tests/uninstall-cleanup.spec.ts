@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { lstat, open, rmdir, unlink, utimes, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -23,6 +24,16 @@ function invoke(
     maxSnapshotEntries: 100,
     fallbackPackageRoots,
   })
+}
+
+function shortWindowsPath(path: string): string {
+  const result = spawnSync('cmd.exe', ['/d', '/c', `for %I in ("${path}") do @echo %~sI`], {
+    encoding: 'utf8',
+    windowsVerbatimArguments: true,
+  })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`cmd.exe failed to resolve a Windows short path: ${result.stderr}`)
+  return result.stdout.trim()
 }
 
 describe('runUninstallCleanup', () => {
@@ -556,6 +567,23 @@ describe('runUninstallCleanup', () => {
     symlinkSync(runtimePackage, join(fallback, 'package'), 'junction')
 
     await expect(invoke(appData, undefined, TOKEN, [toNamespacedPath(runtimeRoot)])).resolves.toBe(true)
+
+    expect(() => lstatSync(product)).toThrow()
+    expect(readFileSync(join(runtimePackage, 'sentinel.txt'), 'utf8')).toBe('keep')
+  })
+
+  it.runIf(process.platform === 'win32')('accepts a generated fallback junction whose target uses an equivalent Windows short spelling', async () => {
+    const appData = mkdtempSync(join(tmpdir(), 'dsh-cleanup-fallback-target-short-'))
+    const product = join(appData, 'DeepSeek Harness')
+    const fallback = join(product, 'Harness', 'profiles', 'node_modules', '@scope')
+    const runtimeRoot = mkdtempSync(join(tmpdir(), 'dsh-cleanup-runtime-target-short-'))
+    const runtimePackage = join(runtimeRoot, 'package')
+    mkdirSync(fallback, { recursive: true })
+    mkdirSync(runtimePackage)
+    writeFileSync(join(runtimePackage, 'sentinel.txt'), 'keep')
+    symlinkSync(shortWindowsPath(runtimePackage), join(fallback, 'package'), 'junction')
+
+    await expect(invoke(appData, undefined, TOKEN, [runtimeRoot])).resolves.toBe(true)
 
     expect(() => lstatSync(product)).toThrow()
     expect(readFileSync(join(runtimePackage, 'sentinel.txt'), 'utf8')).toBe('keep')

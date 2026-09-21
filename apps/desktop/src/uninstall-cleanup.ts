@@ -240,8 +240,11 @@ async function removeGeneratedFallbackLinks(productRoot: string, packageRoots: r
     }
     const rawTarget = await readlink(link)
     const resolvedTarget = resolve(dirname(link), rawTarget)
+    const canonicalResolvedTarget = await realpath(resolvedTarget)
     const canonicalTarget = await realpath(link)
-    if (!canonicalRoots.some(root => isContainedPath(resolvedTarget, root) && isContainedPath(canonicalTarget, root))) {
+    if (!canonicalRoots.some(root => (
+      isContainedPath(canonicalResolvedTarget, root) && isContainedPath(canonicalTarget, root)
+    ))) {
       throw new Error(`Uninstall cleanup refuses an unknown fallback junction target: ${link}`)
     }
   }
