@@ -1,6 +1,6 @@
 /** Desktop production staging behavior and path-safety tests. */
 
-import { existsSync, mkdirSync, mkdtempSync as systemMkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync as systemMkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { lstat as lstatAsync, mkdtemp, rename, rm, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -120,8 +120,10 @@ describe('desktop production staging', () => {
       process.platform === 'win32' ? 'junction' : 'dir',
     )
 
-    await expect(resolveBundleManifest('@deepseek-ai/dsh-base', join(logicalDsh, 'package.json'), stage))
-      .resolves.toBe(realpathSync(join(bundle, 'package.json')))
+    const resolvedManifest = await resolveBundleManifest('@deepseek-ai/dsh-base', join(logicalDsh, 'package.json'), stage)
+    const resolvedIdentity = statSync(resolvedManifest)
+    const expectedIdentity = statSync(join(bundle, 'package.json'))
+    expect({ dev: resolvedIdentity.dev, ino: resolvedIdentity.ino }).toEqual({ dev: expectedIdentity.dev, ino: expectedIdentity.ino })
   })
 
   it('rejects a bundle manifest resolved only from ancestor node_modules', async () => {
