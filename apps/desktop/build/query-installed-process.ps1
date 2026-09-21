@@ -4,7 +4,12 @@ $ProgressPreference = 'SilentlyContinue'
 function Resolve-DshPathIdentity([string] $path) {
   $fullPath = [IO.Path]::GetFullPath($path)
   if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
-    return (Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop).FullName
+    try {
+      return (Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop).FullName
+    } catch {
+      # Replacement can remove an executable between the existence check and identity lookup.
+      return $fullPath
+    }
   }
   return $fullPath
 }
@@ -29,9 +34,14 @@ try {
       }
     }
   } finally {
-    foreach ($process in $processes) { $process.Dispose() }
+    foreach ($process in $processes) {
+      try { $process.Dispose() } catch {
+        # A raced process teardown must not turn an exact-path query into an indeterminate result.
+      }
+    }
   }
   [Console]::Out.Write($(if ($running) { 'running' } else { 'stopped' }))
 } catch {
+  [Console]::Error.Write("query-installed-process failed: type=$($_.Exception.GetType().FullName) hresult=$($_.Exception.HResult)")
   exit 2
 }

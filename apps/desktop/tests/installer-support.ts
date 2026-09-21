@@ -621,12 +621,28 @@ async function waitForProcessState(executable: string, expected: 'running' | 'st
   const script = await readFile(join(dirname(fileURLToPath(import.meta.url)), '../build/query-installed-process.ps1'), 'utf8')
   const command = Buffer.from(script.replace(/^\uFEFF/u, ''), 'utf16le').toString('base64')
   await waitUntil(async (remaining) => {
-    const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command], {
-      env: { ...process.env, DSH_INSTALLER_TARGET_EXE: executable },
-      timeout: Math.min(remaining, 10_000),
-    })
-    return stdout.trim() === expected
+    try {
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command], {
+        env: { ...process.env, DSH_INSTALLER_TARGET_EXE: executable },
+        timeout: Math.min(remaining, 10_000),
+      })
+      return stdout.trim() === expected
+    } catch (error: unknown) {
+      throw processQueryFailure(error)
+    }
   }, timeout)
+}
+
+function processQueryFailure(error: unknown): Error {
+  if (!(error instanceof Error)) return new Error('installed process query failed with a non-Error result')
+  const details: string[] = []
+  if ('code' in error) details.push(`code=${String(error.code)}`)
+  if ('signal' in error) details.push(`signal=${String(error.signal)}`)
+  if ('killed' in error) details.push(`killed=${String(error.killed)}`)
+  if ('stderr' in error && typeof error.stderr === 'string' && error.stderr.trim() !== '') {
+    details.push(`stderr=${error.stderr.trim().slice(0, 256)}`)
+  }
+  return new Error(`installed process query failed${details.length === 0 ? '' : ` (${details.join(' ')})`}`, { cause: error })
 }
 
 async function waitUntil(predicate: (remaining: number) => Promise<boolean>, timeout: number): Promise<void> {
