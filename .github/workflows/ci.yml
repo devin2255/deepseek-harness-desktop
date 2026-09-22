@@ -382,16 +382,16 @@ jobs:
 
       # Runner provisioning only — a developer machine installs Wine through
       # its own package manager; the gate script assumes a wine binary and
-      # fails loud without one. Wine from the apt cache when present; else
-      # download the full dependency closure once and keep it for the next
-      # run. The `wine` dispatcher package (not bare `wine64`) is what puts a
-      # binary on PATH.
+      # fails loud without one. Cached packages reduce repeat downloads, while
+      # fresh apt indexes let the current runner image fill dependencies that
+      # were already installed on the cache-seeding image. The `wine`
+      # dispatcher package (not bare `wine64`) is what puts a binary on PATH.
       - name: Install Wine
         run: |
+          sudo apt-get update
           if compgen -G "$HOME/wine-debs/*.deb" > /dev/null; then
             sudo apt-get install -y --no-install-recommends "$HOME"/wine-debs/*.deb
           else
-            sudo apt-get update
             sudo apt-get install -y --no-install-recommends --download-only wine
             mkdir -p "$HOME/wine-debs"
             cp /var/cache/apt/archives/*.deb "$HOME/wine-debs/" 2>/dev/null || true

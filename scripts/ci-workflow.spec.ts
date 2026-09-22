@@ -61,6 +61,8 @@ describe('CI workflow', () => {
     expect(windows.name).toBe('windows node 24 / wine blocking')
     expect(windows.if).toBe("github.event_name == 'pull_request'")
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
+    const installWine = commandSteps.find(step => step.name === 'Install Wine')
+    expect(installWine?.run.trimStart().startsWith('sudo apt-get update\n')).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
     // Its pool is resolved by the Windows-specific switch.
