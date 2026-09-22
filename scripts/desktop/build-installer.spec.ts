@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -340,8 +340,10 @@ describe('Windows installer configuration', { concurrent: false }, () => {
   })
 
   it('recognizes only old or new exact shortcut targets through one serialized COM session', { timeout: 20_000 }, async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
-    const shortcut = join(directory, "用户's DeepSeek Harness.lnk")
+    const root = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
+    const directory = join(root, "用户's shortcut directory")
+    await mkdir(directory)
+    const shortcut = join(directory, 'DeepSeek Harness.lnk')
     const windows = process.env.SystemRoot ?? 'C:\\Windows'
     const target = join(windows, 'System32/WindowsPowerShell/v1.0/powershell.exe')
     const foreignTarget = join(windows, 'System32/cmd.exe')
@@ -370,7 +372,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
         await expect(inspectShortcutTargets(shortcut, oldTarget, newTarget)).resolves.toBe(expected)
       }
     } finally {
-      await rm(directory, { recursive: true, force: true })
+      await rm(root, { recursive: true, force: true })
     }
   })
 

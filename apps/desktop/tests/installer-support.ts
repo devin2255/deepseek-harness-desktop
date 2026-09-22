@@ -270,9 +270,19 @@ export async function verifyInstalledApplication(
       await waitForProcessState(join(installRoot, 'DeepSeek Harness.exe'), 'stopped')
     }
   } catch (error: unknown) {
-    const diagnostics = await readFile(join(fixture.productData, 'logs', 'desktop.log'), 'utf8')
+    const desktopLog = await readFile(join(fixture.productData, 'logs', 'desktop.log'), 'utf8')
       .then(log => log.slice(-16_384), () => '<desktop log unavailable>')
-    throw new Error(`installed application readiness failed; isolated desktop log:\n${diagnostics}`, { cause: error })
+    const installerTrace = await readFile(join(fixture.environment.TEMP ?? fixture.root, 'dsh-installer-e2e.log'), 'utf8')
+      .then(trace => trace.slice(-16_384), () => '<installer trace unavailable>')
+    const launched = application?.process()
+    const launchedState = launched === undefined
+      ? '<application process unavailable>'
+      : `pid=${launched.pid}; exitCode=${String(launched.exitCode)}; signalCode=${String(launched.signalCode)}; closeEvent=${String(applicationClosed)}`
+    throw new Error([
+      `installed application readiness failed; launched process: ${launchedState}`,
+      `isolated installer trace:\n${installerTrace}`,
+      `isolated desktop log:\n${desktopLog}`,
+    ].join('\n'), { cause: error })
   } finally {
     if (application !== undefined && !applicationClosed) await boundedClose(application)
   }
@@ -620,17 +630,52 @@ async function pathExists(path: string): Promise<boolean> {
 async function waitForProcessState(executable: string, expected: 'running' | 'stopped', timeout = 20_000): Promise<void> {
   const script = await readFile(join(dirname(fileURLToPath(import.meta.url)), '../build/query-installed-process.ps1'), 'utf8')
   const command = Buffer.from(script.replace(/^\uFEFF/u, ''), 'utf16le').toString('base64')
-  await waitUntil(async (remaining) => {
-    try {
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command], {
-        env: { ...process.env, DSH_INSTALLER_TARGET_EXE: executable },
-        timeout: Math.min(remaining, 10_000),
-      })
-      return stdout.trim() === expected
-    } catch (error: unknown) {
-      throw processQueryFailure(error)
-    }
-  }, timeout)
+  let observed = '<not queried>'
+  try {
+    await waitUntil(async (remaining) => {
+      try {
+        const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command], {
+          env: { ...process.env, DSH_INSTALLER_TARGET_EXE: executable },
+          timeout: Math.min(remaining, 10_000),
+        })
+        observed = stdout.trim()
+        return observed === expected
+      } catch (error: unknown) {
+        throw processQueryFailure(error)
+      }
+    }, timeout)
+  } catch (error: unknown) {
+    const processes = await installedProcessDiagnostics(executable)
+    throw new Error(
+      `installed process did not become ${expected}; last state=${JSON.stringify(observed)}; exact-name processes=${processes}`,
+      { cause: error },
+    )
+  }
+}
+
+async function installedProcessDiagnostics(executable: string): Promise<string> {
+  const source = [
+    '$name=[IO.Path]::GetFileNameWithoutExtension($env:DSH_INSTALLER_TARGET_EXE)',
+    '$rows=[Collections.Generic.List[string]]::new()',
+    'foreach($process in [Diagnostics.Process]::GetProcessesByName($name)){',
+    'try{$rows.Add(("pid={0}; exited={1}; path={2}" -f $process.Id,$process.HasExited,$process.MainModule.FileName))}',
+    'catch{$rows.Add(("pid={0}; inspection={1}" -f $process.Id,$_.Exception.GetType().FullName))}',
+    'finally{try{$process.Dispose()}catch{}}',
+    '}',
+    "[Console]::Out.Write($(if($rows.Count -eq 0){'<none>'}else{$rows -join ' | '}))",
+  ].join(';')
+  const command = Buffer.from(source, 'utf16le').toString('base64')
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command,
+    ], {
+      env: { ...process.env, DSH_INSTALLER_TARGET_EXE: executable },
+      timeout: 10_000,
+    })
+    return stdout.trim() || '<empty report>'
+  } catch (error: unknown) {
+    return `<diagnostics failed: ${processQueryFailure(error).message}>`
+  }
 }
 
 function processQueryFailure(error: unknown): Error {
