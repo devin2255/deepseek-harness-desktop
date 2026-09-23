@@ -3,7 +3,7 @@ import { app, dialog, Menu, Notification, shell, Tray } from 'electron'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { acquireApplicationMutex } from './application-mutex.ts'
+import { acquirePlatformApplicationMutex } from './application-mutex.ts'
 import { createBackgroundPresence, type BackgroundMenuItem } from './background-presence.ts'
 import { DesktopLog } from './desktop-log.ts'
 import { startHarness } from './harness-supervisor.ts'
@@ -80,7 +80,7 @@ function startNormalDesktop(): void {
   })
   startDesktopMain({
     app,
-    acquireApplicationMutex,
+    acquireApplicationMutex: () => acquirePlatformApplicationMutex(process.platform),
     launchSpec: runtimeContext,
     platform: process.platform,
     startHarness: (launchSpec, options) => startHarness(launchSpec, options),

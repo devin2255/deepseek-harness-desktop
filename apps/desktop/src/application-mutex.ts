@@ -10,6 +10,20 @@ export interface ApplicationMutexHandle {
   release(): Promise<void>
 }
 
+/**
+ * Acquire the installer-visible mutex only on Windows; Electron owns single-instance exclusion elsewhere.
+ * @param platform - Host operating system.
+ * @param acquireWindowsMutex - Windows mutex operation.
+ * @returns A releasable handle for the selected platform.
+ */
+export async function acquirePlatformApplicationMutex(
+  platform: NodeJS.Platform,
+  acquireWindowsMutex: () => Promise<ApplicationMutexHandle> = acquireApplicationMutex,
+): Promise<ApplicationMutexHandle> {
+  if (platform === 'win32') return acquireWindowsMutex()
+  return { release: async () => {} }
+}
+
 /** Return the fixed helper program used by production and inspected by tests. */
 export function applicationMutexPowerShell(): string {
   return `$createdNew=$false;$mutex=[Threading.Mutex]::new($true,'${MUTEX_NAME}',[ref]$createdNew);if(-not $createdNew){exit 2};[Console]::Out.WriteLine('ready');try{[Console]::In.ReadToEnd()|Out-Null}finally{$mutex.ReleaseMutex();$mutex.Dispose()}`
