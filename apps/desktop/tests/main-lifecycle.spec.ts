@@ -51,6 +51,9 @@ class FakeApp extends EventEmitter implements DesktopApp {
   readonly quit = vi.fn(() => {
     this.calls.push('quit')
   })
+  readonly exit = vi.fn((_exitCode: number) => {
+    this.calls.push('exit')
+  })
 
   emitBeforeQuit(): { readonly preventDefault: Mock<DesktopQuitEvent['preventDefault']> } {
     const event = { preventDefault: vi.fn() }
@@ -836,7 +839,27 @@ describe('startDesktopMain', () => {
 
     expect(stop).toHaveBeenCalledTimes(1)
     expect(focus).not.toHaveBeenCalled()
-    expect(app.quit).toHaveBeenCalledTimes(1)
+    expect(app.exit).toHaveBeenCalledWith(0)
+    expect(app.quit).not.toHaveBeenCalled()
+  })
+
+  it('upgrades an in-flight graceful shutdown to installer termination', async () => {
+    const stopping = deferred<undefined>()
+    const setup = fixture()
+    vi.mocked(setup.stop).mockReturnValue(stopping.promise)
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    setup.app.emitBeforeQuit()
+    await flushLifecycle()
+    setup.app.emit('second-instance', {}, ['DeepSeek Harness.exe', '--installer-request-close'], '', {
+      type: 'deepseek-harness:installer-close',
+    })
+    stopping.resolve(undefined)
+    await desktop.shutdown
+
+    expect(setup.app.exit).toHaveBeenCalledWith(0)
+    expect(setup.app.quit).not.toHaveBeenCalled()
   })
 
   it.each([undefined, {}, { type: 'other' }, { type: 'deepseek-harness:installer-close', extra: true }])('does not close for unvalidated command-line intent and invalid notification %j', async (additionalData) => {
@@ -1224,6 +1247,8 @@ describe('startDesktopMain', () => {
 
     expect(setup.confirmQuit).not.toHaveBeenCalled()
     expect(setup.stop).toHaveBeenCalledOnce()
+    expect(setup.app.exit).toHaveBeenCalledWith(0)
+    expect(setup.app.quit).not.toHaveBeenCalled()
   })
 
   it('recreates and shows a natively closed Windows window for a second instance', async () => {

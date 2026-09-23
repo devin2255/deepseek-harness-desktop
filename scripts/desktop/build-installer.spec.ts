@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -349,9 +349,16 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const foreignTarget = join(windows, 'System32/cmd.exe')
     try {
       const createShortcut = '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DSH_TEST_SHORTCUT);$s.TargetPath=$env:DSH_TEST_TARGET;$s.Save()'
-      await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
-        env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: target },
-      })
+      const stagedShortcut = join(root, 'staged.lnk')
+      const stageShortcut = async (shortcutTarget: string): Promise<void> => {
+        await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
+          env: { ...process.env, DSH_TEST_SHORTCUT: stagedShortcut, DSH_TEST_TARGET: shortcutTarget },
+        })
+        await rm(shortcut, { force: true })
+        // WScript is only a fixture producer; moving its output keeps the inspector path under a Unicode ancestor on hosted Windows.
+        await rename(stagedShortcut, shortcut)
+      }
+      await stageShortcut(target)
       await expect(inspectShortcut(shortcut, target)).resolves.toBe(0)
       await expect(inspectShortcut(shortcut, foreignTarget)).resolves.toBe(11)
       await expect(inspectShortcut(join(directory, 'missing.lnk'), target)).resolves.toBe(10)
@@ -359,16 +366,12 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       await expect(inspectShortcut('relative.lnk', target)).resolves.toBe(2)
       const gitBash = join(await gitInstallationRoot(), 'bin', 'bash.exe')
       const shortGitBash = await shortWindowsPath(gitBash)
-      await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
-        env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: gitBash },
-      })
+      await stageShortcut(gitBash)
       await expect(inspectShortcut(shortcut, shortGitBash)).resolves.toBe(0)
       const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
       const newTarget = target
       for (const [target, expected] of [[oldTarget, 0], [newTarget, 0], [foreignTarget, 11]] as const) {
-        await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
-          env: { ...process.env, DSH_TEST_SHORTCUT: shortcut, DSH_TEST_TARGET: target },
-        })
+        await stageShortcut(target)
         await expect(inspectShortcutTargets(shortcut, oldTarget, newTarget)).resolves.toBe(expected)
       }
     } finally {

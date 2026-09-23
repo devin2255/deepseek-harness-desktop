@@ -33,6 +33,11 @@ export interface DesktopApp {
   whenReady(): Promise<void>
   /** Request application termination. */
   quit(): void
+  /**
+   * Terminate immediately after installer-owned cleanup has settled.
+   * @param exitCode - Operating-system process exit code.
+   */
+  exit(exitCode: number): void
   /** Subscribe to asynchronous quit interception. */
   on(event: 'before-quit', listener: (event: DesktopQuitEvent) => void): this
   /** Subscribe to a second-instance launch and its deserialized notification. */
@@ -127,6 +132,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   let resolveShutdown!: () => void
   const shutdown = new Promise<void>((resolve) => { resolveShutdown = resolve })
   let quitLatched = false
+  let forceExitAfterCleanup = false
   let applicationMutex: ApplicationMutexHandle | undefined
   const shutdownRequested = (): boolean => shutdownTask !== undefined || quitLatched
 
@@ -324,7 +330,8 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     const errorMessage = await dependencies.openPath(dependencies.desktopLog.currentPath())
     if (errorMessage !== '') throw new Error('Electron could not open the desktop log')
   }
-  const quitAfterCleanup = (): Promise<void> => {
+  const quitAfterCleanup = (forceExit = false): Promise<void> => {
+    if (forceExit) forceExitAfterCleanup = true
     shutdownTask ??= (async () => {
       readinessController.abort()
       releaseActiveWindowClosed()
@@ -338,7 +345,10 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       } catch (error: unknown) { report('shutdown', error) } finally {
         quitLatched = true
         resolveShutdown()
-        try { app.quit() } catch (error: unknown) { report('callback', error) }
+        try {
+          if (forceExitAfterCleanup) app.exit(0)
+          else app.quit()
+        } catch (error: unknown) { report('callback', error) }
       }
     })()
     return shutdownTask
@@ -396,7 +406,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   app.on('second-instance', (_event, commandLine?: string[], _workingDirectory?: string, additionalData?: unknown) => {
     try {
       const installerCloseIntent = classifyInstallerCloseIntent(commandLine?.slice(1) ?? [])
-      if (isInstallerCloseNotification(additionalData)) void quitAfterCleanup()
+      if (isInstallerCloseNotification(additionalData)) void quitAfterCleanup(true)
       else if (installerCloseIntent === 'none') void openLiveSession().catch((error: unknown) => { report('callback', error) })
     } catch (error: unknown) { report('callback', error) }
   })

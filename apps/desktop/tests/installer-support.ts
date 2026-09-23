@@ -663,7 +663,7 @@ async function installedProcessDiagnostics(executable: string): Promise<string> 
     'finally{try{$process.Dispose()}catch{}}',
     '}',
     "[Console]::Out.Write($(if($rows.Count -eq 0){'<none>'}else{$rows -join ' | '}))",
-  ].join(';')
+  ].join('\n')
   const command = Buffer.from(source, 'utf16le').toString('base64')
   try {
     const { stdout } = await execFileAsync('powershell.exe', [
