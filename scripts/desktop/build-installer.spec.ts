@@ -311,7 +311,10 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(hook.indexOf('!insertmacro DshQueryInstalledProcess')).toBeLessThan(hook.indexOf('OpenMutexW'))
     expect(hook).toMatch(/DshQueryFailed:[\s\S]*MB_RETRYCANCEL/u)
     expect(hook).not.toMatch(/IntCmp \$2 0 DshNotRunning/u)
-    expect(source).toContain('-EncodedCommand ${DSH_POWERSHELL_QUERY_INSTALLED_PROCESS}')
+    const query = source.match(/!macro DshQueryInstalledProcess Target ExitCode Status(?<body>[\s\S]*?)!macroend/u)?.groups?.body ?? ''
+    expect(query).toContain('$WINDIR\\Sysnative\\WindowsPowerShell\\v1.0\\powershell.exe')
+    expect(query).not.toContain('$SYSDIR\\WindowsPowerShell')
+    expect(query).toContain('-EncodedCommand ${DSH_POWERSHELL_QUERY_INSTALLED_PROCESS}')
     expect(source).toMatch(/DSH_INSTALLER_TARGET_EXE[\s\S]*DSH_INSTALLER_TARGET_EXE[^\n]*p 0/u)
   })
 
@@ -344,6 +347,10 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const inspectorSource = await readFile(inspectShortcutPath, 'utf8')
     expect(inspectorSource).toContain('WScript.Shell')
     expect(inspectorSource).toMatch(/Shell\.Application[\s\S]*GetLink/u)
+    const canonicalInspector = canonicalPowerShellSource(inspectorSource)
+    const definitions = canonicalInspector.slice(0, canonicalInspector.indexOf('\ntry {\n  $shortcutPath'))
+    const fallbackProbe = `${definitions}\nfunction Read-DshShellShortcutTarget([string] $path) { return '' }\n[Console]::Out.Write((Read-DshShortcutTarget $env:DSH_TEST_SHORTCUT))\n`
+    const fallbackCommand = Buffer.from(fallbackProbe, 'utf16le').toString('base64')
     const root = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
     const directory = join(root, "用户's shortcut directory")
     await mkdir(directory)
@@ -376,6 +383,11 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       const newTarget = target
       for (const [target, expected] of [[oldTarget, 0], [newTarget, 0], [foreignTarget, 11]] as const) {
         await stageShortcut(target)
+        if (target === oldTarget) {
+          await expect(runRestrictedCommand(fallbackCommand, {
+            ...process.env, DSH_TEST_SHORTCUT: shortcut,
+          })).resolves.toBe(oldTarget)
+        }
         await expect(inspectShortcutTargets(shortcut, oldTarget, newTarget)).resolves.toBe(expected)
       }
     } finally {

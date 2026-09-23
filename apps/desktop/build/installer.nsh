@@ -389,7 +389,8 @@ FunctionEnd
   Push $9
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_TARGET_EXE", w "${Target}") i.r9'
   Pop $9
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Restricted -EncodedCommand ${DSH_POWERSHELL_QUERY_INSTALLED_PROCESS}`
+  ; NSIS is 32-bit; Sysnative reaches 64-bit PowerShell so MainModule can inspect the x64 app.
+  nsExec::ExecToStack `"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Restricted -EncodedCommand ${DSH_POWERSHELL_QUERY_INSTALLED_PROCESS}`
   Pop ${ExitCode}
   Pop ${Status}
   !insertmacro DshE2eTrace "process query exit=${ExitCode} status=${Status}"

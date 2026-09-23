@@ -16,6 +16,17 @@ function Resolve-DshPathIdentity([string] $path) {
   return $fullPath
 }
 
+function Test-DshAbsolutePath([string] $path) {
+  if ([String]::IsNullOrWhiteSpace($path)) { return $false }
+  try {
+    if (-not [IO.Path]::IsPathRooted($path)) { return $false }
+    [void] [IO.Path]::GetFullPath($path)
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Read-DshShellShortcutTarget([string] $path) {
   $script:shellApplication = New-Object -ComObject Shell.Application
   $script:shellFolder = $script:shellApplication.Namespace([IO.Path]::GetDirectoryName($path))
@@ -27,12 +38,24 @@ function Read-DshShellShortcutTarget([string] $path) {
   return $script:shellLink.Path
 }
 
+function Read-DshWScriptShortcutTarget([string] $path) {
+  $script:shell = New-Object -ComObject WScript.Shell
+  $script:shortcut = $script:shell.CreateShortcut($path)
+  return $script:shortcut.TargetPath
+}
+
 function Read-DshShortcutTarget([string] $path) {
-  if ($path -match '[^\x00-\x7F]') { return Read-DshShellShortcutTarget $path }
+  if ($path -match '[^\x00-\x7F]') {
+    try { $target = Read-DshShellShortcutTarget $path } catch {
+      # A Shell link lookup can fail while WScript can still read its stored target.
+      $target = $null
+    }
+    if (Test-DshAbsolutePath $target) { return $target }
+    return Read-DshWScriptShortcutTarget $path
+  }
   try {
-    $script:shell = New-Object -ComObject WScript.Shell
-    $script:shortcut = $script:shell.CreateShortcut($path)
-    return $script:shortcut.TargetPath
+    $target = Read-DshWScriptShortcutTarget $path
+    if (Test-DshAbsolutePath $target) { return $target }
   } catch {
     if ($null -ne $script:shortcut) {
       [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:shortcut)
@@ -42,8 +65,8 @@ function Read-DshShortcutTarget([string] $path) {
       [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($script:shell)
       $script:shell = $null
     }
-    return Read-DshShellShortcutTarget $path
   }
+  return Read-DshShellShortcutTarget $path
 }
 
 try {
@@ -55,7 +78,9 @@ try {
   if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
     $status = 10
   } else {
-    $shortcutTarget = Resolve-DshPathIdentity (Read-DshShortcutTarget $shortcutPath)
+    $rawShortcutTarget = Read-DshShortcutTarget $shortcutPath
+    if (-not (Test-DshAbsolutePath $rawShortcutTarget)) { throw 'shortcut target is not an absolute path' }
+    $shortcutTarget = Resolve-DshPathIdentity $rawShortcutTarget
     $owned = @($targetPaths | Where-Object {
       [String]::Equals($shortcutTarget, (Resolve-DshPathIdentity $_), [StringComparison]::OrdinalIgnoreCase)
     }).Count -gt 0
