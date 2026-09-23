@@ -10,9 +10,9 @@ A source-built Electron acceptance test proves the desktop entry can run on macO
 
 ## Decision
 
-The [macOS arm64 workflow](../../../../.github/workflows/desktop-macos.yml) runs the real Electron acceptance test and then builds an unsigned arm64 application, DMG, and ZIP on an Apple Silicon runner. The packaging command invokes installed `pnpm` from `PATH` on macOS rather than assuming Corepack is beside Node; Windows uses Corepack without a command shell. It rejects signing credentials, checks the app's executable architecture and required Main/preload files, and verifies both archives before CI retains them for 30 days. The repository-generated 1024-pixel PNG supplies the application icon; Windows keeps its separate ICO and NSIS targets.
+The [macOS arm64 workflow](../../../../.github/workflows/desktop-macos.yml) runs the real Electron acceptance test and then builds an unsigned arm64 application, DMG, and ZIP on an Apple Silicon runner. The packaging command invokes installed `pnpm` from `PATH` on macOS rather than assuming Corepack is beside Node; Windows uses Corepack without a command shell. It rejects signing credentials, checks the app's executable architecture and required Main/preload files, and verifies both archives. CI then mounts the DMG read-only, copies the application to a disposable installation directory, launches that copy, checks authenticated Host readiness and rejection of a direct unauthenticated request, and retains the archives for 30 days only after these checks pass. The repository-generated 1024-pixel PNG supplies the application icon; Windows keeps its separate ICO and NSIS targets.
 
-The archives are qualification artifacts, not releases. The workflow neither installs the DMG nor checks Gatekeeper, Developer ID signing, notarization, or update delivery. Production distribution requires separate credentials, installed-app acceptance, and publication checks.
+The archives are qualification artifacts, not releases. The temporary install does not check Gatekeeper, Developer ID signing, notarization, or update delivery. Production distribution requires separate credentials, trusted installed-app acceptance, and publication checks.
 
 ## Alternatives considered
 
@@ -22,4 +22,4 @@ The archives are qualification artifacts, not releases. The workflow neither ins
 
 ## Consequences
 
-The native CI lane can detect missing bundled files and malformed archives before release work begins, while keeping untrusted pull-request builds away from signing authority. The retained DMG and ZIP need explicit test-only handling; their integrity checks do not establish installability or production trust.
+The native CI lane can detect missing bundled files, malformed archives, and an application that fails after copying out of the DMG, while keeping untrusted pull-request builds away from signing authority. The retained DMG and ZIP need explicit test-only handling; this unsigned install does not establish production trust.

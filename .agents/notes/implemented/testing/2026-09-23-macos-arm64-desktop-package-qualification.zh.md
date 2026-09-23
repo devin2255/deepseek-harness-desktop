@@ -10,9 +10,9 @@ Status: implemented
 
 ## 决策
 
-[macOS arm64 工作流](../../../../.github/workflows/desktop-macos.yml)先运行真实的 Electron 验收测试，然后在 Apple Silicon runner 上构建未签名的 arm64 应用、DMG 和 ZIP。打包命令在 macOS 上调用 `PATH` 中已安装的 `pnpm`，不假设 Corepack 位于 Node 旁边；Windows 则无需命令 shell 即可通过 Corepack 调用。它拒绝签名凭据，检查应用可执行文件的架构与必需的 Main/preload 文件，并在 CI 保留产物 30 天前验证两种压缩包。仓库生成的 1024 像素 PNG 用作应用图标；Windows 继续使用独立的 ICO 和 NSIS 构建目标。
+[macOS arm64 工作流](../../../../.github/workflows/desktop-macos.yml)先运行真实的 Electron 验收测试，然后在 Apple Silicon runner 上构建未签名的 arm64 应用、DMG 和 ZIP。打包命令在 macOS 上调用 `PATH` 中已安装的 `pnpm`，不假设 Corepack 位于 Node 旁边；Windows 则无需命令 shell 即可通过 Corepack 调用。它拒绝签名凭据，检查应用可执行文件的架构与必需的 Main/preload 文件，并验证两种压缩包。随后 CI 只读挂载 DMG，将应用复制到一次性安装目录，从该副本启动，检查经过认证的 Host 就绪情况及对直接未授权请求的拒绝；只有这些检查通过，才保留压缩包 30 天。仓库生成的 1024 像素 PNG 用作应用图标；Windows 继续使用独立的 ICO 和 NSIS 构建目标。
 
-这些压缩包是验收产物，不是发布物。工作流既不安装 DMG，也不检查 Gatekeeper、Developer ID 签名、公证或更新交付。生产分发还需要独立的凭据、已安装应用验收和发布检查。
+这些压缩包是验收产物，不是发布物。临时安装不会检查 Gatekeeper、Developer ID 签名、公证或更新交付。生产分发还需要独立的凭据、受信任的已安装应用验收和发布检查。
 
 ## 曾考虑的替代方案
 
@@ -22,4 +22,4 @@ Status: implemented
 
 ## 后果
 
-原生 CI 通道可以在发布工作开始前发现打包文件缺失及压缩包损坏，同时避免让不受信任的拉取请求构建接触签名权限。保留的 DMG 和 ZIP 必须明确作为测试包使用；完整性检查不能证明可安装性或生产信任。
+原生 CI 通道可以在发布工作开始前发现打包文件缺失、压缩包损坏及应用从 DMG 复制出来后无法运行的问题，同时避免让不受信任的拉取请求构建接触签名权限。保留的 DMG 和 ZIP 必须明确作为测试包使用；未签名的临时安装不能证明生产信任。
