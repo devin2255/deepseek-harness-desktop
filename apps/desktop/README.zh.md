@@ -64,7 +64,7 @@ Electron 应用不添加模型可见内容。桌面 profile 的 [`@deepseek-ai/d
 
 ## Windows 安装程序开发
 
-`pnpm run desktop:package` 构建按用户安装的 x64 辅助安装程序，支持选择目录以及独立的桌面、开始菜单和登录启动选项。打包前会验证生成的 [PowerShell 命令](../../scripts/desktop/generate-installer-powershell.ts)和[卸载文件操作](../../scripts/desktop/generate-installer-file-operations.ts)。后者保留 electron-builder 的移动和回滚算法，并使用 Windows 扩展长度路径；上游模板变化时，必须先审查，再通过 `pnpm run desktop:generate-installer-file-operations` 重新生成。所有权与清理规则参见[安装程序决策](../../.agents/notes/implemented/feature/2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md)。
+`pnpm run desktop:package` 构建按用户安装的 x64 辅助安装程序，支持选择目录以及独立的桌面、开始菜单和登录启动选项。打包前会验证生成的 [PowerShell 命令](../../scripts/desktop/generate-installer-powershell.ts)和[卸载文件操作](../../scripts/desktop/generate-installer-file-operations.ts)。快捷方式所有权检查对普通路径使用 WScript；Unicode 路径或 WScript 无法读取的链接改用 Windows Shell 链接 API。文件操作生成器保留 electron-builder 的移动和回滚算法，并使用 Windows 扩展长度路径；上游模板变化时，必须先审查，再通过 `pnpm run desktop:generate-installer-file-operations` 重新生成。所有权与清理规则参见[安装程序决策](../../.agents/notes/implemented/feature/2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md)。
 
 在 Windows x64 上安装仓库依赖后，从仓库根目录构建并验证分发物：
 

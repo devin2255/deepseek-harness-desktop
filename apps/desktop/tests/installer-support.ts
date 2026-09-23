@@ -266,8 +266,10 @@ export async function verifyInstalledApplication(
     if (!await pathExists(fixture.productData)) throw new Error('installed runtime did not use test APPDATA')
     if (replaceRunningApplication === undefined) await verifyLaunchAndClose(fixture, installRoot)
     else {
+      const primaryProcess = application.process()
+      if (primaryProcess.pid === undefined) throw new Error('installed primary process did not expose a process id')
       await replaceRunningApplication()
-      await waitForProcessState(join(installRoot, 'DeepSeek Harness.exe'), 'stopped')
+      await waitForProcessIdStopped(primaryProcess.pid)
     }
   } catch (error: unknown) {
     const desktopLog = await readFile(join(fixture.productData, 'logs', 'desktop.log'), 'utf8')
@@ -651,6 +653,27 @@ async function waitForProcessState(executable: string, expected: 'running' | 'st
       { cause: error },
     )
   }
+}
+
+async function waitForProcessIdStopped(processId: number, timeout = 20_000): Promise<void> {
+  const source = [
+    '$process=Get-Process -Id $env:DSH_INSTALLER_PROCESS_ID -ErrorAction SilentlyContinue',
+    "[Console]::Out.Write($(if($null -eq $process){'stopped'}else{'running'}))",
+  ].join('\n')
+  const command = Buffer.from(source, 'utf16le').toString('base64')
+  let observed = '<not queried>'
+  await waitUntil(async (remaining) => {
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command,
+    ], {
+      env: { ...process.env, DSH_INSTALLER_PROCESS_ID: String(processId) },
+      timeout: Math.min(remaining, 10_000),
+    })
+    observed = stdout.trim()
+    return observed === 'stopped'
+  }, timeout).catch((error: unknown) => {
+    throw new Error(`installed primary process ${processId} did not stop; last state=${JSON.stringify(observed)}`, { cause: error })
+  })
 }
 
 async function installedProcessDiagnostics(executable: string): Promise<string> {

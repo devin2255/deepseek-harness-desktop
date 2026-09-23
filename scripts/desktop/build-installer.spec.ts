@@ -339,7 +339,10 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(source).toMatch(/DshRemoveOwnedRunValue[\s\S]*DshWriteE2eUninstallResult "uninstall-accepted"/u)
   })
 
-  it('recognizes only old or new exact shortcut targets through one serialized COM session', { timeout: 20_000 }, async () => {
+  it('recognizes only old or new exact shortcut targets with a Unicode-safe system COM fallback', { timeout: 20_000 }, async () => {
+    const inspectorSource = await readFile(inspectShortcutPath, 'utf8')
+    expect(inspectorSource).toContain('WScript.Shell')
+    expect(inspectorSource).toMatch(/Shell\.Application[\s\S]*GetLink/u)
     const root = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
     const directory = join(root, "用户's shortcut directory")
     await mkdir(directory)
