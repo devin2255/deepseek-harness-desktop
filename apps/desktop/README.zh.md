@@ -88,9 +88,11 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 [Windows 安装器工作流](../../.github/workflows/desktop-installer.yml) 在全新的托管 Windows runner 上为拉取请求、master 和 `dsh-v*` 推送运行完整安装器测试。通过包验证的 EXE、校验和与元数据保留 30 天，即使后续验收失败也会保留；使用产物前须查看该次运行的测试结果。该工作流不持有签名凭据，也不发布生产版本。
 
+[桌面端生产发布工作流](../../.github/workflows/desktop-release.yml)是独立的手动操作，只能从 `master` 可达且与版本匹配的 `dsh-v<version>` 标签运行。受保护的 `desktop-release` 环境必须提供 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`。工作流要求安装器与已安装主程序的 Authenticode 都有效，重新执行完整安装器矩阵，创建 GitHub 构建来源证明，最后才把 EXE、校验和与元数据发布为 GitHub Release 资产。选择工作流但不启用 `publish` 时，不会运行发布作业。
+
 ## 已知限制
 
-- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen。尚未实现自动更新，也未实现 macOS 打包、签名和公证。
+- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen，生产发布则必须使用受保护的签名环境并作出明确的手动决定。尚未实现自动更新，也未实现 macOS 打包、签名和公证。
 - **任务集成** — 任务总览、根任务 worktree 隔离、审查、提交、冲突安全的应用及感知可恢复性的丢弃已经可用。子写入 Agent 的 worktree、并行写入者之间的自动协调、Task 归档和 Harness Studio 尚未实现。
 - **原生集成** — 已提供感知任务的托盘驻留，以及完成或注意事项通知。尚未实现深层链接、外部链接处理和窗口位置持久化。
 - **崩溃恢复** — 运行时退出恢复是显式且仅限本机的。计算机重启或断电后，应用不会自行重新启动；下次正常启动会执行冷态 Session 修复。
