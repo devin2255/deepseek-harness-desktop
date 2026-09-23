@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -102,7 +102,7 @@ afterEach(async () => {
 
 describe('desktop Electron acceptance', () => {
   it('boots the secured desktop profile and reaches process quiescence on close', async () => {
-    temporaryRoot = await mkdtemp(join(tmpdir(), 'dsh-desktop-e2e-'))
+    temporaryRoot = await mkdtemp(join(await realpath(tmpdir()), 'dsh-desktop-e2e-'))
     const environment = await isolatedEnvironment(temporaryRoot)
     const pendingProviderResponses: ServerResponse[] = []
     let observedParentPrompt = false
