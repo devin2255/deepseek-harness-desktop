@@ -62,6 +62,7 @@ try {
     $status = $(if ($owned) { 0 } else { 11 })
   }
 } catch {
+  [Console]::Error.Write("inspect-shortcut failed: type=$($_.Exception.GetType().FullName) hresult=$($_.Exception.HResult) message=$($_.Exception.Message)")
   $status = 2
 } finally {
   if ($null -ne $shellLink) { [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shellLink) }

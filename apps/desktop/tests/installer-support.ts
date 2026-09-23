@@ -268,6 +268,7 @@ export async function verifyInstalledApplication(
     else {
       const primaryProcess = application.process()
       if (primaryProcess.pid === undefined) throw new Error('installed primary process did not expose a process id')
+      await waitForProcessState(join(installRoot, 'DeepSeek Harness.exe'), 'running')
       await replaceRunningApplication()
       await waitForProcessIdStopped(primaryProcess.pid)
     }
@@ -680,8 +681,9 @@ async function installedProcessDiagnostics(executable: string): Promise<string> 
   const source = [
     '$name=[IO.Path]::GetFileNameWithoutExtension($env:DSH_INSTALLER_TARGET_EXE)',
     '$rows=[Collections.Generic.List[string]]::new()',
-    'foreach($process in [Diagnostics.Process]::GetProcessesByName($name)){',
-    'try{$rows.Add(("pid={0}; exited={1}; path={2}" -f $process.Id,$process.HasExited,$process.MainModule.FileName))}',
+    '$rows.Add(("target={0}; canonical={1}; expected-name={2}" -f $env:DSH_INSTALLER_TARGET_EXE,(Get-Item -LiteralPath $env:DSH_INSTALLER_TARGET_EXE).FullName,$name))',
+    'foreach($process in [Diagnostics.Process]::GetProcesses()){',
+    'try{if(-not $process.ProcessName.StartsWith("DeepSeek",[StringComparison]::OrdinalIgnoreCase)){continue};$rows.Add(("pid={0}; name={1}; exited={2}; path={3}" -f $process.Id,$process.ProcessName,$process.HasExited,$process.MainModule.FileName))}',
     'catch{$rows.Add(("pid={0}; inspection={1}" -f $process.Id,$_.Exception.GetType().FullName))}',
     'finally{try{$process.Dispose()}catch{}}',
     '}',

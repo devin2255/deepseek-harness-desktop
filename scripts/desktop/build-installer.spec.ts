@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -76,10 +76,11 @@ async function runRestrictedStatus(command: string, environment: NodeJS.ProcessE
   return await new Promise((resolve, reject) => {
     execFile('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command,
-    ], { env: environment, timeout }, (error) => {
+    ], { env: environment, timeout }, (error, _stdout, stderr) => {
       if (error === null) {
         resolve(0)
       } else if (typeof error.code === 'number') {
+        if (error.code === 2 && stderr.trim() !== '') process.stderr.write(`${stderr.trim()}\n`)
         resolve(error.code)
       } else {
         reject(new Error('PowerShell shortcut status command failed without a numeric exit code', { cause: error }))
@@ -400,6 +401,26 @@ describe('Windows installer configuration', { concurrent: false }, () => {
         child.kill()
         await once(child, 'exit')
       }
+    }
+  })
+
+  it('recognizes the installed application executable name before replacement', { timeout: 20_000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-process-name-'))
+    const executable = join(root, 'DeepSeek Harness.exe')
+    const ping = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'ping.exe')
+    await copyFile(ping, executable)
+    const child = spawn(executable, ['-n', '30', '127.0.0.1'], { stdio: 'ignore', windowsHide: true })
+    await once(child, 'spawn')
+    try {
+      const shortExecutable = await shortWindowsPath(executable)
+      await expect(queryInstalledProcess(executable)).resolves.toBe('running')
+      await expect(queryInstalledProcess(shortExecutable)).resolves.toBe('running')
+    } finally {
+      if (child.exitCode === null) {
+        child.kill()
+        await once(child, 'exit')
+      }
+      await rm(root, { recursive: true, force: true })
     }
   })
 
