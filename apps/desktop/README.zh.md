@@ -90,7 +90,7 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 ## macOS arm64 测试包
 
-在 Apple Silicon Mac 上，先运行 `pnpm install` 和 `pnpm run build`，再运行 `pnpm run desktop:package:macos:unsigned` 构建桌面运行时、暂存生产依赖，并在 `.artifacts/desktop/installer/` 下生成 arm64 DMG 和 ZIP 文件。命令会验证应用可执行文件的架构、必需的 Main 与 preload 文件、磁盘映像完整性和 ZIP 完整性。它拒绝签名凭据，仅用于构建测试包。
+在 `PATH` 中已有 `pnpm` 的 Apple Silicon Mac 上，先运行 `pnpm install` 和 `pnpm run build`，再运行 `pnpm run desktop:package:macos:unsigned` 构建桌面运行时、暂存生产依赖，并在 `.artifacts/desktop/installer/` 下生成 arm64 DMG 和 ZIP 文件。命令会验证应用可执行文件的架构、必需的 Main 与 preload 文件、磁盘映像完整性和 ZIP 完整性。它拒绝签名凭据，仅用于构建测试包。
 
 [macOS arm64 工作流](../../.github/workflows/desktop-macos.yml)会先运行真实的 Electron 验收测试，再进行打包；只有打包验证成功，才会将未签名压缩包保留 30 天。这些文件不是生产发布物：工作流不会安装 DMG、验证 Gatekeeper 行为、签名或公证应用，也不会发布更新源。[Mac 验收决策](../../.agents/notes/implemented/testing/2026-09-23-macos-arm64-desktop-package-qualification.md)记录了它与生产发布的区分。
 

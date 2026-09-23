@@ -10,7 +10,7 @@ A source-built Electron acceptance test proves the desktop entry can run on macO
 
 ## Decision
 
-The [macOS arm64 workflow](../../../../.github/workflows/desktop-macos.yml) runs the real Electron acceptance test and then builds an unsigned arm64 application, DMG, and ZIP on an Apple Silicon runner. The packaging command rejects signing credentials, checks the app's executable architecture and required Main/preload files, and verifies both archives before CI retains them for 30 days. The repository-generated 1024-pixel PNG supplies the application icon; Windows keeps its separate ICO and NSIS targets.
+The [macOS arm64 workflow](../../../../.github/workflows/desktop-macos.yml) runs the real Electron acceptance test and then builds an unsigned arm64 application, DMG, and ZIP on an Apple Silicon runner. The packaging command invokes installed `pnpm` from `PATH` on macOS rather than assuming Corepack is beside Node; Windows uses Corepack without a command shell. It rejects signing credentials, checks the app's executable architecture and required Main/preload files, and verifies both archives before CI retains them for 30 days. The repository-generated 1024-pixel PNG supplies the application icon; Windows keeps its separate ICO and NSIS targets.
 
 The archives are qualification artifacts, not releases. The workflow neither installs the DMG nor checks Gatekeeper, Developer ID signing, notarization, or update delivery. Production distribution requires separate credentials, installed-app acceptance, and publication checks.
 

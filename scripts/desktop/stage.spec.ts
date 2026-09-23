@@ -87,8 +87,13 @@ describe('desktop production staging', () => {
     })
   })
 
-  it('launches repository-pinned pnpm through Corepack without a Windows command shell', () => {
-    expect(pnpmInvocation('C:\\tools\\corepack.js')).toEqual({
+  it('uses installed pnpm on POSIX without requiring Corepack beside Node', () => {
+    expect(pnpmInvocation('/missing/corepack.js', 'darwin')).toEqual({ command: 'pnpm', argsPrefix: [] })
+    expect(pnpmInvocation('/missing/corepack.js', 'linux')).toEqual({ command: 'pnpm', argsPrefix: [] })
+  })
+
+  it('launches pnpm through Corepack without a Windows command shell', () => {
+    expect(pnpmInvocation('C:\\tools\\corepack.js', 'win32')).toEqual({
       command: process.execPath,
       argsPrefix: ['C:\\tools\\corepack.js', 'pnpm'],
     })

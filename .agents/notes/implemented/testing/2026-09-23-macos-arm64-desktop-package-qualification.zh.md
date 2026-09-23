@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-[macOS arm64 工作流](../../../../.github/workflows/desktop-macos.yml)先运行真实的 Electron 验收测试，然后在 Apple Silicon runner 上构建未签名的 arm64 应用、DMG 和 ZIP。打包命令拒绝签名凭据，检查应用可执行文件的架构与必需的 Main/preload 文件，并在 CI 保留产物 30 天前验证两种压缩包。仓库生成的 1024 像素 PNG 用作应用图标；Windows 继续使用独立的 ICO 和 NSIS 构建目标。
+[macOS arm64 工作流](../../../../.github/workflows/desktop-macos.yml)先运行真实的 Electron 验收测试，然后在 Apple Silicon runner 上构建未签名的 arm64 应用、DMG 和 ZIP。打包命令在 macOS 上调用 `PATH` 中已安装的 `pnpm`，不假设 Corepack 位于 Node 旁边；Windows 则无需命令 shell 即可通过 Corepack 调用。它拒绝签名凭据，检查应用可执行文件的架构与必需的 Main/preload 文件，并在 CI 保留产物 30 天前验证两种压缩包。仓库生成的 1024 像素 PNG 用作应用图标；Windows 继续使用独立的 ICO 和 NSIS 构建目标。
 
 这些压缩包是验收产物，不是发布物。工作流既不安装 DMG，也不检查 Gatekeeper、Developer ID 签名、公证或更新交付。生产分发还需要独立的凭据、已安装应用验收和发布检查。
 

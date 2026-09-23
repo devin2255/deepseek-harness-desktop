@@ -90,7 +90,7 @@ The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) 
 
 ## macOS arm64 test packaging
 
-On an Apple Silicon Mac, after `pnpm install` and `pnpm run build`, `pnpm run desktop:package:macos:unsigned` builds the desktop runtime, stages its production dependencies, and creates arm64 DMG and ZIP files under `.artifacts/desktop/installer/`. It verifies the app executable architecture, required Main and preload files, disk image integrity, and ZIP integrity. The command rejects signing credentials and is intended for test packages only.
+On an Apple Silicon Mac with `pnpm` on `PATH`, after `pnpm install` and `pnpm run build`, `pnpm run desktop:package:macos:unsigned` builds the desktop runtime, stages its production dependencies, and creates arm64 DMG and ZIP files under `.artifacts/desktop/installer/`. It verifies the app executable architecture, required Main and preload files, disk image integrity, and ZIP integrity. The command rejects signing credentials and is intended for test packages only.
 
 The [macOS arm64 workflow](../../.github/workflows/desktop-macos.yml) runs the real Electron acceptance test before packaging and retains the unsigned archives for 30 days only after package validation succeeds. These files are not a production release: the workflow does not install the DMG, verify Gatekeeper behavior, sign or notarize the app, or publish an update feed. The [Mac qualification decision](../../.agents/notes/implemented/testing/2026-09-23-macos-arm64-desktop-package-qualification.md) records the separation from production publication.
 

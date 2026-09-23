@@ -101,14 +101,19 @@ export function deploymentManifest(source: Readonly<Record<string, unknown>>): D
 }
 
 /**
- * Build a shell-free invocation of the pnpm CLI that launched this command.
- * @param corepackCli - Corepack's JavaScript CLI path.
- * @returns The Node executable and leading pnpm CLI argument.
+ * Use the installed pnpm executable on POSIX and the Corepack CLI on Windows, where pnpm.cmd requires a shell.
+ * @param corepackCli - Corepack's JavaScript CLI path on Windows.
+ * @param platform - Host operating system.
+ * @returns Executable and leading arguments for pnpm.
  */
-export function pnpmInvocation(corepackCli: string = join(dirname(process.execPath), 'node_modules/corepack/dist/corepack.js')): {
+export function pnpmInvocation(
+  corepackCli: string = join(dirname(process.execPath), 'node_modules/corepack/dist/corepack.js'),
+  platform: NodeJS.Platform = process.platform,
+): {
   readonly command: string
   readonly argsPrefix: readonly string[]
 } {
+  if (platform !== 'win32') return { command: 'pnpm', argsPrefix: [] }
   return { command: process.execPath, argsPrefix: [corepackCli, 'pnpm'] }
 }
 
