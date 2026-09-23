@@ -38,7 +38,7 @@ NSIS 环境变量 API 调用会保存并恢复临时寄存器。Windows API 返�
 
 安装程序的文件删除钩子对安装目录树和更新暂存目录树使用扩展长度的盘符路径或 UNC 路径。嵌套运行时依赖可能只有在移入更长的临时目录后才超过传统的 260 字符限制，导致普通同版本修复中止。[生成器](../../../../scripts/desktop/generate-installer-file-operations.ts) 适配固定版本 electron-builder 的移动和恢复函数，不改变其遍历或回滚算法；生成前检查规范化上游模板的摘要，打包时拒绝陈旧的生成输出。原生 NSIS 测试覆盖成功移动、后续移动失败后的恢复以及普通卸载。这些操作只影响已安装的程序文件，不影响单独经过认证的可变数据清理。
 
-即使安装的是 x64 应用，NSIS 自身仍是 32 位进程。因此精确进程查询通过 `Sysnative` 启动 64 位 PowerShell：32 位 PowerShell 虽能枚举运行中的 x64 Electron 进程，却无法读取 `MainModule.FileName`，否则会误报应用已经退出。快捷方式所有权检查使用 WScript 或 Windows Shell 链接 API 读取存储的目标；第一个读取器无法返回绝对路径时改用另一个，使 Unicode 快捷方式路径下尚不存在的目标仍可接受所有权检查。
+即使安装的是 x64 应用，NSIS 自身仍是 32 位进程。因此精确进程查询通过 `Sysnative` 启动 64 位 PowerShell：32 位 PowerShell 虽能枚举运行中的 x64 Electron 进程，却无法读取 `MainModule.FileName`，否则会误报应用已经退出。快捷方式所有权检查先通过 `IPersistFile` 加载链接，并使用带 `SLGP_RAWPATH` 标志的 `IShellLinkW.GetPath` 读取原始路径，随后才尝试 WScript 或 Shell 自动化接口。即使目标已不存在，原始路径仍可读取；只有它精确等于旧或新应用程序路径时才允许删除，外部快捷方式仍受保护。
 
 ## Alternatives considered
 

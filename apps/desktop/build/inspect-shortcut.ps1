@@ -27,6 +27,35 @@ function Test-DshAbsolutePath([string] $path) {
   }
 }
 
+function Read-DshRawShortcutTarget([string] $path) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+
+[ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface DshShellLinkW {
+  void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int length, IntPtr findData, uint flags);
+}
+
+public static class DshRawShortcutTarget {
+  public static string Read(string path) {
+    object link = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046")));
+    try {
+      ((IPersistFile)link).Load(path, 0);
+      var target = new StringBuilder(260);
+      ((DshShellLinkW)link).GetPath(target, target.Capacity, IntPtr.Zero, 4);
+      return target.ToString();
+    } finally {
+      Marshal.FinalReleaseComObject(link);
+    }
+  }
+}
+'@
+  return [DshRawShortcutTarget]::Read($path)
+}
+
 function Read-DshShellShortcutTarget([string] $path) {
   $script:shellApplication = New-Object -ComObject Shell.Application
   $script:shellFolder = $script:shellApplication.Namespace([IO.Path]::GetDirectoryName($path))
@@ -45,6 +74,12 @@ function Read-DshWScriptShortcutTarget([string] $path) {
 }
 
 function Read-DshShortcutTarget([string] $path) {
+  try {
+    $target = Read-DshRawShortcutTarget $path
+    if (Test-DshAbsolutePath $target) { return $target }
+  } catch {
+    # Other Shell readers may still recover a usable target from the link.
+  }
   if ($path -match '[^\x00-\x7F]') {
     try { $target = Read-DshShellShortcutTarget $path } catch {
       # A Shell link lookup can fail while WScript can still read its stored target.

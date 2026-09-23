@@ -343,14 +343,15 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(source).toMatch(/DshRemoveOwnedRunValue[\s\S]*DshWriteE2eUninstallResult "uninstall-accepted"/u)
   })
 
-  it('recognizes only old or new exact shortcut targets with a Unicode-safe system COM fallback', { timeout: 20_000 }, async () => {
+  it('recognizes only old or new exact shortcut targets including unresolved Unicode links', { timeout: 20_000 }, async () => {
     const inspectorSource = await readFile(inspectShortcutPath, 'utf8')
+    expect(inspectorSource).toContain('DshRawShortcutTarget')
     expect(inspectorSource).toContain('WScript.Shell')
     expect(inspectorSource).toMatch(/Shell\.Application[\s\S]*GetLink/u)
     const canonicalInspector = canonicalPowerShellSource(inspectorSource)
     const definitions = canonicalInspector.slice(0, canonicalInspector.indexOf('\ntry {\n  $shortcutPath'))
-    const fallbackProbe = `${definitions}\nfunction Read-DshShellShortcutTarget([string] $path) { return '' }\n[Console]::Out.Write((Read-DshShortcutTarget $env:DSH_TEST_SHORTCUT))\n`
-    const fallbackCommand = Buffer.from(fallbackProbe, 'utf16le').toString('base64')
+    const rawProbe = `${definitions}\n[Console]::Out.Write((Read-DshRawShortcutTarget $env:DSH_TEST_SHORTCUT))\n`
+    const rawCommand = Buffer.from(rawProbe, 'utf16le').toString('base64')
     const root = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
     const directory = join(root, "用户's shortcut directory")
     await mkdir(directory)
@@ -384,9 +385,14 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       for (const [target, expected] of [[oldTarget, 0], [newTarget, 0], [foreignTarget, 11]] as const) {
         await stageShortcut(target)
         if (target === oldTarget) {
-          await expect(runRestrictedCommand(fallbackCommand, {
+          await expect(runRestrictedCommand(rawCommand, {
             ...process.env, DSH_TEST_SHORTCUT: shortcut,
           })).resolves.toBe(oldTarget)
+          const powerShell32 = join(windows, 'SysWOW64/WindowsPowerShell/v1.0/powershell.exe')
+          const result32 = await execFileAsync(powerShell32, [
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', rawCommand,
+          ], { env: { ...process.env, DSH_TEST_SHORTCUT: shortcut }, timeout: 10_000 })
+          expect(result32.stdout.trim()).toBe(oldTarget)
         }
         await expect(inspectShortcutTargets(shortcut, oldTarget, newTarget)).resolves.toBe(expected)
       }
