@@ -53,6 +53,7 @@
     "test:desktop:e2e:ci": "pnpm --filter @deepseek-ai/dsh-desktop build && pnpm --filter @deepseek-ai/dsh-desktop test:e2e",
     "desktop:stage": "tsx scripts/desktop/stage.ts",
     "desktop:package": "tsx scripts/desktop/build-installer.ts",
+    "desktop:package:macos:unsigned": "tsx scripts/desktop/build-macos-unsigned.ts",
     "desktop:generate-installer-powershell": "tsx scripts/desktop/generate-installer-powershell.ts",
     "desktop:generate-installer-file-operations": "tsx scripts/desktop/generate-installer-file-operations.ts",
     "desktop:validate-package": "tsx scripts/desktop/validate-package.ts",

@@ -15,6 +15,7 @@ concurrency:
 
 env:
   DSH_TELEMETRY_DISABLED: '1'
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
 jobs:
   desktop:
@@ -46,3 +47,16 @@ jobs:
 
       - name: Exercise desktop entry and windows
         run: pnpm run test:desktop:e2e:ci
+
+      - name: Build unsigned DMG and ZIP
+        run: pnpm run desktop:package:macos:unsigned
+
+      - name: Retain unsigned test packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos-arm64-${{ github.sha }}
+          path: |
+            .artifacts/desktop/installer/*.dmg
+            .artifacts/desktop/installer/*.zip
+          if-no-files-found: error
+          retention-days: 30

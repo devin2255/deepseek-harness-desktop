@@ -41,9 +41,11 @@ const [template, templateRetina] = await Promise.all([
   sharp(templateSource).resize(16, 16).png({ compressionLevel: 9 }).toBuffer(),
   sharp(templateSource).resize(32, 32).png({ compressionLevel: 9 }).toBuffer(),
 ])
+const macIcon = await sharp(source).resize(1024, 1024).png({ compressionLevel: 9 }).toBuffer()
 const buildRoot = join(REPOSITORY_ROOT, 'apps/desktop/build')
 await Promise.all([
   writeFile(join(buildRoot, 'icon.ico'), icon),
+  writeFile(join(buildRoot, 'icon.png'), macIcon),
   writeFile(join(buildRoot, 'tray.ico'), icon),
   writeFile(join(buildRoot, 'trayTemplate.png'), template),
   writeFile(join(buildRoot, 'trayTemplate@2x.png'), templateRetina),

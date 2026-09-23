@@ -88,13 +88,17 @@ The suite checks startup without API credentials, option changes, running-applic
 
 The [Windows installer workflow](../../.github/workflows/desktop-installer.yml) runs the complete installer suite for pull requests, master, and `dsh-v*` pushes on a fresh hosted Windows runner. It retains package-validated EXE, checksum, and metadata files for 30 days, including when a later acceptance test fails; check the run's test result before using an artifact. This workflow has no signing credentials and does not publish a production release.
 
-The [macOS arm64 smoke workflow](../../.github/workflows/desktop-macos.yml) builds the workspace and runs the desktop Electron E2E suite on an Apple Silicon runner. It does not package, sign, notarize, or install a macOS application.
+## macOS arm64 test packaging
+
+On an Apple Silicon Mac, after `pnpm install` and `pnpm run build`, `pnpm run desktop:package:macos:unsigned` builds the desktop runtime, stages its production dependencies, and creates arm64 DMG and ZIP files under `.artifacts/desktop/installer/`. It verifies the app executable architecture, required Main and preload files, disk image integrity, and ZIP integrity. The command rejects signing credentials and is intended for test packages only.
+
+The [macOS arm64 workflow](../../.github/workflows/desktop-macos.yml) runs the real Electron acceptance test before packaging and retains the unsigned archives for 30 days only after package validation succeeds. These files are not a production release: the workflow does not install the DMG, verify Gatekeeper behavior, sign or notarize the app, or publish an update feed. The [Mac qualification decision](../../.agents/notes/implemented/testing/2026-09-23-macos-arm64-desktop-package-qualification.md) records the separation from production publication.
 
 The [production desktop release workflow](../../.github/workflows/desktop-release.yml) is a separate manual operation from a selected `dsh-v<version>` tag reachable from `master`. Its protected `desktop-release` environment must provide `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. It requires valid Authenticode on both the installer and installed application, repeats the complete installer matrix, creates GitHub build provenance, and only then publishes the EXE, checksum, and metadata as GitHub Release assets. Selecting the workflow with `publish` disabled performs no release job.
 
 ## Known Limitations
 
-- **Installer qualification** — Windows lifecycle qualification is required before distribution; unsigned local builds can trigger SmartScreen, while production publication requires the protected signing environment and an explicit manual decision. Automatic updates and macOS packaging, signing, and notarization are not implemented.
+- **Installer qualification** — Windows lifecycle qualification is required before distribution; unsigned local builds can trigger SmartScreen, while production publication requires the protected signing environment and an explicit manual decision. Automatic updates and macOS installation qualification, signing, and notarization are not implemented.
 - **Task integration** — task overview, root-task worktree isolation, review, Commit, conflict-safe Apply, and recoverability-aware Discard are available. Child-writer worktrees, automatic reconciliation between concurrent writers, Task archival, and Harness Studio are not implemented.
 - **Native integration** — task-aware tray presence and completion or attention notifications are available. Deep links, external-link handling, and persisted window placement are not implemented.
 - **Crash recovery** — runtime exit recovery is explicit and local. The application does not relaunch itself after a machine restart or power loss; the next ordinary launch performs cold Session repair.

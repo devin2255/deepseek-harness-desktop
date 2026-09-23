@@ -31,7 +31,7 @@ describe('desktop macOS smoke workflow', () => {
     const subject = workflow()
     expect(subject.on).toEqual({ pull_request: null, push: { branches: ['master'], tags: ['dsh-v*'] } })
     expect(subject.permissions).toEqual({ contents: 'read' })
-    expect(subject.env).toEqual({ DSH_TELEMETRY_DISABLED: '1' })
+    expect(subject.env).toEqual({ DSH_TELEMETRY_DISABLED: '1', CSC_IDENTITY_AUTO_DISCOVERY: 'false' })
     expect(subject.jobs.desktop?.['runs-on']).toBe('macos-15')
     expect(JSON.stringify(subject)).not.toMatch(/secrets\s*[.[]/u)
     expect(subject.jobs.desktop?.steps.find(item => item.uses?.startsWith('actions/checkout@'))?.with)
@@ -45,8 +45,16 @@ describe('desktop macOS smoke workflow', () => {
       ['Install (immutable)', 'pnpm install --frozen-lockfile'],
       ['Build workspace artifacts', 'pnpm run build'],
       ['Exercise desktop entry and windows', 'pnpm run test:desktop:e2e:ci'],
+      ['Build unsigned DMG and ZIP', 'pnpm run desktop:package:macos:unsigned'],
     ])
     expect(steps.find(item => item.uses?.startsWith('actions/setup-node@'))?.with)
       .toMatchObject({ 'node-version': '24', cache: 'pnpm' })
+  })
+
+  it('retains only Mac test archives after the package check succeeds', () => {
+    const upload = workflow().jobs.desktop?.steps.find(item => item.uses?.startsWith('actions/upload-artifact@'))
+    expect(upload?.with).toMatchObject({ 'if-no-files-found': 'error', 'retention-days': 30 })
+    expect(upload?.with?.path).toContain('.artifacts/desktop/installer/*.dmg')
+    expect(upload?.with?.path).toContain('.artifacts/desktop/installer/*.zip')
   })
 })

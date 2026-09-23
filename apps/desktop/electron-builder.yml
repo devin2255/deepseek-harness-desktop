@@ -16,6 +16,17 @@ win:
     - target: nsis
       arch:
         - x64
+mac:
+  category: public.app-category.developer-tools
+  icon: icon.png
+  artifactName: DeepSeek-Harness-${version}-mac-arm64.${ext}
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
 nsis:
   oneClick: false
   perMachine: false

@@ -88,13 +88,17 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 [Windows 安装器工作流](../../.github/workflows/desktop-installer.yml) 在全新的托管 Windows runner 上为拉取请求、master 和 `dsh-v*` 推送运行完整安装器测试。通过包验证的 EXE、校验和与元数据保留 30 天，即使后续验收失败也会保留；使用产物前须查看该次运行的测试结果。该工作流不持有签名凭据，也不发布生产版本。
 
-[macOS arm64 冒烟测试工作流](../../.github/workflows/desktop-macos.yml) 在 Apple Silicon runner 上构建工作区并运行桌面端 Electron E2E 测试。它不负责打包、签名、公证或安装 macOS 应用。
+## macOS arm64 测试包
+
+在 Apple Silicon Mac 上，先运行 `pnpm install` 和 `pnpm run build`，再运行 `pnpm run desktop:package:macos:unsigned` 构建桌面运行时、暂存生产依赖，并在 `.artifacts/desktop/installer/` 下生成 arm64 DMG 和 ZIP 文件。命令会验证应用可执行文件的架构、必需的 Main 与 preload 文件、磁盘映像完整性和 ZIP 完整性。它拒绝签名凭据，仅用于构建测试包。
+
+[macOS arm64 工作流](../../.github/workflows/desktop-macos.yml)会先运行真实的 Electron 验收测试，再进行打包；只有打包验证成功，才会将未签名压缩包保留 30 天。这些文件不是生产发布物：工作流不会安装 DMG、验证 Gatekeeper 行为、签名或公证应用，也不会发布更新源。[Mac 验收决策](../../.agents/notes/implemented/testing/2026-09-23-macos-arm64-desktop-package-qualification.md)记录了它与生产发布的区分。
 
 [桌面端生产发布工作流](../../.github/workflows/desktop-release.yml)是独立的手动操作，只能从 `master` 可达且与版本匹配的 `dsh-v<version>` 标签运行。受保护的 `desktop-release` 环境必须提供 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`。工作流要求安装器与已安装主程序的 Authenticode 都有效，重新执行完整安装器矩阵，创建 GitHub 构建来源证明，最后才把 EXE、校验和与元数据发布为 GitHub Release 资产。选择工作流但不启用 `publish` 时，不会运行发布作业。
 
 ## 已知限制
 
-- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen，生产发布则必须使用受保护的签名环境并作出明确的手动决定。尚未实现自动更新，也未实现 macOS 打包、签名和公证。
+- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen，生产发布则必须使用受保护的签名环境并作出明确的手动决定。尚未实现自动更新，也未实现 macOS 安装验收、签名和公证。
 - **任务集成** — 任务总览、根任务 worktree 隔离、审查、提交、冲突安全的应用及感知可恢复性的丢弃已经可用。子写入 Agent 的 worktree、并行写入者之间的自动协调、Task 归档和 Harness Studio 尚未实现。
 - **原生集成** — 已提供感知任务的托盘驻留，以及完成或注意事项通知。尚未实现深层链接、外部链接处理和窗口位置持久化。
 - **崩溃恢复** — 运行时退出恢复是显式且仅限本机的。计算机重启或断电后，应用不会自行重新启动；下次正常启动会执行冷态 Session 修复。
