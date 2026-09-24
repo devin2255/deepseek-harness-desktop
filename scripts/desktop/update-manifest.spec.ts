@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 
+import { hasAuthenticodeCertificate, inspectAuthenticodePublisher } from './checksum.ts'
 import { renderPackagedUpdateConfig, verifyPackagedUpdateConfig, verifyWindowsUpdateManifest } from './update-manifest.ts'
 
 const builderConfig = 'publish:\n  provider: github\n  owner: devin2255\n  repo: deepseek-harness-desktop\n'
@@ -15,11 +16,36 @@ describe('Windows desktop update metadata', () => {
     try {
       const builder = join(root, 'builder.yml')
       const packaged = join(root, 'app-update.yml')
+      const application = join(root, 'DeepSeek Harness.exe')
+      await writeFile(builder, builderConfig)
+      await writeFile(application, unsignedPortableExecutable())
+      await writeFile(packaged, renderPackagedUpdateConfig(builderConfig))
+      await expect(verifyPackagedUpdateConfig(packaged, builder, application)).resolves.toBeUndefined()
+      await writeFile(packaged, builderConfig.replace('devin2255', 'deepseek-ai'))
+      await expect(verifyPackagedUpdateConfig(packaged, builder, application)).rejects.toThrow(/differs from reviewed configuration/u)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('requires the signed publisher common name in packaged update settings', () => {
+    expect(yaml.load(renderPackagedUpdateConfig(builderConfig, 'DeepSeek Harness Publisher'))).toEqual({
+      provider: 'github', owner: 'devin2255', repo: 'deepseek-harness-desktop',
+      updaterCacheDirName: '@deepseek-aidsh-desktop-updater',
+      publisherName: ['DeepSeek Harness Publisher'],
+    })
+  })
+
+  it.skipIf(process.platform !== 'win32' || !hasAuthenticodeCertificate(process.execPath))('rejects a signed application without its trusted update publisher', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-update-signed-config-'))
+    try {
+      const builder = join(root, 'builder.yml')
+      const packaged = join(root, 'app-update.yml')
       await writeFile(builder, builderConfig)
       await writeFile(packaged, renderPackagedUpdateConfig(builderConfig))
-      await expect(verifyPackagedUpdateConfig(packaged, builder)).resolves.toBeUndefined()
-      await writeFile(packaged, builderConfig.replace('devin2255', 'deepseek-ai'))
-      await expect(verifyPackagedUpdateConfig(packaged, builder)).rejects.toThrow(/differs from reviewed configuration/u)
+      await expect(verifyPackagedUpdateConfig(packaged, builder, process.execPath)).rejects.toThrow(/differs from reviewed configuration/u)
+      await writeFile(packaged, renderPackagedUpdateConfig(builderConfig, inspectAuthenticodePublisher(process.execPath)))
+      await expect(verifyPackagedUpdateConfig(packaged, builder, process.execPath)).resolves.toBeUndefined()
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -47,3 +73,16 @@ describe('Windows desktop update metadata', () => {
     }
   })
 })
+
+function unsignedPortableExecutable(): Buffer {
+  const value = Buffer.alloc(544)
+  const peOffset = 0x80
+  const optionalOffset = peOffset + 24
+  value.write('MZ', 0, 'ascii')
+  value.writeUInt32LE(peOffset, 0x3c)
+  value.write('PE\0\0', peOffset, 'binary')
+  value.writeUInt16LE(240, peOffset + 20)
+  value.writeUInt16LE(0x20b, optionalOffset)
+  value.writeUInt32LE(16, optionalOffset + 108)
+  return value
+}

@@ -496,6 +496,7 @@ async function main(): Promise<void> {
   await verifyPackagedUpdateConfig(
     join(packageRoot, 'resources', 'app-update.yml'),
     join(REPOSITORY_ROOT, 'apps', 'desktop', 'electron-builder.yml'),
+    join(packageRoot, 'DeepSeek Harness.exe'),
   )
   await verifyWindowsUpdateManifest(
     join(DESKTOP_INSTALLER, 'latest.yml'),

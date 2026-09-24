@@ -36,7 +36,7 @@ function step(id: string): Step {
 describe('desktop production release workflow', () => {
   it('requires an explicit protected manual publication decision', () => {
     expect(subject.on.workflow_dispatch.inputs.publish).toEqual({
-      description: 'Publish a signed Windows installer from the selected dsh-v* tag.',
+      description: 'Publish a signed Windows installer from the selected v* tag.',
       required: true,
       type: 'boolean',
       default: false,
@@ -57,7 +57,7 @@ describe('desktop production release workflow', () => {
       WIN_CSC_LINK: '${{ secrets.WIN_CSC_LINK }}',
       WIN_CSC_KEY_PASSWORD: '${{ secrets.WIN_CSC_KEY_PASSWORD }}',
     })
-    expect(step('ref').run).toMatch(/GITHUB_REF_TYPE[\s\S]*GITHUB_REF_NAME[\s\S]*dsh-v\$version[\s\S]*merge-base --is-ancestor HEAD origin\/master/u)
+    expect(step('ref').run).toMatch(/GITHUB_REF_TYPE[\s\S]*GITHUB_REF_NAME[\s\S]*v\$version[\s\S]*merge-base --is-ancestor HEAD origin\/master/u)
     const serialized = JSON.stringify(subject)
     expect(serialized.match(/secrets\./gu)).toHaveLength(2)
     expect(serialized).not.toMatch(/pull_request|push/u)

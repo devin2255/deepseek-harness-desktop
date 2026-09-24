@@ -45,9 +45,9 @@ describe('desktop installer workflow', () => {
     expect(workspace.verifyDepsBeforeRun).toBe(false)
   })
 
-  it('runs unprivileged on pull requests, master, and dsh release tags under hosted native PowerShell', () => {
+  it('runs unprivileged on pull requests, master, and release tags under hosted native PowerShell', () => {
     const subject = workflow()
-    expect(subject.on).toEqual({ pull_request: null, push: { branches: ['master'], tags: ['dsh-v*'] } })
+    expect(subject.on).toEqual({ pull_request: null, push: { branches: ['master'], tags: ['dsh-v*', 'v*'] } })
     expect(subject.permissions).toEqual({ contents: 'read' })
     expect(subject.jobs.installer).toMatchObject({
       'runs-on': 'windows-2025',

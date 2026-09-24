@@ -30,7 +30,7 @@ function workflow(): Workflow {
 describe('desktop macOS smoke workflow', () => {
   it('runs on Apple Silicon without release credentials or write permissions', () => {
     const subject = workflow()
-    expect(subject.on).toEqual({ pull_request: null, push: { branches: ['master'], tags: ['dsh-v*'] } })
+    expect(subject.on).toEqual({ pull_request: null, push: { branches: ['master'], tags: ['dsh-v*', 'v*'] } })
     expect(subject.permissions).toEqual({ contents: 'read' })
     expect(subject.env).toEqual({ DSH_TELEMETRY_DISABLED: '1', CSC_IDENTITY_AUTO_DISCOVERY: 'false' })
     expect(subject.jobs.desktop?.['runs-on']).toBe('macos-15')

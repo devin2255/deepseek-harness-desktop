@@ -207,6 +207,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const source = await readFile(configPath, 'utf8')
     expect(yaml.load(renderPackagedUpdateConfig(source))).toEqual({
       provider: 'github', owner: 'devin2255', repo: 'deepseek-harness-desktop',
+      updaterCacheDirName: '@deepseek-aidsh-desktop-updater',
     })
     expect(() => renderPackagedUpdateConfig(source.replace('owner: devin2255', 'owner: deepseek-ai')))
       .toThrow(/update publisher must be this repository/u)

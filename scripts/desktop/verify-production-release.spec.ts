@@ -7,8 +7,8 @@ import {
 
 describe('desktop production release gate', () => {
   it('accepts only the exact version tag', () => {
-    expect(() => { assertProductionReleaseTag('dsh-v0.1.0-rc.7', '0.1.0-rc.7') }).not.toThrow()
-    for (const tag of [undefined, 'v0.1.0-rc.7', 'dsh-v0.1.0-rc.6', 'dsh-v0.1.0-rc.7-extra']) {
+    expect(() => { assertProductionReleaseTag('v0.1.0-rc.7', '0.1.0-rc.7') }).not.toThrow()
+    for (const tag of [undefined, 'dsh-v0.1.0-rc.7', 'v0.1.0-rc.6', 'v0.1.0-rc.7-extra']) {
       expect(() => { assertProductionReleaseTag(tag, '0.1.0-rc.7') }).toThrow(/expected tag/u)
     }
   })

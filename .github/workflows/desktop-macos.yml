@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [master]
-    tags: ['dsh-v*']
+    tags: ['dsh-v*', 'v*']
 
 permissions:
   contents: read

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createReleaseFiles, hasAuthenticodeCertificate, inspectAuthenticode, verifyReleaseFiles } from './checksum.ts'
+import { createReleaseFiles, hasAuthenticodeCertificate, inspectAuthenticode, inspectAuthenticodePublisher, verifyReleaseFiles } from './checksum.ts'
 
 const roots: string[] = []
 const mkdtemp = async (prefix: string) => realpath(await systemMkdtemp(prefix))
@@ -21,6 +21,11 @@ describe('desktop release checksum and metadata', () => {
 
     expect(hasAuthenticodeCertificate(artifact)).toBe(false)
     expect(inspectAuthenticode(artifact)).toEqual({ signed: false, signatureStatus: 'NotSigned' })
+    expect(inspectAuthenticodePublisher(artifact)).toBeUndefined()
+  })
+
+  it.skipIf(process.platform !== 'win32' || !hasAuthenticodeCertificate(process.execPath))('reads the common name from a trusted signed Windows executable', () => {
+    expect(inspectAuthenticodePublisher(process.execPath)).toMatch(/\S/u)
   })
 
   it('recognizes a bounded PE certificate table and rejects malformed executables', async () => {

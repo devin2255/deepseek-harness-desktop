@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-[构建器配置](../../../../apps/desktop/electron-builder.yml)将 GitHub 更新源固定到 `devin2255/deepseek-harness-desktop`。Windows 打包在目录构建后将经审查的提供方写入 `resources/app-update.yml`，若构建器已写入不同值则拒绝继续。打包保留 `latest.yml`，并将其版本、安装器名称与 SHA-512 对照最终 EXE。包验证和受保护的发布工作流在发布前重复这些校验；工作流将该清单与已签名安装器一同发布。应用目前尚不会检查或应用更新。
+[构建器配置](../../../../apps/desktop/electron-builder.yml)将 GitHub 更新源固定到 `devin2255/deepseek-harness-desktop`。Windows 打包在目录构建后将经审查的提供方和更新缓存目录写入 `resources/app-update.yml`，若构建器已写入不同值则拒绝继续。对已签名应用，还会将通过 Authenticode 信任校验的证书通用名称记录为 `publisherName`；否则 `electron-updater` 会跳过安装器签名验证。打包保留 `latest.yml`，并将其版本、安装器名称与 SHA-512 对照最终 EXE。包验证和受保护的发布工作流在发布前重复这些校验；工作流还要求安装器与应用使用同一个签名发布者，并将清单与已签名安装器一同发布。桌面发布使用能被更新器识别为语义化版本的 `v<version>` 标签，与 npm 的 `dsh-v<version>` 标签区分开。应用目前尚不会检查或应用更新。
 
 ## Alternatives considered
 

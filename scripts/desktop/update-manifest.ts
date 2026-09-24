@@ -4,13 +4,15 @@ import { createReadStream } from 'node:fs'
 import { lstat, readFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import yaml from 'js-yaml'
+import { inspectAuthenticodePublisher } from './checksum.ts'
 
 /**
  * Render only the reviewed GitHub update provider for packaged applications.
  * @param builderConfig - Full electron-builder configuration text.
+ * @param publisherName - Common name of the signed application certificate, when present.
  * @returns The update provider configuration embedded in the application.
  */
-export function renderPackagedUpdateConfig(builderConfig: string): string {
+export function renderPackagedUpdateConfig(builderConfig: string, publisherName?: string): string {
   const config: unknown = yaml.load(builderConfig)
   if (config === null || typeof config !== 'object' || Array.isArray(config) || !('publish' in config)) {
     throw new Error('desktop packaging: missing explicit update publisher')
@@ -25,18 +27,27 @@ export function renderPackagedUpdateConfig(builderConfig: string): string {
   ) {
     throw new Error('desktop packaging: update publisher must be this repository')
   }
-  return yaml.dump({ provider: publish.provider, owner: publish.owner, repo: publish.repo })
+  return yaml.dump({
+    provider: publish.provider,
+    owner: publish.owner,
+    repo: publish.repo,
+    updaterCacheDirName: '@deepseek-aidsh-desktop-updater',
+    ...(publisherName === undefined ? {} : { publisherName: [publisherName] }),
+  })
 }
 
 /**
  * Verify that installed update settings still match the reviewed builder publisher.
  * @param configPath - Embedded app-update.yml file.
  * @param builderConfigPath - Reviewed electron-builder configuration file.
+ * @param applicationPath - Installed Windows application executable.
  */
-export async function verifyPackagedUpdateConfig(configPath: string, builderConfigPath: string): Promise<void> {
+export async function verifyPackagedUpdateConfig(configPath: string, builderConfigPath: string, applicationPath: string): Promise<void> {
   const status = await lstat(configPath)
   if (!status.isFile() || status.isSymbolicLink()) throw new Error('desktop update: packaged publisher must be an ordinary file')
-  const expected = renderPackagedUpdateConfig(await readFile(builderConfigPath, 'utf8'))
+  const expected = renderPackagedUpdateConfig(
+    await readFile(builderConfigPath, 'utf8'), inspectAuthenticodePublisher(applicationPath),
+  )
   if (await readFile(configPath, 'utf8') !== expected) {
     throw new Error('desktop update: packaged publisher differs from reviewed configuration')
   }

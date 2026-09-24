@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-24-desktop-update-feed-ownership.md
-2026-09-24-desktop-update-feed-ownership.md: 723e737b588bcc89efb72f4553f0b6644053aefa
-2026-09-24-desktop-update-feed-ownership.zh.md: f96d4c4b2b9a59f3e4630bdfa2d61500a1c094fb
+2026-09-24-desktop-update-feed-ownership.md: f0311020a57cf53593d94d1674d2c222a8c11123
+2026-09-24-desktop-update-feed-ownership.zh.md: ed0a42fa7e814fe838feb42da205145009b1910b

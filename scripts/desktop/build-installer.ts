@@ -9,6 +9,7 @@ import yaml from 'js-yaml'
 import {
   createReleaseFiles,
   inspectAuthenticode,
+  inspectAuthenticodePublisher,
 } from './checksum.ts'
 export {
   authenticodeEnvironment,
@@ -36,11 +37,14 @@ import { verifyInstallerFileOperations } from './generate-installer-file-operati
 import { renderPackagedUpdateConfig, verifyPackagedUpdateConfig, verifyWindowsUpdateManifest } from './update-manifest.ts'
 
 const WIN_UNPACKED = join(DESKTOP_INSTALLER, 'win-unpacked')
+const APPLICATION_EXE = join(WIN_UNPACKED, 'DeepSeek Harness.exe')
 const UPDATE_CONFIG = join(WIN_UNPACKED, 'resources', 'app-update.yml')
 const BUILDER_CONFIG = join(REPOSITORY_ROOT, 'apps', 'desktop', 'electron-builder.yml')
 
 async function ensurePackagedUpdateConfig(): Promise<void> {
-  const expected = renderPackagedUpdateConfig(await readFile(BUILDER_CONFIG, 'utf8'))
+  const expected = renderPackagedUpdateConfig(
+    await readFile(BUILDER_CONFIG, 'utf8'), inspectAuthenticodePublisher(APPLICATION_EXE),
+  )
   assertOwnedOutput(UPDATE_CONFIG)
   let existing: string
   try { existing = await readFile(UPDATE_CONFIG, 'utf8') } catch (error: unknown) {
@@ -178,7 +182,7 @@ async function main(): Promise<void> {
     { ...process.env, DEBUG: 'electron-builder' },
   )
   await ensurePackagedUpdateConfig()
-  await verifyPackagedUpdateConfig(UPDATE_CONFIG, BUILDER_CONFIG)
+  await verifyPackagedUpdateConfig(UPDATE_CONFIG, BUILDER_CONFIG, APPLICATION_EXE)
   const sanitizedMarkers = await sanitizeBundlerRegionMarkers(WIN_UNPACKED)
   console.log(`desktop packaging: removed ${sanitizedMarkers} generated source-location comments`)
   const prunedUnpackedFiles = await pruneForeignNativePayloads(WIN_UNPACKED)
@@ -193,7 +197,7 @@ async function main(): Promise<void> {
     { ...process.env, DEBUG: 'electron-builder' },
   )
   const validatedAfterNsis = await validatePackage({ packageRoot: WIN_UNPACKED })
-  await verifyPackagedUpdateConfig(UPDATE_CONFIG, BUILDER_CONFIG)
+  await verifyPackagedUpdateConfig(UPDATE_CONFIG, BUILDER_CONFIG, APPLICATION_EXE)
   const afterNsisTree = await packageTreeManifest(WIN_UNPACKED)
   if (JSON.stringify(validatedAfterNsis) !== JSON.stringify(validatedInput)) {
     throw new Error('desktop packaging: NSIS build changed the validated application input')

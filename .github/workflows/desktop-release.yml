@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish a signed Windows installer from the selected dsh-v* tag.
+        description: Publish a signed Windows installer from the selected v* tag.
         required: true
         type: boolean
         default: false
@@ -58,7 +58,7 @@ jobs:
         run: |
           if ($env:GITHUB_REF_TYPE -ne 'tag') { throw 'Desktop production release requires a selected tag.' }
           $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "dsh-v$version") { throw "Desktop tag does not match version $version." }
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Desktop tag does not match version $version." }
           git fetch origin master
           git merge-base --is-ancestor HEAD origin/master
           if ($LASTEXITCODE -ne 0) { throw 'Desktop release tag is not reachable from origin/master.' }

@@ -199,6 +199,37 @@ export function inspectAuthenticode(path: string): SignatureMetadata {
 }
 
 /**
+ * Read the signer common name used by electron-updater for a signed Windows application.
+ * @param path - Windows executable to inspect.
+ * @returns The trusted signing publisher, or undefined when the executable is unsigned.
+ */
+export function inspectAuthenticodePublisher(path: string): string | undefined {
+  if (!hasAuthenticodeCertificate(path)) return undefined
+  const command = [
+    '$signature = Get-AuthenticodeSignature -LiteralPath $env:DSH_SIGNATURE_ARTIFACT',
+    "if ($signature.Status.ToString() -ne 'Valid' -or $null -eq $signature.SignerCertificate) { throw 'Invalid Authenticode signature' }",
+    '$publisher = $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)',
+    "if ([string]::IsNullOrWhiteSpace($publisher)) { throw 'Missing signer common name' }",
+    '[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($publisher)))',
+  ].join('; ')
+  const result = spawnSync(authenticodePowerShellPath(process.env), [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command,
+  ], authenticodeSpawnOptions(path, process.env))
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error('desktop update: Authenticode publisher inspection failed', { cause: result.error })
+  }
+  const encoded = result.stdout.trim()
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded) || encoded === '') {
+    throw new Error('desktop update: Authenticode publisher encoding is invalid')
+  }
+  const publisher = Buffer.from(encoded, 'base64').toString('utf8')
+  if (publisher.length === 0 || publisher.length > 256 || /[\u0000-\u001f\u007f]/u.test(publisher)) {
+    throw new Error('desktop update: Authenticode publisher name is invalid')
+  }
+  return publisher
+}
+
+/**
  * Write checksum and JSON release metadata beside an installer.
  * @param options - Exact output ownership, release identity, and verified signature state.
  * @returns The metadata written to disk.

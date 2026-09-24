@@ -76,7 +76,7 @@ pnpm run desktop:package
 pnpm run desktop:validate-package
 ```
 
-`.artifacts/desktop/installer/` 下的输出包括 `DeepSeek-Harness-Setup-<version>-x64.exe`、对应 `.sha256`、`release-metadata.json` 和 `latest.yml`。打包的 `resources/app-update.yml` 将 GitHub 提供方固定到 `devin2255/deepseek-harness-desktop`；包与发布校验会核对该身份，并将 `latest.yml` 与确切安装器的 SHA-512 对照。提供给测试者的应是 setup EXE，而不是 `win-unpacked` 内的可执行文件。双击 setup 打开辅助安装程序，默认目录为 `%LOCALAPPDATA%\Programs\DeepSeek Harness`。卸载默认保留 `%APPDATA%\DeepSeek Harness` 下的 Harness 数据和日志，除非用户明确选择并确认删除。发布校验直接读取 PE 证书目录来识别未签名产物；只要证书存在，就必须通过 Windows Authenticode 信任校验。未签名构建可能触发 SmartScreen；校验和验证能检测下载文件是否被修改，但不能证明发布者身份，也不能替代签名批准。
+`.artifacts/desktop/installer/` 下的输出包括 `DeepSeek-Harness-Setup-<version>-x64.exe`、对应 `.sha256`、`release-metadata.json` 和 `latest.yml`。打包的 `resources/app-update.yml` 将 GitHub 提供方固定到 `devin2255/deepseek-harness-desktop`，对已签名构建还会记录应用签名发布者以验证更新；包与发布校验会核对该身份，并将 `latest.yml` 与确切安装器的 SHA-512 对照。生产发布还要求安装器与应用使用同一个签名发布者。提供给测试者的应是 setup EXE，而不是 `win-unpacked` 内的可执行文件。双击 setup 打开辅助安装程序，默认目录为 `%LOCALAPPDATA%\Programs\DeepSeek Harness`。卸载默认保留 `%APPDATA%\DeepSeek Harness` 下的 Harness 数据和日志，除非用户明确选择并确认删除。发布校验直接读取 PE 证书目录来识别未签名产物；只要证书存在，就必须通过 Windows Authenticode 信任校验。未签名构建可能触发 SmartScreen；校验和验证能检测下载文件是否被修改，但不能证明发布者身份，也不能替代签名批准。
 
 只在没有现有产品安装的临时 Windows 账户中运行生命周期验收。测试会认证隔离的应用数据路径，使用测试专用快捷方式和登录启动注册，并拒绝生产产品标识冲突，但仍会操作真实的按用户安装器注册表：
 
@@ -88,7 +88,7 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 测试覆盖无 API 凭据启动、选项变更、通过较旧注册版本触发的运行中应用替换，以及两种卸载数据选择。它不能替代断网机器验收，也不能替代从单独构建的旧发布产物升级的验收。
 
-[Windows 安装器工作流](../../.github/workflows/desktop-installer.yml) 在全新的托管 Windows runner 上为拉取请求、master 和 `dsh-v*` 推送运行完整安装器测试。通过包验证的 EXE、校验和与元数据保留 30 天，即使后续验收失败也会保留；使用产物前须查看该次运行的测试结果。该工作流不持有签名凭据，也不发布生产版本。
+[Windows 安装器工作流](../../.github/workflows/desktop-installer.yml) 在全新的托管 Windows runner 上为拉取请求、master，以及 `dsh-v*` 或 `v*` 推送运行完整安装器测试。通过包验证的 EXE、校验和与元数据保留 30 天，即使后续验收失败也会保留；使用产物前须查看该次运行的测试结果。该工作流不持有签名凭据，也不发布生产版本。
 
 ## macOS arm64 测试包
 
@@ -96,7 +96,7 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 [macOS arm64 工作流](../../.github/workflows/desktop-macos.yml)会先运行真实的 Electron 验收测试，再进行打包；随后只读挂载 DMG，将其中的应用复制到临时安装目录，并验证已安装应用的启动及 loopback 授权，最后才将未签名压缩包保留 30 天。这些文件不是生产发布物：工作流不会验证 Gatekeeper 行为、签名或公证应用，也不会发布更新源。[Mac 验收决策](../../.agents/notes/implemented/testing/2026-09-23-macos-arm64-desktop-package-qualification.md)记录了它与生产发布的区分。
 
-[桌面端生产发布工作流](../../.github/workflows/desktop-release.yml)是独立的手动操作，只能从 `master` 可达且与版本匹配的 `dsh-v<version>` 标签运行。受保护的 `desktop-release` 环境必须提供 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`。工作流要求安装器与已安装主程序的 Authenticode 都有效，重新执行完整安装器矩阵，创建 GitHub 构建来源证明，最后才把 EXE、校验和、发布元数据及 `latest.yml` 发布为 GitHub Release 资产。选择工作流但不启用 `publish` 时，不会运行发布作业。
+[桌面端生产发布工作流](../../.github/workflows/desktop-release.yml)是独立的手动操作，只能从 `master` 可达且与版本匹配的 `v<version>` 标签运行；`dsh-v<version>` 仍是 npm 发布标签。受保护的 `desktop-release` 环境必须提供 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`。工作流要求安装器与已安装主程序的 Authenticode 都有效且签名发布者相同，重新执行完整安装器矩阵，创建 GitHub 构建来源证明，最后才把 EXE、校验和、发布元数据及 `latest.yml` 发布为 GitHub Release 资产。选择工作流但不启用 `publish` 时，不会运行发布作业。
 
 ## 已知限制
 
