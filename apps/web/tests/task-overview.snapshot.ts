@@ -54,6 +54,31 @@ it('leaves ordinary Web composition without a Tasks navigation entry', async () 
   expect(screen.queryByRole('main', { name: 'Tasks' })).toBeNull()
 })
 
+it('hides a root Task after archiving its Session through the assembled sidebar', async () => {
+  mountAssembledApp({ taskOverview: true })
+  const overview = await screen.findByRole('main', { name: 'Tasks' }, { timeout: 10_000 })
+  await within(overview).findByRole('button', { name: 'Fixture 历史会话' })
+  const row = screen.getByRole('treeitem', { name: /Fixture 历史会话/u })
+  const actions = row.querySelector<HTMLButtonElement>('button[aria-label="Session actions for Fixture 历史会话"]')
+  if (actions === null) throw new Error('fixture root is missing its archive menu')
+  fireEvent.click(actions)
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Archive session' }))
+  await waitFor(() => {
+    expect(within(overview).queryByRole('button', { name: 'Fixture 历史会话' })).toBeNull()
+  })
+  const projection = [...overview.querySelectorAll('section')].map(section => ({
+    group: section.querySelector('h2')?.textContent,
+    tasks: [...section.querySelectorAll(':scope > ul > li')].map(row => row.textContent),
+  }))
+  const golden = join(process.cwd(), 'apps/web/tests/snapshots/task-overview/archived.expected.json')
+  const output = `${JSON.stringify(projection, null, 2)}\n`
+  if (REFRESHING_GOLDEN) {
+    mkdirSync(dirname(golden), { recursive: true })
+    writeFileSync(golden, output)
+  }
+  expect(output).toBe(readFileSync(golden, 'utf8'))
+})
+
 it('creates an isolated task through the assembled desktop roster', async () => {
   mountAssembledApp({ taskOverview: true })
   const overview = await screen.findByRole('main', { name: 'Tasks' }, { timeout: 10_000 })

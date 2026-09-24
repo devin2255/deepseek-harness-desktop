@@ -39,9 +39,10 @@ export function selectTasks(
   sessions: SessionListState,
   workspaces: WorkspaceListState,
 ): TaskRow[] {
+  const archived = new Set(workspaces.archivedSessionIds)
   return [...new Set(list.ids)].flatMap((id) => {
     const task = list.byId[id]
-    if (task === undefined) return []
+    if (task === undefined || archived.has(id)) return []
     const root = sessions.byId[id]
     const criteria = task.definition?.criteria ?? []
     return [{
@@ -87,11 +88,8 @@ export function selectSessionActivity(list: SessionListState, workspaces: Worksp
   }
   const rows = roots.map((root): SessionActivityRow => {
     const descendants: SessionSummary[] = []
-    const seen = new Set([root.id])
     const queue = [...(children.get(root.id) ?? [])]
     for (const child of queue) {
-      if (seen.has(child.id)) continue
-      seen.add(child.id)
       descendants.push(child)
       queue.push(...(children.get(child.id) ?? []))
     }

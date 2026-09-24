@@ -31,6 +31,17 @@ const taskList = (rows: TaskSnapshot[]): TaskListState => ({
 })
 
 describe('selectTasks', () => {
+  it('hides archived roots without removing them from the authoritative Task list', () => {
+    const list = taskList([
+      task('visible', { descendantSessionIds: [id('child')] }),
+      task('archived'),
+    ])
+    const selected = selectTasks(list, sessionList([summary('visible')]), workspaces([], [id('archived'), id('child')]))
+    expect(selected.map(row => row.task.taskId)).toEqual(['visible'])
+    expect(list.ids).toEqual([id('visible'), id('archived')])
+    expect(list.byId[id('archived')]?.taskId).toBe(id('archived'))
+  })
+
   it('projects all statuses, durable outcome facts, active descendants, workspace, and every attention owner', () => {
     const statuses = ['needs-attention', 'failed', 'running', 'reviewing', 'ready', 'settled'] as const
     const sessions = sessionList([
@@ -85,5 +96,30 @@ describe('selectTasks', () => {
     expect(selected).toHaveLength(1)
     expect(selected[0]).toMatchObject({ group: 'needs-you', runningDescendants: 1, workspace })
     expect(selected[0]?.pending.map(row => row.id)).toEqual(['root', 'child'])
+  })
+
+  it('orders legacy activity by attention, execution, update time, and root ID', () => {
+    const rows = [
+      summary('idle-z', { updatedAt: 2 }),
+      summary('idle-a', { updatedAt: 2 }),
+      summary('idle-old', { updatedAt: 1 }),
+      summary('running-root', { running: true }),
+      summary('running-child'),
+      summary('needs-you', { pendingInteraction: 'approval' }),
+      summary('child-one', { origin: 'subagent', parentId: id('running-child'), running: true }),
+      summary('child-two', { origin: 'subagent', parentId: id('running-child') }),
+      summary('orphan', { origin: 'subagent' }),
+    ]
+    const selected = selectSessionActivity(sessionList(rows), workspaces())
+
+    expect(selected.map(row => [row.root.id, row.group])).toEqual([
+      ['needs-you', 'needs-you'],
+      ['running-child', 'running'],
+      ['running-root', 'running'],
+      ['idle-a', 'other'],
+      ['idle-z', 'other'],
+      ['idle-old', 'other'],
+    ])
+    expect(selected.find(row => row.root.id === id('running-child'))?.runningDescendants).toBe(1)
   })
 })

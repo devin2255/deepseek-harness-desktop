@@ -27,7 +27,7 @@ Clients must fetch `task.list` when establishing or re-establishing a connection
 - `packages/task/task` owns durable vocabulary, folds, error taxonomy, and the Task service.
 - `packages/task/task-session` owns Session lineage, cold/live aggregation, compare-and-set writes, live-generation fencing, and provider invariants.
 - `packages/host/apiproxy` owns browser-facing methods, strict wire validation, error translation, and Host-stream delivery.
-- Desktop client packages own mirrors, ordering, filtering, navigation, and presentation; they do not reconstruct Task state from transcripts.
+- Desktop client packages own mirrors, ordering, filtering, navigation, and presentation; they do not reconstruct Task state from transcripts. The overview hides roots in the Workspace archive set without removing their `task.list` rows.
 
 ## Alternatives considered
 

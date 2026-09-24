@@ -27,7 +27,7 @@ ApiProxy 公开 `task.list`、`task.define`、`task.updateCriterion`、`task.rec
 - `packages/task/task` 持有持久词汇、fold、错误分类和 Task service。
 - `packages/task/task-session` 持有 Session 血缘、冷热聚合、compare-and-set 写入、实时 generation 隔离和 provider invariant。
 - `packages/host/apiproxy` 持有浏览器方法、严格线路校验、错误转换和 Host 流交付。
-- 桌面客户端包持有镜像、排序、筛选、导航和呈现；它们不会从 transcript 重建 Task 状态。
+- 桌面客户端包持有镜像、排序、筛选、导航和呈现；它们不会从 transcript 重建 Task 状态。总览隐藏 Workspace 归档集合中的根会话，但不移除其 `task.list` 行。
 
 ## 考虑过的替代方案
 
