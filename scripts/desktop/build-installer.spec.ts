@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { copyFile, mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -366,16 +366,37 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const windows = process.env.SystemRoot ?? 'C:\\Windows'
     const target = join(windows, 'System32/WindowsPowerShell/v1.0/powershell.exe')
     const foreignTarget = join(windows, 'System32/cmd.exe')
+    const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
+    const newTarget = target
     try {
       const createShortcut = '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DSH_TEST_SHORTCUT);$s.TargetPath=$env:DSH_TEST_TARGET;$s.Save()'
       const stagedShortcut = join(root, 'staged.lnk')
+      const createUnresolvedShortcut = async (shortcutTarget: string): Promise<void> => {
+        const base = Buffer.from(`${shortcutTarget}\0`, 'utf16le')
+        const linkInfoSize = 36 + base.length + 2
+        const link = Buffer.alloc(76 + linkInfoSize)
+        link.writeUInt32LE(76, 0)
+        Buffer.from('0114020000000000c000000000000046', 'hex').copy(link, 4)
+        link.writeUInt32LE(2, 20)
+        link.writeUInt32LE(linkInfoSize, 76)
+        link.writeUInt32LE(36, 80)
+        link.writeUInt32LE(1, 84)
+        link.writeUInt32LE(36, 104)
+        link.writeUInt32LE(36 + base.length, 108)
+        base.copy(link, 112)
+        await writeFile(stagedShortcut, link)
+      }
       const stageShortcut = async (shortcutTarget: string, move = true): Promise<string> => {
-        await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
-          env: { ...process.env, DSH_TEST_SHORTCUT: stagedShortcut, DSH_TEST_TARGET: shortcutTarget },
-        })
+        if (shortcutTarget === oldTarget) {
+          await createUnresolvedShortcut(shortcutTarget)
+        } else {
+          await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
+            env: { ...process.env, DSH_TEST_SHORTCUT: stagedShortcut, DSH_TEST_TARGET: shortcutTarget },
+          })
+        }
         if (!move) return stagedShortcut
         await rm(shortcut, { force: true })
-        // WScript is only a fixture producer; moving its output keeps the inspector path under a Unicode ancestor on hosted Windows.
+        // Moving the link keeps the inspector path under a Unicode ancestor on hosted Windows.
         await rename(stagedShortcut, shortcut)
         return shortcut
       }
@@ -389,10 +410,8 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       const shortGitBash = await shortWindowsPath(gitBash)
       await stageShortcut(gitBash)
       await expect(inspectShortcut(shortcut, shortGitBash)).resolves.toBe(0)
-      const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
-      const newTarget = target
       for (const [target, expected] of [[oldTarget, 0], [newTarget, 0], [foreignTarget, 11]] as const) {
-        const inspectedShortcut = await stageShortcut(target, target !== oldTarget)
+        const inspectedShortcut = await stageShortcut(target)
         const storedTarget = await runRestrictedCommand(storedCommand, {
           ...process.env, DSH_TEST_SHORTCUT: inspectedShortcut,
         })
