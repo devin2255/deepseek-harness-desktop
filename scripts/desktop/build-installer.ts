@@ -1,7 +1,7 @@
 /** Build the single repository-owned Windows desktop installer. */
 
 import { spawnSync } from 'node:child_process'
-import { lstat, mkdir, readFile, readdir, unlink } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import yaml from 'js-yaml'
@@ -33,8 +33,23 @@ import {
 } from './validate-package.ts'
 import { verifyInstallerPowerShellCommands } from './generate-installer-powershell.ts'
 import { verifyInstallerFileOperations } from './generate-installer-file-operations.ts'
+import { renderPackagedUpdateConfig, verifyPackagedUpdateConfig, verifyWindowsUpdateManifest } from './update-manifest.ts'
 
 const WIN_UNPACKED = join(DESKTOP_INSTALLER, 'win-unpacked')
+const UPDATE_CONFIG = join(WIN_UNPACKED, 'resources', 'app-update.yml')
+const BUILDER_CONFIG = join(REPOSITORY_ROOT, 'apps', 'desktop', 'electron-builder.yml')
+
+async function ensurePackagedUpdateConfig(): Promise<void> {
+  const expected = renderPackagedUpdateConfig(await readFile(BUILDER_CONFIG, 'utf8'))
+  assertOwnedOutput(UPDATE_CONFIG)
+  let existing: string
+  try { existing = await readFile(UPDATE_CONFIG, 'utf8') } catch (error: unknown) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+    await writeFile(UPDATE_CONFIG, expected, { flag: 'wx' })
+    return
+  }
+  if (existing !== expected) throw new Error('desktop packaging: packaged update publisher differs from reviewed configuration')
+}
 
 /** Return the pinned electron-builder directory-build arguments. */
 export function electronBuilderDirectoryInvocation(): { readonly args: readonly string[] } {
@@ -162,6 +177,8 @@ async function main(): Promise<void> {
     ['--filter', '@deepseek-ai/dsh-desktop', 'exec', ...directoryInvocation.args],
     { ...process.env, DEBUG: 'electron-builder' },
   )
+  await ensurePackagedUpdateConfig()
+  await verifyPackagedUpdateConfig(UPDATE_CONFIG, BUILDER_CONFIG)
   const sanitizedMarkers = await sanitizeBundlerRegionMarkers(WIN_UNPACKED)
   console.log(`desktop packaging: removed ${sanitizedMarkers} generated source-location comments`)
   const prunedUnpackedFiles = await pruneForeignNativePayloads(WIN_UNPACKED)
@@ -176,6 +193,7 @@ async function main(): Promise<void> {
     { ...process.env, DEBUG: 'electron-builder' },
   )
   const validatedAfterNsis = await validatePackage({ packageRoot: WIN_UNPACKED })
+  await verifyPackagedUpdateConfig(UPDATE_CONFIG, BUILDER_CONFIG)
   const afterNsisTree = await packageTreeManifest(WIN_UNPACKED)
   if (JSON.stringify(validatedAfterNsis) !== JSON.stringify(validatedInput)) {
     throw new Error('desktop packaging: NSIS build changed the validated application input')
@@ -185,13 +203,13 @@ async function main(): Promise<void> {
   }
   verifyGeneratedInstallerScript(await readFile(join(DESKTOP_INSTALLER, 'builder-debug.yml'), 'utf8'))
   await removeOrdinaryBuilderFile('builder-debug.yml')
-  await removeOrdinaryBuilderFile('latest.yml')
   const entries = (await readdir(DESKTOP_INSTALLER)).filter(name => name !== 'win-unpacked')
-  if (entries.length !== 1 || entries[0] !== DESKTOP_INSTALLER_NAME) {
-    throw new Error(`desktop packaging: expected one exact installer, found ${entries.length} outputs`)
+  if (entries.length !== 2 || !entries.includes(DESKTOP_INSTALLER_NAME) || !entries.includes('latest.yml')) {
+    throw new Error(`desktop packaging: expected the installer and its update manifest, found ${entries.length} outputs`)
   }
   const output = join(DESKTOP_INSTALLER, DESKTOP_INSTALLER_NAME)
   assertInstallerOutput(output)
+  await verifyWindowsUpdateManifest(join(DESKTOP_INSTALLER, 'latest.yml'), output, DESKTOP_VERSION)
   const status = await lstat(output)
   if (!status.isFile() || status.isSymbolicLink()) throw new Error(`desktop packaging: installer is not an ordinary file: ${output}`)
   const signature = inspectAuthenticode(output)
@@ -206,7 +224,7 @@ async function main(): Promise<void> {
     signature,
   })
   const finalEntries = new Set(await readdir(DESKTOP_INSTALLER))
-  const expected = new Set(['win-unpacked', DESKTOP_INSTALLER_NAME, `${DESKTOP_INSTALLER_NAME}.sha256`, 'release-metadata.json'])
+  const expected = new Set(['win-unpacked', DESKTOP_INSTALLER_NAME, 'latest.yml', `${DESKTOP_INSTALLER_NAME}.sha256`, 'release-metadata.json'])
   if (finalEntries.size !== expected.size || [...expected].some(name => !finalEntries.has(name))) {
     throw new Error('desktop packaging: release directory contains unexpected outputs')
   }

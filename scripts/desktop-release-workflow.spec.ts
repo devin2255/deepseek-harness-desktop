@@ -77,6 +77,8 @@ describe('desktop production release workflow', () => {
       uses: 'actions/attest@v4',
       with: { 'subject-path': '.artifacts/desktop/installer/DeepSeek-Harness-Setup-*-x64.exe' },
     })
+    expect(step('upload').with?.path).toContain('.artifacts/desktop/installer/latest.yml')
+    expect(step('publish').run).toContain('$metadataPath, $updateManifest,')
     expect(step('publish').run).toMatch(/gh @arguments[\s\S]*GitHub Release publication failed/u)
   })
 })

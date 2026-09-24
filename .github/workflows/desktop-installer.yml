@@ -71,6 +71,7 @@ jobs:
           path: |
             .artifacts/desktop/installer/*.exe
             .artifacts/desktop/installer/*.exe.sha256
+            .artifacts/desktop/installer/latest.yml
             .artifacts/desktop/installer/release-metadata.json
           if-no-files-found: error
           include-hidden-files: true

@@ -110,6 +110,7 @@ jobs:
           path: |
             .artifacts/desktop/installer/*.exe
             .artifacts/desktop/installer/*.exe.sha256
+            .artifacts/desktop/installer/latest.yml
             .artifacts/desktop/installer/release-metadata.json
           if-no-files-found: error
           include-hidden-files: true
@@ -123,9 +124,10 @@ jobs:
           $metadataPath = '.artifacts/desktop/installer/release-metadata.json'
           $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
           $installer = Join-Path '.artifacts/desktop/installer' $metadata.artifact
+          $updateManifest = Join-Path '.artifacts/desktop/installer' 'latest.yml'
           $arguments = @(
             'release', 'create', $env:GITHUB_REF_NAME,
-            $installer, "$installer.sha256", $metadataPath,
+            $installer, "$installer.sha256", $metadataPath, $updateManifest,
             '--verify-tag', '--generate-notes', '--fail-on-no-commits',
             '--title', "DeepSeek Harness Desktop $($metadata.version)",
             '--notes', 'Signed Windows x64 installer. Download the Setup EXE; verify its SHA-256 sidecar or GitHub artifact attestation before installation.'

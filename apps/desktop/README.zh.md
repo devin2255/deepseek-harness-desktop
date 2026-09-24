@@ -74,7 +74,7 @@ pnpm run desktop:package
 pnpm run desktop:validate-package
 ```
 
-`.artifacts/desktop/installer/` 下的输出包括 `DeepSeek-Harness-Setup-<version>-x64.exe`、对应 `.sha256` 和 `release-metadata.json`。提供给测试者的应是 setup EXE，而不是 `win-unpacked` 内的可执行文件。双击 setup 打开辅助安装程序，默认目录为 `%LOCALAPPDATA%\Programs\DeepSeek Harness`。卸载默认保留 `%APPDATA%\DeepSeek Harness` 下的 Harness 数据和日志，除非用户明确选择并确认删除。发布校验直接读取 PE 证书目录来识别未签名产物；只要证书存在，就必须通过 Windows Authenticode 信任校验。未签名构建可能触发 SmartScreen；校验和验证能检测下载文件是否被修改，但不能证明发布者身份，也不能替代签名批准。
+`.artifacts/desktop/installer/` 下的输出包括 `DeepSeek-Harness-Setup-<version>-x64.exe`、对应 `.sha256`、`release-metadata.json` 和 `latest.yml`。打包的 `resources/app-update.yml` 将 GitHub 提供方固定到 `devin2255/deepseek-harness-desktop`；包与发布校验会核对该身份，并将 `latest.yml` 与确切安装器的 SHA-512 对照。提供给测试者的应是 setup EXE，而不是 `win-unpacked` 内的可执行文件。双击 setup 打开辅助安装程序，默认目录为 `%LOCALAPPDATA%\Programs\DeepSeek Harness`。卸载默认保留 `%APPDATA%\DeepSeek Harness` 下的 Harness 数据和日志，除非用户明确选择并确认删除。发布校验直接读取 PE 证书目录来识别未签名产物；只要证书存在，就必须通过 Windows Authenticode 信任校验。未签名构建可能触发 SmartScreen；校验和验证能检测下载文件是否被修改，但不能证明发布者身份，也不能替代签名批准。
 
 只在没有现有产品安装的临时 Windows 账户中运行生命周期验收。测试会认证隔离的应用数据路径，使用测试专用快捷方式和登录启动注册，并拒绝生产产品标识冲突，但仍会操作真实的按用户安装器注册表：
 
@@ -94,11 +94,11 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 
 [macOS arm64 工作流](../../.github/workflows/desktop-macos.yml)会先运行真实的 Electron 验收测试，再进行打包；随后只读挂载 DMG，将其中的应用复制到临时安装目录，并验证已安装应用的启动及 loopback 授权，最后才将未签名压缩包保留 30 天。这些文件不是生产发布物：工作流不会验证 Gatekeeper 行为、签名或公证应用，也不会发布更新源。[Mac 验收决策](../../.agents/notes/implemented/testing/2026-09-23-macos-arm64-desktop-package-qualification.md)记录了它与生产发布的区分。
 
-[桌面端生产发布工作流](../../.github/workflows/desktop-release.yml)是独立的手动操作，只能从 `master` 可达且与版本匹配的 `dsh-v<version>` 标签运行。受保护的 `desktop-release` 环境必须提供 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`。工作流要求安装器与已安装主程序的 Authenticode 都有效，重新执行完整安装器矩阵，创建 GitHub 构建来源证明，最后才把 EXE、校验和与元数据发布为 GitHub Release 资产。选择工作流但不启用 `publish` 时，不会运行发布作业。
+[桌面端生产发布工作流](../../.github/workflows/desktop-release.yml)是独立的手动操作，只能从 `master` 可达且与版本匹配的 `dsh-v<version>` 标签运行。受保护的 `desktop-release` 环境必须提供 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`。工作流要求安装器与已安装主程序的 Authenticode 都有效，重新执行完整安装器矩阵，创建 GitHub 构建来源证明，最后才把 EXE、校验和、发布元数据及 `latest.yml` 发布为 GitHub Release 资产。选择工作流但不启用 `publish` 时，不会运行发布作业。
 
 ## 已知限制
 
-- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen，生产发布则必须使用受保护的签名环境并作出明确的手动决定。尚未实现自动更新，也未实现 macOS Gatekeeper 验收、签名和公证。
+- **安装程序验证** — 分发前必须完成 Windows 生命周期验证；未签名的本地构建可能触发 SmartScreen，生产发布则必须使用受保护的签名环境并作出明确的手动决定。Windows 更新源和清单已打包，但应用尚不会检查、下载或安装更新。macOS Gatekeeper 验收、签名和公证尚未实现。
 - **任务集成** — 任务总览、根任务 worktree 隔离、审查、提交、冲突安全的应用及感知可恢复性的丢弃已经可用。子写入 Agent 的 worktree、并行写入者之间的自动协调、Task 归档和 Harness Studio 尚未实现。
 - **原生集成** — 已提供感知任务的托盘驻留，以及完成或注意事项通知。尚未实现深层链接、外部链接处理和窗口位置持久化。
 - **崩溃恢复** — 运行时退出恢复是显式且仅限本机的。计算机重启或断电后，应用不会自行重新启动；下次正常启动会执行冷态 Session 修复。

@@ -81,7 +81,7 @@ describe('desktop installer workflow', () => {
       uses: 'actions/upload-artifact@v4',
       if: "${{ !cancelled() && steps.validate.outcome == 'success' }}",
       with: {
-        path: '.artifacts/desktop/installer/*.exe\n.artifacts/desktop/installer/*.exe.sha256\n.artifacts/desktop/installer/release-metadata.json\n',
+        path: '.artifacts/desktop/installer/*.exe\n.artifacts/desktop/installer/*.exe.sha256\n.artifacts/desktop/installer/latest.yml\n.artifacts/desktop/installer/release-metadata.json\n',
         'if-no-files-found': 'error',
         'include-hidden-files': true,
         'retention-days': 30,

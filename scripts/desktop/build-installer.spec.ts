@@ -28,12 +28,14 @@ import {
   renderInstallerPowerShellCommands,
 } from './generate-installer-powershell.ts'
 import { DESKTOP_INSTALLER, REPOSITORY_ROOT } from './packaging-layout.ts'
+import { renderPackagedUpdateConfig } from './update-manifest.ts'
 
 interface InstallerConfig {
   readonly appId: string
   readonly productName: string
   readonly asar: boolean
   readonly artifactName: string
+  readonly publish: { readonly provider: string; readonly owner: string; readonly repo: string }
   readonly win: { readonly target: Array<{ readonly target: string; readonly arch: string[] }>; readonly requestedExecutionLevel: string }
   readonly nsis: Record<string, unknown>
 }
@@ -189,6 +191,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(config).toMatchObject({
       appId: 'ai.deepseek.harness.desktop', productName: 'DeepSeek Harness', asar: false,
       artifactName: 'DeepSeek-Harness-Setup-${version}-x64.${ext}',
+      publish: { provider: 'github', owner: 'devin2255', repo: 'deepseek-harness-desktop' },
       win: { target: [{ target: 'nsis', arch: ['x64'] }], requestedExecutionLevel: 'asInvoker' },
       nsis: {
         oneClick: false, perMachine: false, allowElevation: false, packElevateHelper: false,
@@ -198,6 +201,17 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       },
     })
     expect(JSON.stringify(config)).not.toMatch(/nsis-web|webInstaller/iu)
+  })
+
+  it('embeds only this repository as the packaged update publisher', async () => {
+    const source = await readFile(configPath, 'utf8')
+    expect(yaml.load(renderPackagedUpdateConfig(source))).toEqual({
+      provider: 'github', owner: 'devin2255', repo: 'deepseek-harness-desktop',
+    })
+    expect(() => renderPackagedUpdateConfig(source.replace('owner: devin2255', 'owner: deepseek-ai')))
+      .toThrow(/update publisher must be this repository/u)
+    expect(() => renderPackagedUpdateConfig(source.replace(/publish:\n  provider: github\n  owner: devin2255\n  repo: deepseek-harness-desktop\n/u, '')))
+      .toThrow(/missing explicit update publisher/u)
   })
 
   it('declares real builder hooks for pages, persisted choices, cleanup authentication, and retryable shutdown', async () => {
@@ -357,7 +371,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(inspectorSource).toMatch(/Shell\.Application[\s\S]*GetLink/u)
     const canonicalInspector = canonicalPowerShellSource(inspectorSource)
     const definitions = canonicalInspector.slice(0, canonicalInspector.indexOf('\ntry {\n  $shortcutPath'))
-    const storedProbe = `${definitions}\n[void] (Read-DshRawShortcutTarget $env:DSH_TEST_SHORTCUT)\n[Console]::Out.Write((Read-DshStoredShortcutTarget $env:DSH_TEST_SHORTCUT))\n`
+    const storedProbe = `${definitions}\ntry { [void] (Read-DshRawShortcutTarget $env:DSH_TEST_SHORTCUT) } catch { # Shell COM may reject an unresolved synthetic link.\n}\n[Console]::Out.Write((Read-DshStoredShortcutTarget $env:DSH_TEST_SHORTCUT))\n`
     const storedCommand = Buffer.from(storedProbe, 'utf16le').toString('base64')
     const root = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
     const directory = join(root, "用户's shortcut directory")
@@ -589,7 +603,7 @@ describe('installer build boundary', () => {
     expect(source).toContain("'--prepackaged', WIN_UNPACKED")
     expect(source).not.toContain("await resetStageDirectory(REPOSITORY_ROOT, join(DESKTOP_INSTALLER, 'win-unpacked'))")
     expect(source).toContain("await removeOrdinaryBuilderFile('builder-debug.yml')")
-    expect(source).toContain("await removeOrdinaryBuilderFile('latest.yml')")
+    expect(source).toContain("await verifyWindowsUpdateManifest(join(DESKTOP_INSTALLER, 'latest.yml'), output, DESKTOP_VERSION)")
     expect(await readFile(configPath, 'utf8')).not.toContain(REPOSITORY_ROOT)
   })
 

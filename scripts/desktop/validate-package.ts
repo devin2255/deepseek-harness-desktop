@@ -15,6 +15,7 @@ import {
   DESKTOP_VERSION,
   REPOSITORY_ROOT,
 } from './packaging-layout.ts'
+import { verifyPackagedUpdateConfig, verifyWindowsUpdateManifest } from './update-manifest.ts'
 
 const DEFAULT_MAX_TEXT_BYTES = 4 * 1024 * 1024
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/iu
@@ -492,6 +493,15 @@ export async function validatePackage(options: PackageValidationOptions): Promis
 async function main(): Promise<void> {
   const packageRoot = resolve(process.argv[2] ?? join(DESKTOP_INSTALLER, 'win-unpacked'))
   const result = await validatePackage({ packageRoot })
+  await verifyPackagedUpdateConfig(
+    join(packageRoot, 'resources', 'app-update.yml'),
+    join(REPOSITORY_ROOT, 'apps', 'desktop', 'electron-builder.yml'),
+  )
+  await verifyWindowsUpdateManifest(
+    join(DESKTOP_INSTALLER, 'latest.yml'),
+    join(DESKTOP_INSTALLER, DESKTOP_INSTALLER_NAME),
+    DESKTOP_VERSION,
+  )
   const release = await verifyReleaseFiles({
     outputRoot: DESKTOP_INSTALLER,
     artifact: join(DESKTOP_INSTALLER, DESKTOP_INSTALLER_NAME),

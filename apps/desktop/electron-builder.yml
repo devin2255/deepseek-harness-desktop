@@ -8,6 +8,10 @@ directories:
   app: ../../.artifacts/desktop/stage
   output: ../../.artifacts/desktop/installer
   buildResources: build
+publish:
+  provider: github
+  owner: devin2255
+  repo: deepseek-harness-desktop
 win:
   executableName: DeepSeek Harness
   icon: icon.ico

@@ -12,7 +12,9 @@ import {
   DESKTOP_INSTALLER,
   DESKTOP_INSTALLER_NAME,
   DESKTOP_VERSION,
+  REPOSITORY_ROOT,
 } from './packaging-layout.ts'
+import { verifyPackagedUpdateConfig, verifyWindowsUpdateManifest } from './update-manifest.ts'
 
 /** Require the checked-out tag to identify exactly the packaged desktop version. */
 export function assertProductionReleaseTag(tag: string | undefined, version: string): void {
@@ -36,6 +38,11 @@ async function main(): Promise<void> {
     artifact: installer,
     expectedVersion: DESKTOP_VERSION,
   })
+  await verifyPackagedUpdateConfig(
+    join(DESKTOP_INSTALLER, 'win-unpacked', 'resources', 'app-update.yml'),
+    join(REPOSITORY_ROOT, 'apps', 'desktop', 'electron-builder.yml'),
+  )
+  await verifyWindowsUpdateManifest(join(DESKTOP_INSTALLER, 'latest.yml'), installer, DESKTOP_VERSION)
   assertProductionSignature('installer', release)
   const application = inspectAuthenticode(join(DESKTOP_INSTALLER, 'win-unpacked', 'DeepSeek Harness.exe'))
   assertProductionSignature('installed application', application)
