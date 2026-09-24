@@ -17,6 +17,8 @@ pnpm --filter @deepseek-ai/dsh-desktop start
 
 `start` runs the built `lib/main.js`; it does not compile source files. The invoking directory becomes the Harness working directory, while `DSH_HOME` selects the profile and persistence root through the ordinary CLI rules.
 
+The desktop's `knip.json` workspace lists real Electron acceptance entries and runtime-only dependencies that Cordis loads from profile configuration or the packaged dependency tree. Keep that list aligned with the package manifests when changing desktop composition; static imports alone do not reveal these required packages.
+
 ## Runtime Lifecycle
 
 Main enables Chromium's sandbox before readiness and acquires Electron's single-instance lock. On Windows, it also holds an installer-visible mutex through a PowerShell child; macOS and Linux use only Electron's lock and do not launch that Windows helper. After `app.whenReady()`, the owning instance creates the local startup window, starts exactly one Harness with the `desktop` profile on a random loopback port, and hands off to the authorized main window only after authenticated readiness. Native close releases the old window's isolated-session authorization before a tray action or second launch recreates and focuses a window with the existing Harness authority; it never starts another Harness.

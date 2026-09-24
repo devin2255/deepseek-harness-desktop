@@ -30,7 +30,7 @@ export function applicationMutexPowerShell(): string {
 }
 
 /** Acquire the stable application mutex without relying on Electron's private lock name. */
-export async function acquireApplicationMutex(): Promise<ApplicationMutexHandle> {
+async function acquireApplicationMutex(): Promise<ApplicationMutexHandle> {
   const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', applicationMutexPowerShell()], {
     stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true,
   })

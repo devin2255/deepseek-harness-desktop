@@ -43,13 +43,13 @@ export interface BackgroundPresenceNative {
 }
 
 /** Platform-specific tray assets copied into the deployed application. */
-export interface BackgroundPresenceAssets {
+interface BackgroundPresenceAssets {
   readonly windowsIconPath: string
   readonly macTemplateIconPath: string
 }
 
 /** Observer callbacks are wired by the controller but configured by Main. */
-export type BackgroundPresenceObserverFactory = (callbacks: {
+type BackgroundPresenceObserverFactory = (callbacks: {
   readonly onState: (state: TaskObserverState) => void
   readonly reportError: (error: unknown) => void
 }) => TaskObserver

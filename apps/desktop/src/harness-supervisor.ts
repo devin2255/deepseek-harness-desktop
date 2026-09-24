@@ -24,7 +24,7 @@ export interface HarnessLaunchSpec {
 }
 
 /** File properties required to reject directories and link-shaped CLI entries. */
-export interface HarnessCliFileStatus {
+interface HarnessCliFileStatus {
   /** Whether the entry is an ordinary file. */
   isFile(): boolean
   /** Whether the entry is a symbolic link or Windows junction. */
@@ -32,7 +32,7 @@ export interface HarnessCliFileStatus {
 }
 
 /** A process output stream used for the readiness signal and diagnostics. */
-export interface HarnessOutput {
+interface HarnessOutput {
   /** Subscribe to output chunks. */
   on(event: 'data', listener: (chunk: unknown) => void): this
   /** Remove an output listener. */
@@ -40,7 +40,7 @@ export interface HarnessOutput {
 }
 
 /** The subset of Electron's utility process API owned by the supervisor. */
-export interface HarnessUtilityProcess {
+interface HarnessUtilityProcess {
   /** Standard output when the process was forked with piped stdio. */
   readonly stdout: HarnessOutput | null
   /** Standard error when the process was forked with piped stdio. */
@@ -70,7 +70,7 @@ export interface HarnessSupervisorDependencies {
 }
 
 /** Committed Harness startup facts exposed without raw diagnostics. */
-export type HarnessStartupMilestone = 'runtime-loaded' | 'profile-validated' | 'service-started' | 'service-ready'
+type HarnessStartupMilestone = 'runtime-loaded' | 'profile-validated' | 'service-started' | 'service-ready'
 
 /** Optional caller-owned startup cancellation and progress observation. */
 export interface HarnessStartOptions {
@@ -122,7 +122,7 @@ export class HarnessStartupTimeoutError extends Error {
 }
 
 /** Reports caller cancellation before authenticated readiness succeeded. */
-export class HarnessStartupAbortedError extends Error {
+class HarnessStartupAbortedError extends Error {
   constructor() {
     super('Harness startup was aborted')
     this.name = 'AbortError'

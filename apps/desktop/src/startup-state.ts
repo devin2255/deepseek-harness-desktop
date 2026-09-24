@@ -9,7 +9,7 @@ export type DesktopStartupWorking =
   | { readonly attempt: number; readonly phase: 'probing-service'; readonly status: 'working' }
 
 /** Stable failure details safe to expose to the desktop renderer. */
-export interface DesktopStartupError {
+interface DesktopStartupError {
   /** Machine-readable failure category independent of diagnostic text. */
   readonly code:
     | 'electron-unavailable'
@@ -32,7 +32,7 @@ export interface DesktopStartupFailure {
 }
 
 /** A completed startup attempt. */
-export interface DesktopStartupReady {
+interface DesktopStartupReady {
   readonly attempt: number
   readonly phase: 'ready'
   readonly status: 'ready'

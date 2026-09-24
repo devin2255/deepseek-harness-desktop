@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TaskSnapshot } from '@deepseek-ai/dsh-task/types'
 
 /** Notification with authoritative navigation targets. */
-export interface TaskNotification {
+interface TaskNotification {
   readonly key: string
   readonly kind: 'attention' | 'complete' | 'failed'
   readonly taskId: SessionId
