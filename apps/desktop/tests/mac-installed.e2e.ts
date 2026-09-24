@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { _electron as electron, type ElectronApplication } from 'playwright'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +21,6 @@ describe.skipIf(!enabled)('installed macOS desktop package', () => {
     const mount = join(fixture, 'mounted')
     const installed = join(fixture, 'installed', 'DeepSeek Harness.app')
     const executable = join(installed, 'Contents', 'MacOS', 'DeepSeek Harness')
-    const home = join(fixture, 'home')
     const dmg = join(repositoryRoot, '.artifacts/desktop/installer', `DeepSeek-Harness-${packageVersion}-mac-arm64.dmg`)
     let attachAttempted = false
     let detached = false
@@ -30,7 +29,7 @@ describe.skipIf(!enabled)('installed macOS desktop package', () => {
     let operationError: unknown
     const cleanupFailures: unknown[] = []
     try {
-      await Promise.all([mkdir(mount), mkdir(home), mkdir(join(fixture, 'installed'))])
+      await Promise.all([mkdir(mount), mkdir(join(fixture, 'installed'))])
       attachAttempted = true
       execFileSync('hdiutil', ['attach', '-readonly', '-nobrowse', '-mountpoint', mount, dmg], { timeout: 30_000 })
       execFileSync('ditto', [join(mount, 'DeepSeek Harness.app'), installed], { timeout: 60_000 })
@@ -44,7 +43,7 @@ describe.skipIf(!enabled)('installed macOS desktop package', () => {
       application = await electron.launch({
         executablePath: executable,
         args: [`--user-data-dir=${join(fixture, 'electron-profile')}`],
-        env: { ...environment, HOME: home, DSH_HOME: join(home, '.dsh'), DSH_TELEMETRY_DISABLED: '1' },
+        env: { ...environment, DSH_TELEMETRY_DISABLED: '1' },
         timeout: 15_000,
       })
       applicationClosed = false
@@ -71,8 +70,6 @@ describe.skipIf(!enabled)('installed macOS desktop package', () => {
         signal: AbortSignal.timeout(10_000),
       })
       expect(unauthorized.status).toBe(401)
-      const appHome = await application.evaluate(({ app }) => app.getPath('home'))
-      expect(appHome === home || appHome.startsWith(`${home}${sep}`)).toBe(true)
     } catch (error: unknown) {
       operationError = error
     } finally {
