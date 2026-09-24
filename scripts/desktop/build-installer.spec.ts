@@ -72,10 +72,11 @@ async function runRestrictedCommand(command: string, environment: NodeJS.Process
   return result.stdout.trim()
 }
 
-async function runRestrictedStatus(command: string, environment: NodeJS.ProcessEnv, timeout = 10_000): Promise<number> {
+async function runRestrictedStatus(compressed: string, environment: NodeJS.ProcessEnv, timeout = 10_000): Promise<number> {
+  const command = `iex ([IO.StreamReader]::new([IO.Compression.GzipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${compressed}')),[IO.Compression.CompressionMode]::Decompress),[Text.Encoding]::UTF8)).ReadToEnd()`
   return await new Promise((resolve, reject) => {
     execFile('powershell.exe', [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command,
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-Command', command,
     ], { env: environment, timeout }, (error, _stdout, stderr) => {
       if (error === null) {
         resolve(0)
@@ -118,7 +119,7 @@ async function gitInstallationRoot(): Promise<string> {
 }
 
 async function inspectShortcut(shortcut: string, target: string): Promise<number> {
-  return runRestrictedStatus(powerShellCommands.INSPECT_SHORTCUT, {
+  return runRestrictedStatus(inspectShortcutCompressed, {
     ...process.env,
     DSH_INSTALLER_SHORTCUT: shortcut,
     DSH_INSTALLER_OLD_TARGET_EXE: target,
@@ -127,7 +128,7 @@ async function inspectShortcut(shortcut: string, target: string): Promise<number
 }
 
 async function inspectShortcutTargets(shortcut: string, oldTarget: string, newTarget: string): Promise<number> {
-  return runRestrictedStatus(powerShellCommands.INSPECT_SHORTCUT, {
+  return runRestrictedStatus(inspectShortcutCompressed, {
     ...process.env,
     DSH_INSTALLER_SHORTCUT: shortcut,
     DSH_INSTALLER_OLD_TARGET_EXE: oldTarget,
@@ -141,7 +142,10 @@ const compareSemverPath = join(REPOSITORY_ROOT, 'apps/desktop/build/compare-semv
 const queryProcessPath = join(REPOSITORY_ROOT, 'apps/desktop/build/query-installed-process.ps1')
 const inspectShortcutPath = join(REPOSITORY_ROOT, 'apps/desktop/build/inspect-shortcut.ps1')
 const powerShellCommandsPath = join(REPOSITORY_ROOT, 'apps/desktop/build/powershell-commands.nsh')
-const powerShellCommands = parseInstallerPowerShellCommands(await readFile(powerShellCommandsPath, 'utf8'))
+const generatedPowerShellCommands = await readFile(powerShellCommandsPath, 'utf8')
+const powerShellCommands = parseInstallerPowerShellCommands(generatedPowerShellCommands)
+const inspectShortcutCompressed = generatedPowerShellCommands.match(/^!define DSH_POWERSHELL_INSPECT_SHORTCUT_GZIP "(?<encoded>[A-Za-z0-9+/=]+)"$/mu)?.groups?.encoded ?? ''
+if (inspectShortcutCompressed === '') throw new Error('missing compressed shortcut inspector')
 const desktopRequire = createRequire(join(REPOSITORY_ROOT, 'apps/desktop/package.json'))
 const electronBuilderPackage = desktopRequire.resolve('electron-builder/package.json')
 const appBuilderPackage = createRequire(electronBuilderPackage).resolve('app-builder-lib/package.json')
@@ -162,7 +166,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(source).not.toMatch(/DshE2eTrace[^\r\n]*(?:OWNERSHIP|\$R3)/u)
   })
 
-  it('keeps every generated UTF-16LE command fresh with its canonical PowerShell owner', async () => {
+  it('keeps fixed installer commands fresh and the shortcut command below the NSIS string limit', async () => {
     const sources = {
       COMPARE_SEMVER: await readFile(compareSemverPath, 'utf8'),
       INSPECT_SHORTCUT: await readFile(inspectShortcutPath, 'utf8'),
@@ -173,6 +177,9 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     for (const [name, command] of Object.entries(parseInstallerPowerShellCommands(generated))) {
       expect(Buffer.from(command, 'base64').toString('utf16le')).toBe(canonicalPowerShellSource(sources[name as keyof typeof sources]))
     }
+    expect(generated.split('\n').find(line => line.includes('DSH_POWERSHELL_INSPECT_SHORTCUT_GZIP'))?.length).toBeLessThan(8_192)
+    const installer = await readFile(includePath, 'utf8')
+    expect(installer).toContain("-Command \"iex ([IO.StreamReader]::new([IO.Compression.GzipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${DSH_POWERSHELL_INSPECT_SHORTCUT_GZIP}'))")
     expect(() => { assertInstallerPowerShellCommandsFresh(generated, { ...sources, COMPARE_SEMVER: `${sources.COMPARE_SEMVER}# stale\n` }) })
       .toThrow(/stale/u)
     expect(renderInstallerPowerShellCommands(sources)).toBe(generated)
@@ -350,8 +357,8 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(inspectorSource).toMatch(/Shell\.Application[\s\S]*GetLink/u)
     const canonicalInspector = canonicalPowerShellSource(inspectorSource)
     const definitions = canonicalInspector.slice(0, canonicalInspector.indexOf('\ntry {\n  $shortcutPath'))
-    const rawProbe = `${definitions}\n[Console]::Out.Write((Read-DshRawShortcutTarget $env:DSH_TEST_SHORTCUT))\n`
-    const rawCommand = Buffer.from(rawProbe, 'utf16le').toString('base64')
+    const storedProbe = `${definitions}\n[void] (Read-DshRawShortcutTarget $env:DSH_TEST_SHORTCUT)\n[Console]::Out.Write((Read-DshStoredShortcutTarget $env:DSH_TEST_SHORTCUT))\n`
+    const storedCommand = Buffer.from(storedProbe, 'utf16le').toString('base64')
     const root = await mkdtemp(join(tmpdir(), 'dsh-shortcut-'))
     const directory = join(root, "用户's shortcut directory")
     await mkdir(directory)
@@ -362,13 +369,15 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     try {
       const createShortcut = '$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:DSH_TEST_SHORTCUT);$s.TargetPath=$env:DSH_TEST_TARGET;$s.Save()'
       const stagedShortcut = join(root, 'staged.lnk')
-      const stageShortcut = async (shortcutTarget: string): Promise<void> => {
+      const stageShortcut = async (shortcutTarget: string, move = true): Promise<string> => {
         await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', createShortcut], {
           env: { ...process.env, DSH_TEST_SHORTCUT: stagedShortcut, DSH_TEST_TARGET: shortcutTarget },
         })
+        if (!move) return stagedShortcut
         await rm(shortcut, { force: true })
         // WScript is only a fixture producer; moving its output keeps the inspector path under a Unicode ancestor on hosted Windows.
         await rename(stagedShortcut, shortcut)
+        return shortcut
       }
       await stageShortcut(target)
       await expect(inspectShortcut(shortcut, target)).resolves.toBe(0)
@@ -383,18 +392,19 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       const oldTarget = join(windows, "用户's 旧目录/WindowsPowerShell/v1.0/powershell.exe")
       const newTarget = target
       for (const [target, expected] of [[oldTarget, 0], [newTarget, 0], [foreignTarget, 11]] as const) {
-        await stageShortcut(target)
+        const inspectedShortcut = await stageShortcut(target, target !== oldTarget)
+        const storedTarget = await runRestrictedCommand(storedCommand, {
+          ...process.env, DSH_TEST_SHORTCUT: inspectedShortcut,
+        })
+        expect(storedTarget.toLowerCase()).toBe(target.toLowerCase())
         if (target === oldTarget) {
-          await expect(runRestrictedCommand(rawCommand, {
-            ...process.env, DSH_TEST_SHORTCUT: shortcut,
-          })).resolves.toBe(oldTarget)
           const powerShell32 = join(windows, 'SysWOW64/WindowsPowerShell/v1.0/powershell.exe')
           const result32 = await execFileAsync(powerShell32, [
-            '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', rawCommand,
-          ], { env: { ...process.env, DSH_TEST_SHORTCUT: shortcut }, timeout: 10_000 })
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', storedCommand,
+          ], { env: { ...process.env, DSH_TEST_SHORTCUT: inspectedShortcut }, timeout: 10_000 })
           expect(result32.stdout.trim()).toBe(oldTarget)
         }
-        await expect(inspectShortcutTargets(shortcut, oldTarget, newTarget)).resolves.toBe(expected)
+        await expect(inspectShortcutTargets(inspectedShortcut, oldTarget, newTarget)).resolves.toBe(expected)
       }
     } finally {
       await rm(root, { recursive: true, force: true })

@@ -255,7 +255,7 @@ FunctionEnd
   Push $9
   System::Call 'kernel32::SetEnvironmentVariableW(w "DSH_INSTALLER_NEW_TARGET_EXE", w "${NewTarget}") i.r9'
   Pop $9
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Restricted -EncodedCommand ${DSH_POWERSHELL_INSPECT_SHORTCUT}`
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Restricted -Command "iex ([IO.StreamReader]::new([IO.Compression.GzipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${DSH_POWERSHELL_INSPECT_SHORTCUT_GZIP}')),[IO.Compression.CompressionMode]::Decompress),[Text.Encoding]::UTF8)).ReadToEnd()"`
   Pop $0
   Pop $1
   !insertmacro DshE2eTrace "shortcut inspect exit=$0 path=${Shortcut} old=${OldTarget} new=${NewTarget}"
