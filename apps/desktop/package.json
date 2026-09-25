@@ -53,7 +53,9 @@
     "@deepseek-ai/dsh-subprocess": "workspace:^",
     "@deepseek-ai/dsh-task": "workspace:^",
     "@deepseek-ai/dsh-timeout": "workspace:^",
-    "@deepseek-ai/dsh-workflow": "workspace:^"
+    "@deepseek-ai/dsh-workflow": "workspace:^",
+    "electron-updater": "6.8.9",
+    "js-yaml": "^4.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

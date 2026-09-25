@@ -10,7 +10,7 @@ export default defineConfig([
     fixedExtension: false,
     dts: false,
     clean: false,
-    deps: { neverBundle: ['electron'] },
+    deps: { neverBundle: ['electron', 'electron-updater'] },
   },
   {
     entry: { preload: 'lib/types/preload.js' },

@@ -68,6 +68,8 @@ export interface DesktopMainDependencies {
   ) => BackgroundPresence
   /** Ask the user how to handle an explicit quit while Task activity may remain. */
   readonly confirmQuit: (state: TaskObserverState) => Promise<DesktopQuitDecision>
+  /** Ask before stopping Tasks and starting a downloaded update installer. */
+  readonly confirmUpdateInstall: (state: TaskObserverState) => Promise<boolean>
   /** Create the immediate local recovery window. */
   readonly createStartupWindow: (actions: StartupWindowActions) => Promise<StartupWindow>
   /** Product-owned diagnostic log. */
@@ -84,10 +86,18 @@ export interface DesktopMainDependencies {
 
 /** Observable lifecycle settlement used by focused tests and process owners. */
 export interface DesktopMainHandle {
+  /** Whether this process owns the product's Electron instance lock. */
+  readonly ownsInstance: boolean
   /** Settle after the first attempt succeeds or exposes a retryable failure. */
   readonly startup: Promise<void>
   /** Settle after the first bounded shutdown request. */
   readonly shutdown: Promise<void>
+  /**
+   * Ask permission, stop owned work, release the mutex, then launch the installer.
+   * @param launchInstaller - Start only the previously verified downloaded installer.
+   * @returns Whether the user approved the installation handoff.
+   */
+  readonly requestUpdateInstallation: (launchInstaller: () => void) => Promise<boolean>
 }
 
 interface StartupAttempt {
@@ -330,9 +340,10 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
     const errorMessage = await dependencies.openPath(dependencies.desktopLog.currentPath())
     if (errorMessage !== '') throw new Error('Electron could not open the desktop log')
   }
-  const quitAfterCleanup = (forceExit = false): Promise<void> => {
+  const quitAfterCleanup = (forceExit = false, launchInstaller?: () => void): Promise<void> => {
     if (forceExit) forceExitAfterCleanup = true
     shutdownTask ??= (async () => {
+      let cleanupCompleted = false
       readinessController.abort()
       releaseActiveWindowClosed()
       const attempt = currentAttempt
@@ -342,13 +353,20 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
           if (attempt !== undefined) { await attempt.settled; await stopAttempt(attempt) }
           await applicationMutex?.release()
         })(), dependencies.cleanupTimeoutMs)
+        cleanupCompleted = true
       } catch (error: unknown) { report('shutdown', error) } finally {
         quitLatched = true
         resolveShutdown()
         try {
           if (forceExitAfterCleanup) app.exit(0)
-          else app.quit()
-        } catch (error: unknown) { report('callback', error) }
+          else {
+            if (cleanupCompleted) launchInstaller?.()
+            app.quit()
+          }
+        } catch (error: unknown) {
+          report('callback', error)
+          if (launchInstaller !== undefined) try { app.quit() } catch (quitError: unknown) { report('callback', quitError) }
+        }
       }
     })()
     return shutdownTask
@@ -376,6 +394,25 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       }
     })().finally(() => { quitConfirmationTask = undefined })
     return quitConfirmationTask
+  }
+  const requestUpdateInstallation = async (launchInstaller: () => void): Promise<boolean> => {
+    if (shutdownRequested() || quitConfirmationTask !== undefined) return false
+    const state = currentAttempt?.presence?.currentState() ?? {
+      activeTaskCount: 0,
+      activeAgentCount: 0,
+      attentionCount: 0,
+      notifications: [],
+      freshness: 'unavailable' as const,
+    }
+    let accepted: boolean
+    try { accepted = await dependencies.confirmUpdateInstall(state) } catch (error: unknown) {
+      report('callback', error)
+      return false
+    }
+    if (!accepted || shutdownRequested()) return false
+    let launched = false
+    await quitAfterCleanup(false, () => { launchInstaller(); launched = true })
+    return launched
   }
   const actions: StartupWindowActions = { retry, openLogs, exit: quitAfterCleanup }
   const openLiveSession = (sessionId?: SessionId): Promise<void> => {
@@ -420,7 +457,7 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
   })
 
   const startup = ownsInstance ? startOwnedInstance() : stopRejectedInstance()
-  return { startup, shutdown }
+  return { ownsInstance, startup, shutdown, requestUpdateInstallation }
 
   async function startOwnedInstance(): Promise<void> {
     try {

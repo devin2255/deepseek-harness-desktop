@@ -1,6 +1,7 @@
 /** Native background-presence ownership for desktop Task activity. */
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TaskObserver, TaskObserverState } from './task-observer.ts'
+import type { DesktopUpdates, DesktopUpdateState } from './desktop-updates.ts'
 
 /** Application operations exposed to native background controls. */
 export interface BackgroundPresenceActions {
@@ -57,6 +58,7 @@ type BackgroundPresenceObserverFactory = (callbacks: {
 /** Dependencies available only after Electron readiness and Harness startup. */
 export interface BackgroundPresenceOptions {
   readonly actions: BackgroundPresenceActions
+  readonly updates?: Pick<DesktopUpdates, 'currentState' | 'subscribe' | 'check' | 'install'>
   readonly assets: BackgroundPresenceAssets
   readonly native: BackgroundPresenceNative
   readonly createObserver: BackgroundPresenceObserverFactory
@@ -73,6 +75,14 @@ export interface BackgroundPresence {
 interface BackgroundCopy {
   readonly open: string
   readonly quit: string
+  readonly checkUpdates: string
+  readonly checkingUpdates: string
+  readonly downloadingUpdate: string
+  readonly updateError: string
+  readonly upToDate: string
+  readonly installUpdate: (version: string) => string
+  readonly updateReadyTitle: string
+  readonly updateReadyBody: (version: string) => string
   readonly unavailable: string
   readonly live: (state: TaskObserverState) => string
 }
@@ -87,6 +97,14 @@ interface NotificationOwnership {
 const englishCopy: BackgroundCopy = {
   open: 'Open DeepSeek Harness',
   quit: 'Quit',
+  checkUpdates: 'Check for Updates',
+  checkingUpdates: 'Checking for updates…',
+  downloadingUpdate: 'Downloading update…',
+  updateError: 'Update check failed — retry',
+  upToDate: 'Up to date',
+  installUpdate: version => `Install update ${version}…`,
+  updateReadyTitle: 'DeepSeek Harness update ready',
+  updateReadyBody: version => `Version ${version} is downloaded. Click to review installation.`,
   unavailable: 'Task activity unavailable',
   live: state => `${state.activeTaskCount} tasks running · ${state.activeAgentCount} agents · ${state.attentionCount} needs attention`,
 }
@@ -94,6 +112,14 @@ const englishCopy: BackgroundCopy = {
 const chineseCopy: BackgroundCopy = {
   open: '打开 DeepSeek Harness',
   quit: '退出',
+  checkUpdates: '检查更新',
+  checkingUpdates: '正在检查更新…',
+  downloadingUpdate: '正在下载更新…',
+  updateError: '检查更新失败 — 重试',
+  upToDate: '已是最新版本',
+  installUpdate: version => `安装更新 ${version}…`,
+  updateReadyTitle: 'DeepSeek Harness 更新已就绪',
+  updateReadyBody: version => `版本 ${version} 已下载，点击确认安装。`,
   unavailable: '任务状态暂不可用',
   live: state => `${state.activeTaskCount} 个任务运行中 · ${state.activeAgentCount} 个 Agent · ${state.attentionCount} 项待处理`,
 }
@@ -131,6 +157,8 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
   let observer: TaskObserver
   let disposal: Promise<void> | undefined
   let openSessionFlight: Promise<void> | undefined
+  let disposeUpdates: (() => void) | undefined
+  let lastUpdateKind: DesktopUpdateState['kind'] | undefined
   let currentState: TaskObserverState = Object.freeze({
     activeTaskCount: 0,
     activeAgentCount: 0,
@@ -184,54 +212,73 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
 
   const open = () => { openSession() }
   const quit = () => { runAction(options.actions.requestQuit) }
+  const checkUpdates = () => { runAction(() => options.updates?.check()) }
+  const installUpdate = () => { runAction(() => options.updates?.install()) }
 
-  function render(state: TaskObserverState): void {
-    if (disposed) return
-    currentState = state
-    const summary = state.freshness === 'live' ? copy.live(state) : copy.unavailable
-    try {
-      tray.setToolTip(summary)
-    } catch (error) {
-      reportFailure(error)
+  function updateMenuItem(state: DesktopUpdateState): BackgroundMenuItem {
+    switch (state.kind) {
+      case 'checking': return { label: copy.checkingUpdates, enabled: false }
+      case 'downloading': return { label: copy.downloadingUpdate, enabled: false }
+      case 'ready': return { label: copy.installUpdate(state.version), click: installUpdate }
+      case 'installing': return { label: copy.installUpdate(state.version), enabled: false }
+      case 'error': return { label: copy.updateError, click: checkUpdates }
+      case 'up-to-date': return { label: copy.upToDate, click: checkUpdates }
+      case 'idle': return { label: copy.checkUpdates, click: checkUpdates }
     }
+    return assertNever(state)
+  }
+
+  function showNotification(title: string, body: string, onClick: () => void): void {
+    let notification: BackgroundNotification | undefined
+    try {
+      const createdNotification = options.native.createNotification({ title, body })
+      notification = createdNotification
+      const listeners: Readonly<Record<NotificationEvent, () => void>> = {
+        click: () => {
+          const failures = releaseNotification(createdNotification)
+          if (failures.length > 0) reportFailure(combinedFailure(failures, 'Desktop notification cleanup failed'))
+          onClick()
+        },
+        close: () => {
+          const failures = releaseNotification(createdNotification)
+          if (failures.length > 0) reportFailure(combinedFailure(failures, 'Desktop notification cleanup failed'))
+        },
+      }
+      const ownership: NotificationOwnership = { listeners, installedEvents: new Set() }
+      notifications.set(createdNotification, ownership)
+      for (const event of ['click', 'close'] as const) {
+        ownership.installedEvents.add(event)
+        createdNotification.on(event, listeners[event])
+      }
+      createdNotification.show()
+    } catch (error) {
+      const failures = [error]
+      if (notification !== undefined) failures.push(...releaseNotification(notification))
+      reportFailure(combinedFailure(failures, 'Desktop notification setup and cleanup failed'))
+    }
+  }
+
+  function renderMenu(): void {
+    if (disposed) return
+    const summary = currentState.freshness === 'live' ? copy.live(currentState) : copy.unavailable
+    try { tray.setToolTip(summary) } catch (error) { reportFailure(error) }
     try {
       tray.setContextMenu(options.native.buildMenu([
         { label: summary, enabled: false },
         { type: 'separator' },
         { label: copy.open, click: open },
+        ...(options.updates === undefined ? [] : [updateMenuItem(options.updates.currentState())]),
         { label: copy.quit, click: quit },
       ]))
-    } catch (error) {
-      reportFailure(error)
-    }
+    } catch (error) { reportFailure(error) }
+  }
+
+  function render(state: TaskObserverState): void {
+    if (disposed) return
+    currentState = state
+    renderMenu()
     for (const transition of state.notifications) {
-      let notification: BackgroundNotification | undefined
-      try {
-        const createdNotification = options.native.createNotification({ title: transition.title, body: transition.body })
-        notification = createdNotification
-        const listeners: Readonly<Record<NotificationEvent, () => void>> = {
-          click: () => {
-            const failures = releaseNotification(createdNotification)
-            if (failures.length > 0) reportFailure(combinedFailure(failures, 'Desktop notification cleanup failed'))
-            openSession(transition.ownerSessionId)
-          },
-          close: () => {
-            const failures = releaseNotification(createdNotification)
-            if (failures.length > 0) reportFailure(combinedFailure(failures, 'Desktop notification cleanup failed'))
-          },
-        }
-        const ownership: NotificationOwnership = { listeners, installedEvents: new Set() }
-        notifications.set(createdNotification, ownership)
-        for (const event of ['click', 'close'] as const) {
-          ownership.installedEvents.add(event)
-          createdNotification.on(event, listeners[event])
-        }
-        createdNotification.show()
-      } catch (error) {
-        const failures = [error]
-        if (notification !== undefined) failures.push(...releaseNotification(notification))
-        reportFailure(combinedFailure(failures, 'Desktop notification setup and cleanup failed'))
-      }
+      showNotification(transition.title, transition.body, () => { openSession(transition.ownerSessionId) })
     }
   }
 
@@ -239,8 +286,16 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
     tray.on('click', open)
     tray.on('double-click', open)
     observer = options.createObserver({ onState: render, reportError: reportFailure })
+    disposeUpdates = options.updates?.subscribe((state) => {
+      renderMenu()
+      if (state.kind === 'ready' && lastUpdateKind !== 'ready') {
+        showNotification(copy.updateReadyTitle, copy.updateReadyBody(state.version), installUpdate)
+      }
+      lastUpdateKind = state.kind
+    })
   } catch (error) {
     const failures: unknown[] = [error]
+    if (disposeUpdates !== undefined) captureFailure(failures, disposeUpdates)
     captureFailure(failures, () => { tray.removeListener('click', open) })
     captureFailure(failures, () => { tray.removeListener('double-click', open) })
     captureFailure(failures, () => { tray.destroy() })
@@ -259,6 +314,7 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
         rejectDisposal = reject
       })
       const failures: unknown[] = []
+      if (disposeUpdates !== undefined) captureFailure(failures, disposeUpdates)
       captureFailure(failures, () => { tray.removeListener('click', open) })
       captureFailure(failures, () => { tray.removeListener('double-click', open) })
       for (const notification of [...notifications.keys()]) {
@@ -281,3 +337,5 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
     },
   }
 }
+
+function assertNever(value: never): never { throw new Error(`Unexpected desktop update state: ${String(value)}`) }

@@ -8,6 +8,7 @@ import {
   type BackgroundTray,
 } from '../src/background-presence.ts'
 import type { TaskObserver, TaskObserverState } from '../src/task-observer.ts'
+import type { DesktopUpdates, DesktopUpdateState } from '../src/desktop-updates.ts'
 
 const sessionId = (value: string) => value as SessionId
 const liveState = (overrides: Partial<TaskObserverState> = {}): TaskObserverState => ({
@@ -73,6 +74,7 @@ function fixture(options: {
   readonly openSession?: (id?: SessionId) => Promise<void>
   readonly reportFailure?: (error: unknown) => void
   readonly requestQuit?: () => void
+  readonly updates?: Pick<DesktopUpdates, 'currentState' | 'subscribe' | 'check' | 'install'>
   readonly configureNotification?: (notification: FakeNotification, index: number) => void
 } = {}) {
   const tray = new FakeTray()
@@ -108,6 +110,7 @@ function fixture(options: {
   const reportFailure = vi.fn(options.reportFailure ?? (() => {}))
   const presence = createBackgroundPresence({
     native,
+    ...(options.updates === undefined ? {} : { updates: options.updates }),
     assets: { windowsIconPath: 'tray.ico', macTemplateIconPath: 'trayTemplate.png' },
     actions: { openSession, requestQuit, reportFailure },
     createObserver(callbacks) {
@@ -126,6 +129,40 @@ function fixture(options: {
 
 describe('background presence', () => {
   afterEach(() => { vi.restoreAllMocks() })
+
+  it('offers signed update checks and a ready-to-install notification without stopping tasks implicitly', async () => {
+    let updateState: DesktopUpdateState = { kind: 'idle' }
+    let publishUpdate: ((state: DesktopUpdateState) => void) | undefined
+    const check = vi.fn(async () => {})
+    const install = vi.fn(async () => {})
+    const updates = {
+      currentState: () => updateState,
+      subscribe(listener: (state: DesktopUpdateState) => void) {
+        publishUpdate = (state: DesktopUpdateState) => { updateState = state; listener(state) }
+        listener(updateState)
+        return () => { publishUpdate = undefined }
+      },
+      check,
+      install,
+    }
+    const f = fixture({ updates })
+    f.emit(liveState())
+    const checkItem = f.templates.at(-1)?.find(item => item.label === 'Check for Updates')
+    checkItem?.click?.()
+    await vi.waitFor(() => { expect(check).toHaveBeenCalledOnce() })
+
+    publishUpdate?.({ kind: 'ready', version: '0.1.1' })
+    expect(f.notifications.at(-1)?.options).toEqual({
+      title: 'DeepSeek Harness update ready',
+      body: 'Version 0.1.1 is downloaded. Click to review installation.',
+    })
+    expect(f.templates.at(-1)?.some(item => item.label === 'Install update 0.1.1…')).toBe(true)
+    expect(install).not.toHaveBeenCalled()
+    f.notifications.at(-1)?.native.emit('click')
+    await vi.waitFor(() => { expect(install).toHaveBeenCalledOnce() })
+    await f.presence.dispose()
+    expect(publishUpdate).toBeUndefined()
+  })
 
   it('owns one Windows tray with localized live summary and native actions', async () => {
     const f = fixture()

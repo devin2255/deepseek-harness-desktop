@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { MessageBoxOptions } from 'electron'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { BackgroundPresence, BackgroundPresenceOptions } from '../src/background-presence.ts'
-import type { DesktopMainDependencies } from '../src/main-lifecycle.ts'
+import type { DesktopMainDependencies, DesktopMainHandle } from '../src/main-lifecycle.ts'
 import type { TaskObserver, TaskObserverOptions, TaskObserverState } from '../src/task-observer.ts'
 import { UNINSTALL_CLEANUP_ENVIRONMENT_KEY } from '../src/uninstall-cleanup.ts'
 
@@ -138,6 +138,49 @@ describe('desktop Main installer close entry', () => {
 })
 
 describe('desktop Main background-presence composition', () => {
+  it.skipIf(process.platform !== 'win32')('enables only the signed packaged update source and disables implicit installation', async () => {
+    const setup = prepareNormalEntry()
+    writeFileSync(join(setup.resourcesPath, 'app-update.yml'), [
+      'provider: github',
+      'owner: devin2255',
+      'repo: deepseek-harness-desktop',
+      "updaterCacheDirName: '@deepseek-aidsh-desktop-updater'",
+      'publisherName:',
+      '  - DeepSeek Harness Publisher',
+      '',
+    ].join('\n'))
+    const updater = {
+      autoDownload: true,
+      autoInstallOnAppQuit: true,
+      disableWebInstaller: false,
+      disableDifferentialDownload: false,
+      allowDowngrade: true,
+      checkForUpdates: vi.fn(async () => null),
+      downloadUpdate: vi.fn(async () => []),
+      quitAndInstall: vi.fn(),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    }
+    setup.desktopRequire.mockReturnValue({ autoUpdater: updater })
+
+    await import('../src/main.ts')
+
+    expect(setup.desktopRequire).toHaveBeenCalledWith('electron-updater')
+    expect(updater).toMatchObject({
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      disableWebInstaller: true,
+      disableDifferentialDownload: true,
+      allowDowngrade: false,
+    })
+    const dependencies = setup.startDesktopMain.mock.calls[0]?.[0]
+    if (dependencies === undefined) throw new Error('Expected desktop lifecycle dependencies')
+    dependencies.createBackgroundPresence(new URL('http://127.0.0.1:4312'), 'capability', {
+      openSession: async () => {}, requestQuit: () => {}, reportFailure: () => {},
+    })
+    expect(setup.createBackgroundPresence.mock.calls[0]?.[0].updates).toBeDefined()
+  })
+
   it('wires the authenticated observer, native tray adapters, and conservative unavailable quit copy', async () => {
     const setup = prepareNormalEntry()
 
@@ -211,6 +254,22 @@ describe('desktop Main background-presence composition', () => {
     const chineseDialog = setup.showMessageBox.mock.calls[2]?.[0]
     expect(chineseDialog?.buttons).toEqual(['继续后台运行', '停止并退出', '取消'])
     expect(chineseDialog?.detail).toContain('2 个任务')
+
+    setup.showMessageBox.mockResolvedValueOnce({ response: 0 })
+    await expect(dependencies.confirmUpdateInstall({
+      activeTaskCount: 2, activeAgentCount: 2, attentionCount: 0, notifications: [], freshness: 'live',
+    })).resolves.toBe(false)
+    const updateDialog = setup.showMessageBox.mock.calls[3]?.[0]
+    expect(updateDialog?.buttons).toEqual(['稍后', '停止任务并安装'])
+    expect(updateDialog?.defaultId).toBe(0)
+    expect(updateDialog?.detail).toContain('2 个任务')
+
+    setup.getLocale.mockReturnValue('en-US')
+    setup.showMessageBox.mockResolvedValueOnce({ response: 1 })
+    await expect(dependencies.confirmUpdateInstall({
+      activeTaskCount: 0, activeAgentCount: 0, attentionCount: 0, notifications: [], freshness: 'unavailable',
+    })).resolves.toBe(true)
+    expect(setup.showMessageBox.mock.calls[4]?.[0].detail).toContain('cannot be confirmed')
   })
 })
 
@@ -221,8 +280,10 @@ function prepareNormalEntry(): {
   readonly getLocale: Mock<() => string>
   readonly Notification: ReturnType<typeof vi.fn>
   readonly showMessageBox: Mock<(options: MessageBoxOptions) => Promise<{ readonly response: number }>>
-  readonly startDesktopMain: Mock<(dependencies: DesktopMainDependencies) => void>
+  readonly startDesktopMain: Mock<(dependencies: DesktopMainDependencies) => DesktopMainHandle>
   readonly Tray: ReturnType<typeof vi.fn>
+  readonly desktopRequire: Mock<(...args: unknown[]) => unknown>
+  readonly resourcesPath: string
 } {
   const appData = mkdtempSync(join(tmpdir(), 'dsh-main-normal-'))
   const resourcesPath = mkdtempSync(join(tmpdir(), 'dsh-main-normal-resources-'))
@@ -230,7 +291,9 @@ function prepareNormalEntry(): {
   process.argv = ['DeepSeek Harness.exe']
   process.env.APPDATA = appData
   const showMessageBox = vi.fn<(options: MessageBoxOptions) => Promise<{ readonly response: number }>>()
-  const startDesktopMain = vi.fn<(dependencies: DesktopMainDependencies) => void>()
+  const startDesktopMain = vi.fn<(dependencies: DesktopMainDependencies) => DesktopMainHandle>(() => ({
+    ownsInstance: true, startup: Promise.resolve(), shutdown: Promise.resolve(), requestUpdateInstallation: async () => false,
+  }))
   const initialState: TaskObserverState = Object.freeze({
     activeTaskCount: 0,
     activeAgentCount: 0,
@@ -247,11 +310,12 @@ function prepareNormalEntry(): {
   const Tray = vi.fn(function Tray() {})
   const Notification = vi.fn(function Notification() {})
   const desktopLog = { append: vi.fn(), currentPath: vi.fn(() => join(appData, 'desktop.log')) }
-  const desktopRequire = Object.assign(vi.fn(), { resolve: vi.fn(() => 'cli-entry') })
+  const desktopRequire = Object.assign(vi.fn<(...args: unknown[]) => unknown>(), { resolve: vi.fn(() => 'cli-entry') })
   const getLocale = vi.fn(() => 'en-US')
   const app = {
     isPackaged: true,
     getLocale,
+    whenReady: vi.fn(async () => {}),
   }
   vi.doMock('electron', () => ({
     app,
@@ -288,6 +352,8 @@ function prepareNormalEntry(): {
     showMessageBox,
     startDesktopMain,
     Tray,
+    desktopRequire,
+    resourcesPath,
   }
 }
 

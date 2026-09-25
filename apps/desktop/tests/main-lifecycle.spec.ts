@@ -183,6 +183,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     dispose: disposeBackgroundPresence,
   }))
   const confirmQuit = vi.fn<DesktopMainDependencies['confirmQuit']>(async () => 'cancel')
+  const confirmUpdateInstall = vi.fn<DesktopMainDependencies['confirmUpdateInstall']>(async () => false)
   const launchSpec: HarnessLaunchSpec = {
     cliEntry: 'C:\\Program Files\\DeepSeek Harness\\resources\\app\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
     cwd: 'C:\\Users\\tester',
@@ -197,6 +198,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     createWindow,
     createBackgroundPresence,
     confirmQuit,
+    confirmUpdateInstall,
     createStartupWindow,
     desktopLog,
     openPath,
@@ -1186,6 +1188,57 @@ describe('startDesktopMain', () => {
     }))
     expect(setup.disposeBackgroundPresence).toHaveBeenCalledOnce()
     expect(setup.stop).toHaveBeenCalledOnce()
+  })
+
+  it('starts a downloaded installer only after approved Harness and mutex cleanup', async () => {
+    const order: string[] = []
+    const release = vi.fn(async () => { order.push('mutex') })
+    const setup = fixture({
+      acquireApplicationMutex: async () => ({ release }),
+      confirmUpdateInstall: async () => true,
+    })
+    setup.setTaskState({
+      activeTaskCount: 2, activeAgentCount: 2, attentionCount: 0, notifications: [], freshness: 'live',
+    })
+    setup.disposeBackgroundPresence.mockImplementation(async () => { order.push('presence') })
+    vi.mocked(setup.stop).mockImplementation(async () => { order.push('harness') })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+
+    const accepted = await desktop.requestUpdateInstallation(() => { order.push('installer') })
+
+    expect(accepted).toBe(true)
+    expect(order).toEqual(['presence', 'harness', 'mutex', 'installer'])
+    expect(setup.app.quit).toHaveBeenCalledOnce()
+    expect(setup.app.exit).not.toHaveBeenCalled()
+  })
+
+  it('does not stop work or launch an update when installation is declined', async () => {
+    const setup = fixture()
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    const launchInstaller = vi.fn()
+
+    expect(await desktop.requestUpdateInstallation(launchInstaller)).toBe(false)
+    expect(launchInstaller).not.toHaveBeenCalled()
+    expect(setup.stop).not.toHaveBeenCalled()
+    expect(setup.app.quit).not.toHaveBeenCalled()
+  })
+
+  it('does not launch an update when the owned mutex cannot be released', async () => {
+    const failure = new Error('mutex release failed')
+    const setup = fixture({
+      acquireApplicationMutex: async () => ({ release: async () => { throw failure } }),
+      confirmUpdateInstall: async () => true,
+    })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    const launchInstaller = vi.fn()
+
+    expect(await desktop.requestUpdateInstallation(launchInstaller)).toBe(false)
+    expect(launchInstaller).not.toHaveBeenCalled()
+    expect(setup.reportFailure).toHaveBeenCalledWith('shutdown', failure)
+    expect(setup.app.quit).toHaveBeenCalledOnce()
   })
 
   it('wires background actions to native quit and contained callback reporting', async () => {
