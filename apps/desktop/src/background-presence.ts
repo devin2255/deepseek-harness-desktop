@@ -158,7 +158,7 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
   let disposal: Promise<void> | undefined
   let openSessionFlight: Promise<void> | undefined
   let disposeUpdates: (() => void) | undefined
-  let lastUpdateKind: DesktopUpdateState['kind'] | undefined
+  let notifiedUpdateVersion: string | undefined
   let currentState: TaskObserverState = Object.freeze({
     activeTaskCount: 0,
     activeAgentCount: 0,
@@ -288,10 +288,10 @@ export function createBackgroundPresence(options: BackgroundPresenceOptions): Ba
     observer = options.createObserver({ onState: render, reportError: reportFailure })
     disposeUpdates = options.updates?.subscribe((state) => {
       renderMenu()
-      if (state.kind === 'ready' && lastUpdateKind !== 'ready') {
+      if (state.kind === 'ready' && notifiedUpdateVersion !== state.version) {
+        notifiedUpdateVersion = state.version
         showNotification(copy.updateReadyTitle, copy.updateReadyBody(state.version), installUpdate)
       }
-      lastUpdateKind = state.kind
     })
   } catch (error) {
     const failures: unknown[] = [error]
