@@ -9,7 +9,180 @@ from pathlib import Path
 
 import pytest
 
-from deepseek_harness import DeepSeekHarness, HarnessClient, HarnessConfig, Notification, SdkProtocolError
+from deepseek_harness import (
+    DeepSeekHarness,
+    DefineTaskCriterion,
+    HarnessClient,
+    HarnessConfig,
+    Notification,
+    SdkProtocolError,
+    TaskCriterion,
+    TaskRisk,
+)
+
+
+def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+    calls: list[tuple[str, object]] = []
+    row = {
+        "taskId": "root",
+        "workspaceId": "workspace",
+        "executionWorkspace": {
+            "kind": "git-worktree",
+            "taskId": "root",
+            "workspaceId": "workspace",
+            "sourcePath": r"D:\source\project",
+            "path": r"D:\harness\worktrees\root",
+            "branch": "dsh/task-0123456789abcdef01234567",
+            "baseCommit": "0" * 40,
+            "sourceHead": "0" * 40,
+            "sourceDirty": False,
+            "sourceStatusDigest": "a" * 64,
+            "createdAt": 1,
+        },
+        "descendantSessionIds": ["child"],
+        "status": "reviewing",
+        "freshness": "live",
+        "attention": [],
+        "risks": [],
+        "updatedAt": 1,
+        "asOfSeq": 0,
+    }
+
+    def request(method: str, params: dict[str, object], *, response_model: type, **_kwargs: object):
+        calls.append((method, params))
+        summary = {
+            "taskId": "root", "workspaceId": "workspace", "revision": "b" * 64,
+            "baseCommit": "0" * 40, "headCommit": "0" * 40, "sourceHead": "0" * 40,
+            "sourceDirty": False, "branch": "dsh/task-0123456789abcdef01234567",
+            "dirty": True, "truncated": False,
+            "files": [{"path": "src/app.ts", "status": "modified", "binary": False,
+                       "additions": 2, "deletions": 1}],
+            "additions": 2, "deletions": 1,
+        }
+        commit_receipt = {
+            "kind": "commit", "operationId": "00000000-0000-4000-8000-000000000001",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "b" * 64,
+            "committedRevision": "c" * 64, "branch": row["executionWorkspace"]["branch"],
+            "commit": "1" * 40, "committedAt": 2,
+        }
+        apply_receipt = {
+            "kind": "apply", "operationId": "00000000-0000-4000-8000-000000000002",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "c" * 64,
+            "commit": "1" * 40, "sourceHeadBefore": "2" * 40,
+            "sourceHeadAfter": "2" * 40, "appliedAt": 3,
+        }
+        discard_receipt = {
+            "kind": "discard", "operationId": "00000000-0000-4000-8000-000000000003",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "c" * 64,
+            "branch": row["executionWorkspace"]["branch"], "branchPreserved": True,
+            "worktreeRemoved": True, "uncommittedChangesDiscarded": False,
+            "recoverableCommit": "1" * 40, "discardedAt": 4,
+        }
+        if method == "task/list":
+            value = {"generation": 7, "tasks": [row]}
+        elif method == "task/reviewSummary":
+            value = summary
+        elif method == "task/reviewDiff":
+            value = {
+                "taskId": "root", "workspaceId": "workspace", "revision": params["expectedRevision"],
+                "path": params["path"], "binary": False, "truncated": False, "patch": "+new",
+            }
+        else:
+            value = {
+                **row,
+                "definition": {"goal": "Ship", "criteria": []},
+                "risks": [params["risk"]] if method == "task/recordRisk" else [],
+                "reviewDecision": params["decision"] if method == "task/review" else None,
+                **({"commitReceipt": commit_receipt} if method == "task/commit" else {}),
+                **({"commitReceipt": commit_receipt, "applyReceipt": apply_receipt}
+                   if method == "task/apply" else {}),
+                **({"commitReceipt": commit_receipt, "applyReceipt": apply_receipt,
+                    "discardReceipt": discard_receipt} if method == "task/discard" else {}),
+            }
+        return response_model.model_validate(value)
+
+    monkeypatch.setattr(client, "request", request)
+    listed = client.list_tasks()
+    assert listed.generation == 7
+    assert listed.tasks[0].execution_workspace.path == r"D:\harness\worktrees\root"
+    assert client.define_task(
+        "root", goal="Ship", criteria=[DefineTaskCriterion(text="Works")], expected_seq=0
+    ).definition.goal == "Ship"
+    criterion = TaskCriterion(id="criterion", text="Works", status="waived", evidence=[])
+    client.update_task_criterion("root", criterion=criterion, expected_seq=1)
+    risk = TaskRisk(id="risk", severity="high", summary="Signing")
+    assert client.record_task_risk("root", risk=risk, expected_seq=2).risks[0].summary == "Signing"
+    assert client.review_task("root", decision="ready", expected_seq=3).review_decision == "ready"
+    summary = client.get_task_review_summary("root")
+    assert summary.files[0].additions == 2
+    assert client.get_task_review_diff(
+        "root", path="src/app.ts", expected_revision=summary.revision
+    ).patch == "+new"
+    committed = client.commit_task(
+        "root", expected_revision=summary.revision, message="feat: ship", expected_seq=4
+    )
+    assert committed.commit_receipt.commit == "1" * 40
+    applied = client.apply_task(
+        "root", expected_revision=committed.commit_receipt.committed_revision,
+        expected_source_head="2" * 40, commit=committed.commit_receipt.commit, expected_seq=5,
+    )
+    assert applied.apply_receipt.source_head_before == "2" * 40
+    discarded = client.discard_task(
+        "root", expected_revision=committed.commit_receipt.committed_revision,
+        confirmed_uncommitted_loss=False, expected_seq=6,
+    )
+    assert discarded.discard_receipt.worktree_removed is True
+    assert [method for method, _params in calls] == [
+        "task/list", "task/define", "task/updateCriterion", "task/recordRisk", "task/review",
+        "task/reviewSummary", "task/reviewDiff", "task/commit", "task/apply", "task/discard",
+    ]
+
+
+def test_malformed_task_projection_uses_sdk_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": "bad", "tasks": [{}]})
+
+    monkeypatch.setattr(client, "request", request)
+    with pytest.raises(SdkProtocolError, match="malformed Task response"):
+        client.list_tasks()
+
+
+def test_mismatched_task_worktree_uses_sdk_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+    row = {
+        "taskId": "root",
+        "workspaceId": "workspace",
+        "executionWorkspace": {
+            "kind": "git-worktree",
+            "taskId": "different-task",
+            "workspaceId": "workspace",
+            "sourcePath": r"D:\source\project",
+            "path": r"D:\harness\worktrees\root",
+            "branch": "dsh/task-0123456789abcdef01234567",
+            "baseCommit": "0" * 40,
+            "sourceHead": "1" * 40,
+            "sourceDirty": False,
+            "sourceStatusDigest": "a" * 64,
+            "createdAt": 1,
+        },
+        "descendantSessionIds": [],
+        "status": "running",
+        "freshness": "live",
+        "attention": [],
+        "risks": [],
+        "updatedAt": 1,
+        "asOfSeq": 0,
+    }
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": 1, "tasks": [row]})
+
+    monkeypatch.setattr(client, "request", request)
+    with pytest.raises(SdkProtocolError, match="malformed Task response"):
+        client.list_tasks()
 
 
 def test_high_level_sdk_runs_turn_and_collects_final_response(tmp_path: Path) -> None:
@@ -922,7 +1095,7 @@ def _install_fake_bundled_runtime(
 
     Returns the fake bundled default config path.
     """
-    runtime = tmp_path / "dsh-jsonrpc-agent"
+    runtime = tmp_path / "dsh-jsonrpc-agent.py"
     runtime.write_text(
         """#!/usr/bin/env python3
 import json
@@ -947,7 +1120,7 @@ for line in sys.stdin:
     (module_dir / "__init__.py").write_text(
         f"""
 def resolve_bundled_launch_args(mode=None):
-    return ({str(runtime)!r},)
+    return ({sys.executable!r}, {str(runtime)!r})
 
 
 def bundled_default_config_path():

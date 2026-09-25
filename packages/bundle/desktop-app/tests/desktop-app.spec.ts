@@ -2,7 +2,7 @@
 
 import { once } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import type { IncomingMessage } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,18 +18,26 @@ import * as DesktopApp from '../src/index.ts'
 import { apply, CAPABILITY_ENV, inject } from '../src/index.ts'
 
 let environmentBeforeTest: string | undefined
+let versionEnvironmentBeforeTest: string | undefined
 let compositionRoot: string | undefined
 let composition: Context | undefined
 const contexts = new Set<Context>()
 const desktopManifestPath = fileURLToPath(new URL('../package.json', import.meta.url))
+const webManifestPath = fileURLToPath(new URL('../../web-app/package.json', import.meta.url))
 const basePatchPath = fileURLToPath(new URL('../../base/cordis.patch.yml', import.meta.url))
 const webPatchPath = fileURLToPath(new URL('../../web-app/cordis.patch.yml', import.meta.url))
+const LAUNCH_CAPABILITY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 
 interface DesktopBundleManifest {
+  dependencies?: Record<string, string>
   dsh?: { bundle?: { patch?: unknown } }
 }
 
-beforeEach(() => { environmentBeforeTest = process.env[CAPABILITY_ENV] })
+beforeEach(() => {
+  environmentBeforeTest = process.env[CAPABILITY_ENV]
+  versionEnvironmentBeforeTest = process.env.DSH_DESKTOP_APP_VERSION
+  process.env.DSH_DESKTOP_APP_VERSION = '0.1.0-rc.7'
+})
 
 afterEach(async () => {
   const activeContexts = [...contexts]
@@ -46,6 +54,8 @@ afterEach(async () => {
     } finally {
       if (environmentBeforeTest === undefined) delete process.env.DSH_DESKTOP_CAPABILITY
       else process.env[CAPABILITY_ENV] = environmentBeforeTest
+      if (versionEnvironmentBeforeTest === undefined) delete process.env.DSH_DESKTOP_APP_VERSION
+      else process.env.DSH_DESKTOP_APP_VERSION = versionEnvironmentBeforeTest
     }
   }
 })
@@ -56,6 +66,26 @@ function request(authorization: string | undefined): IncomingMessage {
     headers: authorization === undefined ? {} : { authorization },
     headersDistinct: authorization === undefined ? {} : { authorization: [authorization] },
   } as IncomingMessage
+}
+
+/** Invoke a registered route with a response recorder. */
+async function invokeRoute(
+  route: Parameters<WebServer['register']>[0],
+  method: string,
+): Promise<{ status: number; headers: Record<string, string>; body: string }> {
+  let status = 200
+  let headers: Record<string, string> = {}
+  let body = ''
+  const response = {
+    writeHead(nextStatus: number, nextHeaders: Record<string, string> = {}) {
+      status = nextStatus
+      headers = nextHeaders
+      return response
+    },
+    end(chunk?: string) { body += chunk ?? '' },
+  } as unknown as ServerResponse
+  await route.handler({ method } as IncomingMessage, response)
+  return { status, headers, body }
 }
 
 /** Mount the plugin around a fake Web server and retain its registered guard. */
@@ -76,6 +106,39 @@ async function mountedDesktopRuntime(): Promise<{ ctx: Context; guard: WebReques
   await ctx.plugin({ inject: [...inject], apply })
   if (guard === undefined) throw new Error('desktop capability guard was not registered')
   return { ctx, guard, removed: () => !registered }
+}
+
+/** Mount independently disposable desktop and API fibers over an observable route registry. */
+async function mountedReadinessRuntime(): Promise<{
+  readonly apiFiber: Awaited<ReturnType<Context['plugin']>>
+  readonly ctx: Context
+  readonly desktopFiber: Awaited<ReturnType<Context['plugin']>>
+  readonly isApiMounted: () => boolean
+  readonly routes: Map<string, Parameters<WebServer['register']>[0]>
+}> {
+  process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
+  const routes = new Map<string, Parameters<WebServer['register']>[0]>()
+  const ctx = new Context()
+  contexts.add(ctx)
+  ctx.provide('webServer', {
+    registerGuard: () => () => {},
+    register(route: Parameters<WebServer['register']>[0]) {
+      routes.set(route.path, route)
+      return () => { routes.delete(route.path) }
+    },
+  } as Pick<WebServer, 'register' | 'registerGuard'> as WebServer)
+  const desktopFiber = await ctx.plugin({ inject: [...inject], apply })
+  let apiMounted = false
+  const apiFiber = await ctx.plugin({
+    apply(apiCtx: Context) {
+      apiCtx.effect(() => {
+        apiMounted = true
+        return () => { apiMounted = false }
+      }, 'desktop-app test: API service mounted')
+      apiCtx.provide('apiProxy', {})
+    },
+  })
+  return { apiFiber, ctx, desktopFiber, isApiMounted: () => apiMounted, routes }
 }
 
 /** Release one test context without scheduling a second teardown. */
@@ -116,6 +179,7 @@ async function bootDesktopComposition(): Promise<Context> {
 
   composition = new Context()
   composition.baseUrl = pathToFileURL(compositionRoot).href + '/'
+  composition.provide('apiProxy', {})
   await composition.plugin(Loader)
   composition.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
@@ -139,7 +203,11 @@ async function bootDesktopComposition(): Promise<Context> {
 }
 
 /** Send raw HTTP header lines and return the server's status line. */
-async function rawRequest(port: number, authorization: readonly string[]): Promise<number> {
+async function rawRequest(
+  port: number,
+  authorization: readonly string[],
+  path = '/ready',
+): Promise<number> {
   const socket = connect(port, '127.0.0.1')
   socket.on('error', () => {})
   await once(socket, 'connect')
@@ -147,7 +215,7 @@ async function rawRequest(port: number, authorization: readonly string[]): Promi
   const chunks: Buffer[] = []
   socket.on('data', (chunk) => { chunks.push(Buffer.from(chunk)) })
   socket.write([
-    'GET /ready HTTP/1.1',
+    `GET ${path} HTTP/1.1`,
     `Host: 127.0.0.1:${String(port)}`,
     'Connection: close',
     ...authorization.map(value => `Authorization: ${value}`),
@@ -185,6 +253,8 @@ async function rawUpgrade(port: number, authorization: readonly string[]): Promi
 describe('desktop launch capability', () => {
   it('composes the manifest-declared patch over the actual Web bundle rows', async () => {
     const { entries, patch } = await readDesktopBundleComposition()
+    const manifest = JSON.parse(await readFile(desktopManifestPath, 'utf8')) as DesktopBundleManifest
+    const webManifest = JSON.parse(await readFile(webManifestPath, 'utf8')) as DesktopBundleManifest
 
     expect(patch).toBe('./cordis.patch.yml')
     expect(entries.find(entry => entry.id === 'webserver')).toMatchObject({
@@ -203,10 +273,45 @@ describe('desktop launch capability', () => {
     expect(entries.find(entry => entry.id === 'desktop-app')).toMatchObject({
       name: '@deepseek-ai/dsh-desktop-app',
     })
+    expect(entries.find(entry => entry.id === 'task-session')).toMatchObject({
+      name: '@deepseek-ai/dsh-task-session',
+    })
+    expect(entries.find(entry => entry.id === 'task-worktree-local')).toMatchObject({
+      name: '@deepseek-ai/dsh-task-worktree-local',
+    })
+    expect(entries.find(entry => entry.id === 'task-review-local')).toMatchObject({
+      name: '@deepseek-ai/dsh-task-review-local',
+    })
+    expect(entries.find(entry => entry.id === 'ui-task-overview')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-task-overview',
+    })
+    expect(entries.find(entry => entry.id === 'ui-task-review')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-task-review',
+    })
+    expect(entries.find(entry => entry.id === 'api-gateway')?.inject).toContain('tasks')
+    expect(entries.findIndex(entry => entry.id === 'task-session'))
+      .toBeLessThan(entries.findIndex(entry => entry.id === 'ui-task-overview'))
+    expect(entries.findIndex(entry => entry.id === 'task-worktree-local'))
+      .toBeLessThan(entries.findIndex(entry => entry.id === 'api-gateway'))
+    expect(entries.findIndex(entry => entry.id === 'task-worktree-local'))
+      .toBeLessThan(entries.findIndex(entry => entry.id === 'task-review-local'))
+    expect(entries.findIndex(entry => entry.id === 'task-review-local'))
+      .toBeLessThan(entries.findIndex(entry => entry.id === 'api-gateway'))
+    expect(manifest.dependencies).toMatchObject({
+      '@deepseek-ai/dsh-task': 'workspace:^',
+      '@deepseek-ai/dsh-task-session': 'workspace:^',
+      '@deepseek-ai/dsh-client-ui-task-overview': 'workspace:^',
+    })
+    expect(webManifest.dependencies).toMatchObject({
+      '@deepseek-ai/dsh-client-ui-task-review': 'workspace:^',
+      '@deepseek-ai/dsh-task-review': 'workspace:^',
+      '@deepseek-ai/dsh-task-review-local': 'workspace:^',
+      '@deepseek-ai/dsh-task-worktree-local': 'workspace:^',
+    })
   })
 
   it('loads the bare desktop plugin and authorizes one exact raw HTTP or upgrade request', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
     const loaded = await bootDesktopComposition()
     loaded.webServer.register({ kind: 'exact', path: '/ready', handler: (_req, res) => { res.end('ready') } })
     loaded.webServer.registerUpgrade({
@@ -216,22 +321,69 @@ describe('desktop launch capability', () => {
       },
     })
 
-    expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(200)
+    expect(await rawRequest(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`])).toBe(200)
+    expect(await rawRequest(
+      loaded.webServer.port,
+      [`Bearer ${LAUNCH_CAPABILITY}`],
+      '/.well-known/deepseek-harness-desktop/readiness',
+    )).toBe(200)
+    expect(await rawRequest(
+      loaded.webServer.port,
+      [],
+      '/.well-known/deepseek-harness-desktop/readiness',
+    )).toBe(401)
     expect(await rawRequest(loaded.webServer.port, [])).toBe(401)
-    expect(await rawRequest(loaded.webServer.port, ['Basic launch-secret'])).toBe(401)
+    expect(await rawRequest(loaded.webServer.port, [`Basic ${LAUNCH_CAPABILITY}`])).toBe(401)
     expect(await rawRequest(loaded.webServer.port, ['Bearer other'])).toBe(401)
-    expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret', 'Bearer other'])).toBe(401)
-    expect(await rawRequest(loaded.webServer.port, ['Bearer other', 'Bearer launch-secret'])).toBe(401)
-    expect(await rawUpgrade(loaded.webServer.port, ['Bearer launch-secret'])).toBe(101)
-    expect(await rawUpgrade(loaded.webServer.port, ['Bearer launch-secret', 'Bearer other'])).toBeUndefined()
+    expect(await rawRequest(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`, 'Bearer other'])).toBe(401)
+    expect(await rawRequest(loaded.webServer.port, ['Bearer other', `Bearer ${LAUNCH_CAPABILITY}`])).toBe(401)
+    expect(await rawUpgrade(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`])).toBe(101)
+    expect(await rawUpgrade(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`, 'Bearer other'])).toBeUndefined()
 
     const desktopEntry = [...loaded.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-desktop-app')
     if (desktopEntry?.fiber === undefined) throw new Error('desktop plugin was not mounted by the Loader')
     await desktopEntry.fiber.dispose()
-    expect(await rawRequest(loaded.webServer.port, ['Bearer launch-secret'])).toBe(401)
+    expect(await rawRequest(loaded.webServer.port, [`Bearer ${LAUNCH_CAPABILITY}`])).toBe(401)
   })
 
-  it.each([undefined, '', ' ', 'launch+secret', 'launch/secret', 'launch=secret', '秘密'])('fails loud and removes an absent, empty, or non-base64url launch capability', async (capability) => {
+  it('removes the exact readiness route when the desktop plugin is disposed while the API service remains mounted', async () => {
+    const { apiFiber, ctx, desktopFiber, isApiMounted, routes } = await mountedReadinessRuntime()
+    const path = '/.well-known/deepseek-harness-desktop/readiness'
+    const route = routes.get(path)
+    expect(route).toMatchObject({ kind: 'exact', path })
+    if (route === undefined) throw new Error('desktop readiness route was not registered')
+
+    const response = await invokeRoute(route, 'GET')
+    expect(response).toMatchObject({
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        product: 'deepseek-harness-desktop',
+        version: '0.1.0-rc.7',
+        capabilities: ['host.describe', 'session.list'],
+      }),
+    })
+    expect(await invokeRoute(route, 'POST')).toMatchObject({ status: 405 })
+
+    await desktopFiber.dispose()
+    expect(isApiMounted()).toBe(true)
+    expect(routes.has(path)).toBe(false)
+    await apiFiber.dispose()
+    await disposeContext(ctx)
+  })
+
+  it('removes the exact readiness route when the API service is disposed', async () => {
+    const { apiFiber, ctx, routes } = await mountedReadinessRuntime()
+    const path = '/.well-known/deepseek-harness-desktop/readiness'
+    expect(routes.get(path)).toMatchObject({ kind: 'exact', path })
+
+    await apiFiber.dispose()
+
+    expect(routes.has(path)).toBe(false)
+    await disposeContext(ctx)
+  })
+
+  it.each([undefined, '', ' ', 'short', 'launch+secret', 'launch/secret', 'launch=secret', '秘密'])('fails loud and removes an absent or malformed launch capability', async (capability) => {
     if (capability === undefined) delete process.env.DSH_DESKTOP_CAPABILITY
     else process.env[CAPABILITY_ENV] = capability
 
@@ -244,12 +396,27 @@ describe('desktop launch capability', () => {
     await disposeContext(ctx)
   })
 
+  it.each([undefined, '', 'x'.repeat(129)])('fails loud and removes an absent, empty, or oversized desktop version', async (version) => {
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
+    if (version === undefined) delete process.env.DSH_DESKTOP_APP_VERSION
+    else process.env.DSH_DESKTOP_APP_VERSION = version
+    const ctx = new Context()
+    contexts.add(ctx)
+    ctx.provide('webServer', { registerGuard: () => () => {} } as Pick<WebServer, 'registerGuard'> as WebServer)
+
+    await expect(ctx.plugin({ inject: [...inject], apply }))
+      .rejects.toThrow('desktop-app: DSH_DESKTOP_APP_VERSION must contain the desktop application version')
+    expect(process.env[CAPABILITY_ENV]).toBeUndefined()
+    expect(process.env.DSH_DESKTOP_APP_VERSION).toBeUndefined()
+    await disposeContext(ctx)
+  })
+
   it('captures one launch capability and authorizes only its exact bearer value', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard, removed } = await mountedDesktopRuntime()
     expect(process.env[CAPABILITY_ENV]).toBeUndefined()
-    expect(guard(request('Bearer launch-secret'))).toBe(true)
+    expect(guard(request(`Bearer ${LAUNCH_CAPABILITY}`))).toBe(true)
     expect(guard(request('Bearer other'))).toBe(false)
     expect(guard(request(undefined))).toBe(false)
     await disposeContext(ctx)
@@ -257,16 +424,16 @@ describe('desktop launch capability', () => {
   })
 
   it('rejects malformed Authorization values', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard } = await mountedDesktopRuntime()
     for (const authorization of [
-      'Basic launch-secret',
-      'bearer launch-secret',
+      `Basic ${LAUNCH_CAPABILITY}`,
+      `bearer ${LAUNCH_CAPABILITY}`,
       'Bearer',
       'Bearer ',
-      'Bearer  launch-secret',
-      'Bearer launch-secret ',
+      `Bearer  ${LAUNCH_CAPABILITY}`,
+      `Bearer ${LAUNCH_CAPABILITY} `,
     ]) {
       expect(guard(request(authorization))).toBe(false)
     }
@@ -274,20 +441,20 @@ describe('desktop launch capability', () => {
   })
 
   it('rejects a bearer token whose byte length differs from the captured capability', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard } = await mountedDesktopRuntime()
     expect(guard(request('Bearer x'))).toBe(false)
-    expect(guard(request('Bearer launch-secret-extra'))).toBe(false)
+    expect(guard(request(`Bearer ${LAUNCH_CAPABILITY}extra`))).toBe(false)
     await disposeContext(ctx)
   })
 
   it('continues to authorize after the launch environment entry has been removed', async () => {
-    process.env[CAPABILITY_ENV] = 'launch-secret'
+    process.env[CAPABILITY_ENV] = LAUNCH_CAPABILITY
 
     const { ctx, guard } = await mountedDesktopRuntime()
     expect(process.env[CAPABILITY_ENV]).toBeUndefined()
-    expect(guard(request('Bearer launch-secret'))).toBe(true)
+    expect(guard(request(`Bearer ${LAUNCH_CAPABILITY}`))).toBe(true)
     await disposeContext(ctx)
   })
 })

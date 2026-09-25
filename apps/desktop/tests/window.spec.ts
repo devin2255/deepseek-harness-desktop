@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { configureAuthorizedSession } from '../src/authorized-session.ts'
 import {
   createDesktopWindow,
@@ -44,21 +45,31 @@ function desktopWindow(): {
           setWindowOpenHandler(handler) {
             openHandler = () => handler({})
           },
+          send(channel, sessionId) {
+            steps.push(`send:${channel}:${sessionId}`)
+          },
         },
         loadURL(url) {
           steps.push(`load:${url}`)
           return Promise.resolve()
         },
         destroy() {
+          steps.push('destroy')
           wasDestroyed = true
         },
         focus() {
           steps.push('focus')
         },
+        hide() {
+          steps.push('hide')
+        },
         isDestroyed: () => wasDestroyed,
         isMinimized: () => false,
         restore() {
           steps.push('restore')
+        },
+        show() {
+          steps.push('show')
         },
         once(event, listener) {
           if (event === 'closed') closedListeners.push(listener)
@@ -126,7 +137,9 @@ function navigationEvent(url: string): FakeEvent {
 
 describe('createDesktopWindow', () => {
   it('returns only the native-window lifecycle controls', () => {
-    expectTypeOf<keyof DesktopWindow>().toEqualTypeOf<'focus' | 'isMinimized' | 'onClosed' | 'restore'>()
+    expectTypeOf<keyof DesktopWindow>().toEqualTypeOf<
+      'destroy' | 'focus' | 'hide' | 'isDestroyed' | 'isMinimized' | 'onClosed' | 'openSession' | 'restore' | 'show'
+    >()
   })
 
   it('creates a sandboxed window in the isolated partition and binds authorization before loading', async () => {
@@ -151,9 +164,27 @@ describe('createDesktopWindow', () => {
     expect(fixture.steps).toEqual(['configure', 'create', 'bind', 'load:http://127.0.0.1:4312/'])
     expect(actual.isMinimized()).toBe(false)
     actual.restore()
+    actual.show()
+    actual.hide()
+    actual.openSession('target-session' as SessionId)
+    expect(() => { actual.openSession('' as SessionId) }).toThrow('non-blank and bounded')
     actual.focus()
     expect(fixture.steps).toContain('restore')
+    expect(fixture.steps).toContain('show')
+    expect(fixture.steps).toContain('hide')
+    expect(fixture.steps).toContain('send:deepseek-harness:desktop-open-session:target-session')
     expect(fixture.steps).toContain('focus')
+  })
+
+  it('destroys a loaded window at most once through the lifecycle handle', async () => {
+    const fixture = desktopWindow()
+    const actual = await createDesktopWindow(new URL('http://127.0.0.1:4312'), 'capability', fixture.dependencies)
+
+    actual.destroy()
+    actual.destroy()
+
+    expect(fixture.destroyed()).toBe(true)
+    expect(fixture.steps.filter(step => step === 'destroy')).toHaveLength(1)
   })
 
   it('allows only same-origin navigation and redirects, and denies all new windows', async () => {
@@ -283,6 +314,7 @@ function desktopWindowWithLoadFailure(loadFailure: Error): {
             id: 19,
             on() {},
             setWindowOpenHandler() {},
+            send() {},
           },
           loadURL() {
             steps.push('load')
@@ -295,9 +327,11 @@ function desktopWindowWithLoadFailure(loadFailure: Error): {
             wasDestroyed = true
           },
           focus() {},
+          hide() {},
           isDestroyed: () => wasDestroyed,
           isMinimized: () => false,
           restore() {},
+          show() {},
         }
       },
       configureSession() {
@@ -369,6 +403,7 @@ function desktopWindowWithSetupFailure(
               steps.push('open')
               fail('open')
             },
+            send() {},
           },
           loadURL() {
             steps.push('load')
@@ -386,9 +421,11 @@ function desktopWindowWithSetupFailure(
             if (failingCleanup.has('destroy')) throw new Error('destroy failed')
           },
           focus() {},
+          hide() {},
           isDestroyed: () => wasDestroyed,
           isMinimized: () => false,
           restore() {},
+          show() {},
         }
       },
       reportCleanupError() {},

@@ -10,6 +10,8 @@ type ZodIssue = zCore.core.$ZodIssue
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { TaskWorktreeErrorCode } from '@deepseek-ai/dsh-task-worktree/types'
+import type { TaskReviewErrorCode } from '@deepseek-ai/dsh-task-review/types'
 
 /**
  * Message correlation id: the initiator mints it on a request; a response
@@ -37,6 +39,12 @@ export interface RpcErrorDetailsMap {
   'session-conflict': { sessionId: SessionId; requestedCwd: string; existingCwd?: string }
   'invalid-time-zone': { value: string }
   'workspace-attach-failed': { sessionId: SessionId; workspaceId: string }
+  'workspace-isolation-unavailable': {
+    workspaceId?: string
+    sessionId?: SessionId
+    worktreeCode?: TaskWorktreeErrorCode
+    preservedPath?: string
+  }
   'workspace-not-found': { workspaceId: string }
   'workspace-invalid-path': { path: string }
   'workspace-name-conflict': { name: string }
@@ -92,6 +100,23 @@ export interface RpcErrorDetailsMap {
   'subagent-not-resumable': { childSessionId: SessionId }
   'subagent-unauthorized': { childSessionId: SessionId }
   'subagent-delivery-unavailable': { childSessionId: SessionId }
+  'task-not-found': { sessionId: SessionId }
+  'task-target-not-root': { sessionId: SessionId }
+  'task-stale-sequence': { sessionId: SessionId }
+  'task-invalid-definition': { sessionId: SessionId }
+  'task-invalid-criterion': { sessionId: SessionId }
+  'task-invalid-risk': { sessionId: SessionId }
+  'task-invalid-review': { sessionId: SessionId }
+  'task-invalid-commit': { sessionId: SessionId }
+  'task-invalid-apply': { sessionId: SessionId }
+  'task-invalid-discard': { sessionId: SessionId }
+  'task-review-unavailable': { sessionId: SessionId }
+  'task-review-rejected': { sessionId: SessionId; reviewCode: TaskReviewErrorCode }
+  'task-invalid-evidence': { sessionId: SessionId }
+  'task-invalid-worktree': { sessionId: SessionId }
+  'task-worktree-assigned': { sessionId: SessionId }
+  'task-active': { sessionId: SessionId }
+  'task-unavailable': { sessionId?: SessionId }
   'internal': {}
 }
 

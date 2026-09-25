@@ -30,6 +30,7 @@ import {
   type Profile,
 } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { isDesktopLaunchCapability } from '@deepseek-ai/dsh-desktop-app'
 
 /** Shipped agent-preset root: beside this app's own config, in both source and built layouts. */
 const SHIPPED_PRESET_ROOT = fileURLToPath(new URL('../config/agent-presets/', import.meta.url))
@@ -80,6 +81,25 @@ export const PROFILE_ROOT_FILENAME = 'cordis.yml'
 export function resolveTelemetryPatch(disabledEnv: string | undefined, hasRow: boolean): PatchOptions | undefined {
   if ((disabledEnv ?? '') === '' || !hasRow) return undefined
   return { id: TELEMETRY_ROW_ID, disabled: true }
+}
+
+/**
+ * Keep user patch files live unless this is the authenticated Electron-supervised desktop profile.
+ * Electron utility processes cannot expose Node internal modules to the config-only HMR provider;
+ * desktop startup therefore applies both user layers once and relies on application restart for edits.
+ * @param profile - Selected Harness profile name.
+ * @param environment - Launch environment before the desktop plugin consumes its capability and version.
+ * @returns Whether profile boot should mount the user-patch watchers.
+ */
+export function shouldWatchUserPatches(profile: string, environment: NodeJS.ProcessEnv): boolean {
+  const capability = environment.DSH_DESKTOP_CAPABILITY
+  const version = environment.DSH_DESKTOP_APP_VERSION
+  const supervisedDesktop = profile === 'desktop'
+    && isDesktopLaunchCapability(capability)
+    && version !== undefined
+    && version.length > 0
+    && version.length <= 128
+  return !supervisedDesktop
 }
 
 /**
@@ -206,6 +226,7 @@ function suppressShutdownError(ctx: Context, signal: AbortSignal, error: unknown
  */
 export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Context; shutdown: ProcessShutdown }> {
   const composed = composeProfile(options.profile, options.patchFiles)
+  const watchPatches = shouldWatchUserPatches(options.profile, process.env)
   const app: { current?: Context } = {}
   const shutdown = createProcessShutdown(async () => { await app.current?.fiber.dispose() })
   const signalShutdown = new AbortController()
@@ -265,7 +286,8 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   // landed mid-setup. Watching is unconditional: a one-shot surface exits
   // through its bounded shutdown, which disposes the watchers before the
   // loop drains.
-  if (!signalShutdown.signal.aborted
+  if (watchPatches
+    && !signalShutdown.signal.aborted
     && ctx.fiber.state === FiberState.ACTIVE
     && ctx.get('loader') !== undefined) {
     try {

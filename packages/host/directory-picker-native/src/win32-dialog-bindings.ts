@@ -18,6 +18,7 @@ interface KoffiFunction { (...args: unknown[]): unknown }
 interface KoffiLibrary { func(convention: string, name: string, result: string, args: string[]): KoffiFunction }
 interface Koffi {
   load(path: string): KoffiLibrary
+  disposable(name: string, type: string, free: KoffiFunction): unknown
   proto(declaration: string): unknown
   pointer(type: unknown): unknown
   call(pointer: unknown, proto: unknown, ...args: unknown[]): unknown
@@ -25,20 +26,6 @@ interface Koffi {
   register(fn: (...args: unknown[]) => unknown, type: unknown): unknown
   unregister(callback: unknown): void
   sizeof(type: string): number
-  view(ref: unknown, len: number): ArrayBuffer
-}
-
-/**
- * Read a NUL-terminated UTF-16 string at a native address. koffi's
- * `_Out_ void **` out-params surface a raw address, and
- * `koffi.decode(addr, 'str16')` would dereference it as a pointer — crash
- * on real Windows — so view the memory directly instead.
- */
-function readUtf16(koffi: Koffi, address: unknown): string {
-  const bytes = Buffer.from(koffi.view(address, 32768))
-  let end = 0
-  while (end + 1 < bytes.length && bytes[end] !== 0) end += 2
-  return bytes.toString('utf16le', 0, end)
 }
 
 const COINIT_APARTMENTTHREADED = 0x2
@@ -99,12 +86,16 @@ export async function loadWin32DialogBindings(): Promise<Win32DialogBindings> {
   const coCreateInstance = ole32.func('__stdcall', 'CoCreateInstance', 'int32', ['void *', 'void *', 'uint32', 'void *', 'void *'])
   const coTaskMemFree = ole32.func('__stdcall', 'CoTaskMemFree', 'void', ['void *'])
   const getCurrentThreadId = kernel32.func('__stdcall', 'GetCurrentThreadId', 'uint32', [])
+  // Let Koffi copy the COM-owned UTF-16 result into a JS string before
+  // releasing it. `koffi.view()` creates an external ArrayBuffer, which
+  // Electron's Node mode forbids and terminates through N-API.
+  koffi.disposable('DshTaskMemStr16', 'str16', coTaskMemFree)
 
   const protoShow = koffi.proto('int32 __stdcall DshDialogShow(void *self, void *owner)')
   const protoSetOptions = koffi.proto('int32 __stdcall DshDialogSetOptions(void *self, uint32 options)')
   const protoSetTitle = koffi.proto('int32 __stdcall DshDialogSetTitle(void *self, str16 title)')
   const protoGetResult = koffi.proto('int32 __stdcall DshDialogGetResult(void *self, _Out_ void **item)')
-  const protoGetDisplayName = koffi.proto('int32 __stdcall DshItemGetDisplayName(void *self, int32 form, _Out_ void **name)')
+  const protoGetDisplayName = koffi.proto('int32 __stdcall DshItemGetDisplayName(void *self, int32 form, _Out_ DshTaskMemStr16 *name)')
   const protoRelease = koffi.proto('uint32 __stdcall DshComRelease(void *self)')
 
   /** Bind vtable slot `slot` of COM object `self` to a caller through `proto`. */
@@ -153,11 +144,11 @@ export async function loadWin32DialogBindings(): Promise<Win32DialogBindings> {
           if (gotItem < 0) return { hr: gotItem }
           const item = itemOut[0]
           try {
-            const nameOut: unknown[] = [null]
+            const nameOut: Array<string | null> = [null]
             const gotName = method(item, SLOT_GET_DISPLAY_NAME, protoGetDisplayName)(SIGDN_FILESYSPATH, nameOut)
             if (gotName < 0) return { hr: gotName }
-            const path = readUtf16(koffi, nameOut[0])
-            coTaskMemFree(nameOut[0])
+            const path = nameOut[0]
+            if (path === null || path === undefined) throw new Error('GetDisplayName succeeded without returning a path')
             return { hr: gotName, path }
           } finally {
             method(item, SLOT_RELEASE, protoRelease)()

@@ -133,6 +133,8 @@ export class SessionManager {
   private listPhase: SessionListPhase = 'pending'
   private listError: RpcError | null = null
   private listInflight: Promise<void> | null = null
+  /** Disconnect invalidates responses from every pull started in the previous generation. */
+  private listGeneration = 0
   /** Mutations arriving after a list request starts are replayed over its response. */
   private listMutations: SessionListMutation[] | null = null
   private readonly addresses = new Map<SessionId, SubagentAddress>()
@@ -442,11 +444,13 @@ export class SessionManager {
     this.listError = null
     const established = this.summaries
     const mutations: SessionListMutation[] = []
+    const generation = this.listGeneration
     this.listMutations = mutations
     this.notifier.markDirty()
     this.listInflight = (async () => {
       try {
         const { result } = await this.api.sessions.list({})
+        if (generation !== this.listGeneration) return
         if (result.ok) {
           const baseline = this.listPhase === 'pending'
             ? result.value.items
@@ -495,14 +499,17 @@ export class SessionManager {
           this.listError = result.error
         }
       } catch (error) {
+        if (generation !== this.listGeneration) return
         this.listState = 'error'
         const folded = transportError<never>(error)
         /* v8 ignore next -- the `? null` arm is unreachable: transportError always returns ok:false. */
         this.listError = folded.ok ? null : folded.error
       } finally {
-        this.listMutations = null
-        this.listInflight = null
-        this.notifier.markDirty()
+        if (generation === this.listGeneration) {
+          this.listMutations = null
+          this.listInflight = null
+          this.notifier.markDirty()
+        }
       }
     })()
     return this.listInflight
@@ -530,14 +537,26 @@ export class SessionManager {
    * Contract session.create; on success merge into summaries immediately (no
    * wait for the next refresh). A created session is blank by definition
    * (entity birth precedes the first message).
-   * @param opts - target workspace or working directory, plus an optional caller-owned id.
+   * @param opts - target workspace or working directory, plus an optional caller-owned id and isolation mode.
    * @returns the create result.
    */
   async create(
-    opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {},
-  ): Promise<RpcResult<{ sessionId: SessionId }>> {
+    opts: {
+      workspaceId?: WorkspaceId
+      cwd?: string
+      sessionId?: SessionId
+      isolation?: 'direct' | 'worktree'
+    } = {},
+  ): Promise<RpcResult<{
+    sessionId: SessionId
+    agentPreset?: string
+    executionWorkspace?: { path: string }
+  }>> {
     try {
-      const shared = opts.sessionId === undefined ? {} : { sessionId: opts.sessionId }
+      const shared = {
+        ...(opts.sessionId === undefined ? {} : { sessionId: opts.sessionId }),
+        ...(opts.isolation === undefined ? {} : { isolation: opts.isolation }),
+      }
       const payload = opts.workspaceId !== undefined
         ? { workspaceId: opts.workspaceId, ...shared }
         : { ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }), ...shared }
@@ -545,7 +564,9 @@ export class SessionManager {
       if (result.ok) {
         this.recordMutation({ kind: 'upsert', summary: {
           sessionId: result.value.sessionId, updatedAt: Date.now(), running: false, blank: true,
-          ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+          ...(result.value.executionWorkspace !== undefined
+            ? { cwd: result.value.executionWorkspace.path }
+            : opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
           ...(result.value.agentPreset !== undefined ? { agentPreset: result.value.agentPreset } : {}),
         } })
       } else {
@@ -882,9 +903,16 @@ export class SessionManager {
    * drop generation-scoped live state. Interactions resolved while disconnected
    * send no frame, so stale statuses and buffered answerable frames must not
    * survive into the next generation — mux-open replay re-adds every still-pending
-   * request with its live rpcId.
+   * request with its live rpcId. Pending list responses lose publication authority;
+   * retained rows remain loading until a fresh baseline settles.
   */
   handleDisconnected(): void {
+    this.listGeneration += 1
+    this.listInflight = null
+    this.listMutations = null
+    this.listState = 'loading'
+    this.listError = null
+    this.notifier.markDirty()
     if (this.pendingInteractions.size > 0) {
       this.pendingInteractions.clear()
       this.notifier.markDirty()

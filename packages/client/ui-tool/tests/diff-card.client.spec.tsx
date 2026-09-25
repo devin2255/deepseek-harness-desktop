@@ -158,7 +158,7 @@ describe('FileMutationRow diff card', () => {
     ids: [SID],
     byId: { [SID]: { id: SID, displayTitle: 'r', running: false, blank: false, updatedAt: 0, cwd: '/w/app' } },
     current: SID,
-    phase: 'ready',
+    phase: 'ready', state: 'idle', error: null,
     subagentsByParent: {}, jobsBySession: {},
     currentAddress: undefined,
   })
@@ -311,12 +311,12 @@ describe('DetailsPanel diff Output section', () => {
     const chat = createChatStore().create()
     if (selection !== null) chat.actions.select(selection)
     const sessions = createSnapshotStore<SessionListState>(cwd === undefined
-      ? { ids: [], byId: {}, current: undefined, phase: 'ready', subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined }
+      ? { ids: [], byId: {}, current: undefined, phase: 'ready', state: 'idle', error: null, subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined }
       : {
         ids: [SID],
         byId: { [SID]: { id: SID, displayTitle: 'r', running: false, blank: false, updatedAt: 0, cwd } },
         current: SID,
-        phase: 'ready',
+        phase: 'ready', state: 'idle', error: null,
         subagentsByParent: {}, jobsBySession: {},
         currentAddress: undefined,
       })

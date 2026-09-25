@@ -1743,6 +1743,139 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'taskReview',
+    summary: 'Service Definition for inspecting and delivering Task-owned worktree changes.',
+    description: 'Service Definition for inspecting and delivering Task-owned worktree changes.',
+    methods: [
+      {
+        signature: 'abstract summarize( request: SummarizeTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskReviewSummary>',
+        description: 'Inspect the current bounded review state of one Task worktree.',
+        parameters: [{ name: 'request', description: 'Recorded assignment that owns the review.' }, { name: 'signal', description: 'Optional cancellation of repository inspection.' }],
+        returns: 'One immutable summary and its exact review revision.',
+      },
+      {
+        signature: 'abstract diff( request: GetTaskFileDiffRequest, signal?: AbortSignal, ): Promise<TaskFileDiff>',
+        description: 'Read one member file diff from an exact review snapshot.',
+        parameters: [{ name: 'request', description: 'Recorded assignment, repository-relative path, and expected revision.' }, { name: 'signal', description: 'Optional cancellation of diff generation.' }],
+        returns: 'The bounded text or binary diff description.',
+      },
+      {
+        signature: 'abstract commit( request: CommitTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskCommitReceipt>',
+        description: 'Commit the exact reviewed state inside its Task worktree.',
+        parameters: [{ name: 'request', description: 'Recorded assignment, expected revision, and commit message.' }, { name: 'signal', description: 'Optional cancellation before Git commits the state.' }],
+        returns: 'Durable commit facts for Session logging.',
+      },
+      {
+        signature: 'abstract apply( request: ApplyTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskApplyReceipt>',
+        description: 'Apply one reviewed Task commit to its recorded source checkout.',
+        parameters: [{ name: 'request', description: 'Recorded assignment, expected revision, and exact Task commit.' }, { name: 'signal', description: 'Optional cancellation before source mutation.' }],
+        returns: 'Durable apply facts for Session logging.',
+      },
+      {
+        signature: 'abstract discard( request: DiscardTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskDiscardReceipt>',
+        description: 'Release one Task worktree after exact-state and loss confirmation checks.',
+        parameters: [{ name: 'request', description: 'Recorded assignment, expected revision, and loss acknowledgement.' }, { name: 'signal', description: 'Optional cancellation before worktree removal.' }],
+        returns: 'Durable cleanup facts for Session logging.',
+      },
+    ],
+  },
+  {
+    key: 'tasks',
+    summary: 'Root-task projection seam.',
+    description: 'Root-task projection seam. Implementations own Session resolution, replay, compare-and-set appends, live generations, and subscriber containment.',
+    methods: [
+      {
+        signature: 'abstract snapshot(): TaskListSnapshot',
+        description: 'Read the current task-list baseline.',
+        parameters: [],
+        returns: 'a detached whole-list baseline for the current generation.',
+      },
+      {
+        signature: 'abstract onChanged(listener: (change: TaskListChange) => void): () => void',
+        description: 'Subscribe to whole-row changes.',
+        parameters: [{ name: 'listener', description: 'callback invoked for each committed change batch.' }],
+        returns: 'a disposer that removes this exact subscription.',
+      },
+      {
+        signature: 'abstract replaceLiveGeneration(generation: number, facts: readonly LiveTaskFact[]): void',
+        description: 'Replace the complete process-local activity and attention baseline.',
+        parameters: [{ name: 'generation', description: 'monotonically increasing live-source generation.' }, { name: 'facts', description: 'complete detached fact set for that generation.' }],
+      },
+      {
+        signature: 'abstract invalidateLiveGeneration(generation: number): void',
+        description: 'Retain the last live baseline but mark it disconnected.',
+        parameters: [{ name: 'generation', description: 'exact generation whose source disconnected.' }],
+      },
+      {
+        signature: 'abstract assignWorktree(sessionId: SessionId, request: AssignTaskWorktreeRequest): Promise<TaskSnapshot>',
+        description: 'Record the immutable execution worktree created for one root Task.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'complete assignment facts and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract define(sessionId: SessionId, request: DefineTaskRequest): Promise<TaskSnapshot>',
+        description: 'Define or replace one root Task.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'normalized definition input and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract updateCriterion(sessionId: SessionId, request: UpdateTaskCriterionRequest): Promise<TaskSnapshot>',
+        description: 'Replace one criterion by stable identity.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'complete criterion and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract recordRisk(sessionId: SessionId, request: RecordTaskRiskRequest): Promise<TaskSnapshot>',
+        description: 'Record or resolve one risk by stable identity.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'complete risk and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot>',
+        description: 'Record an explicit human review decision.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'decision and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot>',
+        description: 'Record facts returned by a completed Task commit operation.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'whole commit receipt and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot>',
+        description: 'Record facts returned by a completed source application.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'whole apply receipt and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+      {
+        signature: 'abstract recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot>',
+        description: 'Record facts returned by a completed worktree discard.',
+        parameters: [{ name: 'sessionId', description: 'root Session identity.' }, { name: 'request', description: 'whole discard receipt and expected next sequence.' }],
+        returns: 'the committed task row.',
+      },
+    ],
+  },
+  {
+    key: 'taskWorktrees',
+    summary: 'Service Definition for Task-specific execution worktrees.',
+    description: 'Service Definition for Task-specific execution worktrees.',
+    methods: [
+      {
+        signature: 'abstract create( request: CreateTaskWorktreeRequest, signal?: AbortSignal, ): Promise<TaskWorktreeAssignment>',
+        description: 'Create one application-owned integration worktree without changing the source checkout.',
+        parameters: [{ name: 'request', description: 'Task identity and registered source Workspace.' }, { name: 'signal', description: 'Optional cancellation of inspection and Git execution.' }],
+        returns: 'Complete assignment facts suitable for durable Session logging.',
+      },
+      {
+        signature: 'abstract inspect( assignment: TaskWorktreeAssignment, signal?: AbortSignal, ): Promise<TaskWorktreeAvailability>',
+        description: 'Compare durable assignment facts with the current local Git registration.',
+        parameters: [{ name: 'assignment', description: 'Previously recorded worktree assignment.' }, { name: 'signal', description: 'Optional cancellation of Git inspection.' }],
+        returns: 'Whether the exact worktree remains available, is missing, or has diverged.',
+      },
+    ],
+  },
+  {
     key: 'terminals',
     summary: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
     description: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
@@ -2662,6 +2795,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AgentStatus = \'idle\' | \'running\';',
   },
   {
+    name: 'ApplyTaskReviewRequest',
+    declaration: 'export interface ApplyTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly expectedSourceHead: string;\n    readonly commit: string;\n}',
+  },
+  {
     name: 'ApprovalOutcome',
     declaration: 'export type ApprovalOutcome = \'allowed-once\' | \'rejected\' | \'cancelled\' | \'unavailable\';',
   },
@@ -2714,6 +2851,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AssembledSection {\n    name: string;\n    text: string;\n}',
   },
   {
+    name: 'AssignTaskWorktreeRequest',
+    declaration: 'export interface AssignTaskWorktreeRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedSeq: number;\n}',
+  },
+  {
     name: 'AssistantMessage',
     declaration: 'export interface AssistantMessage extends Message {\n    readonly role: \'assistant\';\n    readonly source: ModelMessageSource;\n}',
   },
@@ -2724,6 +2865,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AttachmentId',
     declaration: 'export type AttachmentId = Branded<\'AttachmentId\'>;',
+  },
+  {
+    name: 'AttentionItem',
+    declaration: 'export interface AttentionItem {\n    readonly id: AttentionItemId;\n    readonly taskId: SessionId;\n    readonly ownerSessionId: SessionId;\n    readonly kind: AttentionKind;\n    readonly severity: AttentionSeverity;\n    readonly summary: string;\n    readonly createdAt: number;\n    readonly sourceId: string;\n    readonly actionable: boolean;\n}',
+  },
+  {
+    name: 'AttentionItemId',
+    declaration: 'export type AttentionItemId = Branded<\'AttentionItemId\'>;',
+  },
+  {
+    name: 'AttentionKind',
+    declaration: 'export type AttentionKind = keyof AttentionKindMap;',
+  },
+  {
+    name: 'AttentionKindMap',
+    declaration: 'export interface AttentionKindMap {\n    approval: unknown;\n    question: unknown;\n    \'plan-review\': unknown;\n    \'run-failure\': unknown;\n    \'merge-conflict\': unknown;\n    \'validation-failure\': unknown;\n    \'review-request\': unknown;\n}',
+  },
+  {
+    name: 'AttentionSeverity',
+    declaration: 'export type AttentionSeverity = \'info\' | \'warning\' | \'error\' | \'critical\';',
   },
   {
     name: 'BackendRegistry',
@@ -2816,6 +2977,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CommandResult',
     declaration: 'export type CommandResult = {\n    readonly kind: \'success\';\n    readonly text?: string;\n    readonly sourceEventSeq?: number;\n} | {\n    readonly kind: \'error\';\n    readonly text: string;\n};',
+  },
+  {
+    name: 'CommitTaskReviewRequest',
+    declaration: 'export interface CommitTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly message: string;\n}',
   },
   {
     name: 'CompactionAgentContext',
@@ -2926,12 +3091,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n}',
   },
   {
+    name: 'CreateTaskWorktreeRequest',
+    declaration: 'export interface CreateTaskWorktreeRequest {\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly workspacePath: string;\n}',
+  },
+  {
     name: 'CredentialInfo',
     declaration: 'export interface CredentialInfo {\n    configured: boolean;\n    source?: string;\n    writable: boolean;\n}',
   },
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DefineTaskCriterion',
+    declaration: 'export interface DefineTaskCriterion {\n    readonly id?: TaskCriterionId;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'DefineTaskRequest',
+    declaration: 'export interface DefineTaskRequest {\n    readonly goal: string;\n    readonly criteria: readonly DefineTaskCriterion[];\n    readonly expectedSeq: number;\n}',
   },
   {
     name: 'DiffCallView',
@@ -2960,6 +3137,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DirectoryRegistrationHandle',
     declaration: 'export interface DirectoryRegistrationHandle {\n    (): void;\n    replace(entries: readonly LlmConfigurableProvider[]): void;\n}',
+  },
+  {
+    name: 'DiscardTaskReviewRequest',
+    declaration: 'export interface DiscardTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly confirmedUncommittedLoss: boolean;\n}',
   },
   {
     name: 'Domain',
@@ -3112,6 +3293,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'GenericResultView',
     declaration: 'export interface GenericResultView {\n    card: \'generic\';\n    title?: string;\n    content?: ContentBlock[];\n}',
+  },
+  {
+    name: 'GetTaskFileDiffRequest',
+    declaration: 'export interface GetTaskFileDiffRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly path: string;\n    readonly expectedRevision: TaskReviewRevision;\n}',
   },
   {
     name: 'GoalActivation',
@@ -3272,6 +3457,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KvUnitDescriptor',
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n}',
+  },
+  {
+    name: 'LiveTaskActivity',
+    declaration: 'export interface LiveTaskActivity {\n    readonly kind: \'activity\';\n    readonly taskId: SessionId;\n    readonly ownerSessionId: SessionId;\n    readonly sourceId: string;\n    readonly state: \'running\' | \'failed\';\n    readonly createdAt: number;\n    readonly summary?: string;\n}',
+  },
+  {
+    name: 'LiveTaskAttention',
+    declaration: 'export interface LiveTaskAttention {\n    readonly kind: \'attention\';\n    readonly item: AttentionItem;\n}',
+  },
+  {
+    name: 'LiveTaskFact',
+    declaration: 'export type LiveTaskFact = LiveTaskFactMap[keyof LiveTaskFactMap];',
+  },
+  {
+    name: 'LiveTaskFactMap',
+    declaration: 'export interface LiveTaskFactMap {\n    activity: LiveTaskActivity;\n    attention: LiveTaskAttention;\n}',
   },
   {
     name: 'LlmAdapter',
@@ -3586,6 +3787,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
   },
   {
+    name: 'RecordTaskApplyRequest',
+    declaration: 'export interface RecordTaskApplyRequest {\n    readonly receipt: TaskApplyReceipt;\n    readonly expectedSeq: number;\n}',
+  },
+  {
+    name: 'RecordTaskCommitRequest',
+    declaration: 'export interface RecordTaskCommitRequest {\n    readonly receipt: TaskCommitReceipt;\n    readonly expectedSeq: number;\n}',
+  },
+  {
+    name: 'RecordTaskDiscardRequest',
+    declaration: 'export interface RecordTaskDiscardRequest {\n    readonly receipt: TaskDiscardReceipt;\n    readonly expectedSeq: number;\n}',
+  },
+  {
+    name: 'RecordTaskRiskRequest',
+    declaration: 'export interface RecordTaskRiskRequest {\n    readonly risk: TaskRisk;\n    readonly expectedSeq: number;\n}',
+  },
+  {
     name: 'RedactedSecret',
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
   },
@@ -3642,6 +3859,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
+    name: 'ReviewTaskRequest',
+    declaration: 'export interface ReviewTaskRequest {\n    readonly decision: TaskReviewDecision;\n    readonly expectedSeq: number;\n}',
+  },
+  {
     name: 'RpcError',
     declaration: 'export type RpcError = {\n    [C in RpcErrorCode]: {\n        code: C;\n        message: string;\n        details: RpcErrorDetailsMap[C];\n    };\n}[RpcErrorCode];',
   },
@@ -3651,7 +3872,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RpcErrorDetailsMap',
-    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-preset-conflict\': {\n        sessionId: SessionId;\n        requestedPreset: string;\n        existingPreset?: string;\n    };\n    \'agent-preset-not-found\': {\n        agentPreset: string;\n      /* …truncated — full shape in source */',
+    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-isolation-unavailable\': {\n        workspaceId?: string;\n        sessionId?: SessionId;\n        worktreeCode?: TaskWorktreeErrorCode;\n        preservedPath?: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-pr /* …truncated — full shape in source */',
   },
   {
     name: 'RpcId',
@@ -4234,6 +4455,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubprocessTerminalSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    env?: Record<string, string> | undefined;\n    rows: number;\n    cols: number;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n}',
   },
   {
+    name: 'SummarizeTaskReviewRequest',
+    declaration: 'export interface SummarizeTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n}',
+  },
+  {
     name: 'SurfaceEvent',
     declaration: 'export type SurfaceEvent = SessionEvent<SurfaceEventType> & {\n    surfaceOp: SurfaceOp;\n};',
   },
@@ -4256,6 +4481,110 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TableValueOf',
     declaration: 'export type TableValueOf<S extends DomainSpec, N extends keyof S[\'tables\']> = S[\'tables\'][N] extends DomainTableSpec<string, infer V> ? V : never;',
+  },
+  {
+    name: 'TaskApplyReceipt',
+    declaration: 'export interface TaskApplyReceipt {\n    readonly kind: \'apply\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly commit: string;\n    readonly sourceHeadBefore: string;\n    readonly sourceHeadAfter: string;\n    readonly appliedAt: number;\n}',
+  },
+  {
+    name: 'TaskCommitReceipt',
+    declaration: 'export interface TaskCommitReceipt {\n    readonly kind: \'commit\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly committedRevision: TaskReviewRevision;\n    readonly branch: string;\n    readonly commit: string;\n    readonly committedAt: number;\n}',
+  },
+  {
+    name: 'TaskCriterion',
+    declaration: 'export interface TaskCriterion {\n    readonly id: TaskCriterionId;\n    readonly text: string;\n    readonly status: TaskCriterionStatus;\n    readonly evidence: readonly TaskEvidenceRef[];\n}',
+  },
+  {
+    name: 'TaskCriterionId',
+    declaration: 'export type TaskCriterionId = Branded<\'TaskCriterionId\'>;',
+  },
+  {
+    name: 'TaskCriterionStatus',
+    declaration: 'export type TaskCriterionStatus = \'pending\' | \'satisfied\' | \'failed\' | \'waived\';',
+  },
+  {
+    name: 'TaskDefinition',
+    declaration: 'export interface TaskDefinition {\n    readonly goal: string;\n    readonly criteria: readonly TaskCriterion[];\n}',
+  },
+  {
+    name: 'TaskDiscardReceipt',
+    declaration: 'export interface TaskDiscardReceipt {\n    readonly kind: \'discard\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly branch: string;\n    readonly branchPreserved: boolean;\n    readonly worktreeRemoved: boolean;\n    readonly uncommittedChangesDiscarded: boolean;\n    readonly recoverableCommit?: string;\n    readonly discardedAt: number;\n}',
+  },
+  {
+    name: 'TaskEvidenceRef',
+    declaration: 'export interface TaskEvidenceRef {\n    readonly sessionId: SessionId;\n    readonly seq: number;\n}',
+  },
+  {
+    name: 'TaskFileDiff',
+    declaration: 'export interface TaskFileDiff {\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly revision: TaskReviewRevision;\n    readonly path: string;\n    readonly previousPath?: string;\n    readonly binary: boolean;\n    readonly truncated: boolean;\n    readonly patch: string;\n}',
+  },
+  {
+    name: 'TaskFreshness',
+    declaration: 'export type TaskFreshness = \'live\' | \'disconnected\' | \'unavailable\';',
+  },
+  {
+    name: 'TaskListChange',
+    declaration: 'export interface TaskListChange {\n    readonly generation: number;\n    readonly upserts: readonly TaskSnapshot[];\n    readonly removed: readonly SessionId[];\n}',
+  },
+  {
+    name: 'TaskListSnapshot',
+    declaration: 'export interface TaskListSnapshot {\n    readonly generation: number;\n    readonly tasks: readonly TaskSnapshot[];\n}',
+  },
+  {
+    name: 'TaskReviewDecision',
+    declaration: 'export type TaskReviewDecision = \'changes-requested\' | \'ready\';',
+  },
+  {
+    name: 'TaskReviewFile',
+    declaration: 'export interface TaskReviewFile {\n    readonly path: string;\n    readonly previousPath?: string;\n    readonly status: TaskReviewFileStatus;\n    readonly binary: boolean;\n    readonly additions: number | null;\n    readonly deletions: number | null;\n}',
+  },
+  {
+    name: 'TaskReviewFileStatus',
+    declaration: 'export type TaskReviewFileStatus = \'added\' | \'modified\' | \'deleted\' | \'renamed\' | \'copied\' | \'type-changed\' | \'untracked\' | \'conflicted\';',
+  },
+  {
+    name: 'TaskReviewOperationId',
+    declaration: 'export type TaskReviewOperationId = Branded<\'TaskReviewOperationId\'>;',
+  },
+  {
+    name: 'TaskReviewRevision',
+    declaration: 'export type TaskReviewRevision = Branded<\'TaskReviewRevision\'>;',
+  },
+  {
+    name: 'TaskReviewSummary',
+    declaration: 'export interface TaskReviewSummary {\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly revision: TaskReviewRevision;\n    readonly baseCommit: string;\n    readonly headCommit: string;\n    readonly sourceHead: string;\n    readonly sourceDirty: boolean;\n    readonly branch: string;\n    readonly dirty: boolean;\n    readonly truncated: boolean;\n    readonly files: readonly TaskReviewFile[];\n    readonly additions: number;\n    readonly deletions: number;\n}',
+  },
+  {
+    name: 'TaskRisk',
+    declaration: 'export interface TaskRisk {\n    readonly id: TaskRiskId;\n    readonly severity: TaskRiskSeverity;\n    readonly summary: string;\n    readonly resolution?: string;\n}',
+  },
+  {
+    name: 'TaskRiskId',
+    declaration: 'export type TaskRiskId = Branded<\'TaskRiskId\'>;',
+  },
+  {
+    name: 'TaskRiskSeverity',
+    declaration: 'export type TaskRiskSeverity = \'low\' | \'medium\' | \'high\' | \'critical\';',
+  },
+  {
+    name: 'TaskSnapshot',
+    declaration: 'export interface TaskSnapshot {\n    readonly taskId: SessionId;\n    readonly workspaceId?: WorkspaceId;\n    readonly executionWorkspace?: TaskWorktreeAssignment;\n    readonly definition?: TaskDefinition;\n    readonly descendantSessionIds: readonly SessionId[];\n    readonly status: TaskStatus;\n    readonly freshness: TaskFreshness;\n    readonly attention: readonly AttentionItem[];\n    readonly risks: readonly TaskRisk[];\n    readonly reviewDecision?: TaskReviewDecision;\n    readonly commitReceipt?: TaskCommitReceipt;\n    readonly applyReceipt?: TaskApplyReceipt;\n    readonly discardReceipt?: TaskDiscardReceipt;\n    readonly updatedAt: number;\n    readonly asOfSeq: number;\n}',
+  },
+  {
+    name: 'TaskStatus',
+    declaration: 'export type TaskStatus = \'needs-attention\' | \'failed\' | \'running\' | \'reviewing\' | \'ready\' | \'settled\';',
+  },
+  {
+    name: 'TaskWorktreeAssignment',
+    declaration: 'export interface TaskWorktreeAssignment {\n    readonly kind: \'git-worktree\';\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly sourcePath: string;\n    readonly path: string;\n    readonly branch: string;\n    readonly baseCommit: string;\n    readonly sourceHead: string;\n    readonly sourceDirty: boolean;\n    readonly sourceStatusDigest: string;\n    readonly createdAt: number;\n}',
+  },
+  {
+    name: 'TaskWorktreeAvailability',
+    declaration: 'export type TaskWorktreeAvailability = \'available\' | \'missing\' | \'diverged\';',
+  },
+  {
+    name: 'TaskWorktreeErrorCode',
+    declaration: 'export type TaskWorktreeErrorCode = \'WORKTREE_NOT_GIT\' | \'WORKTREE_NESTED_REPOSITORY\' | \'WORKTREE_UNBORN_HEAD\' | \'WORKTREE_INSUFFICIENT_SPACE\' | \'WORKTREE_TARGET_OCCUPIED\' | \'WORKTREE_BRANCH_OCCUPIED\' | \'WORKTREE_GIT_FAILED\' | \'WORKTREE_UNAVAILABLE\';',
   },
   {
     name: 'TerminalBackend',
@@ -4536,6 +4865,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TypertTypeModel',
     declaration: 'export interface TypertTypeModel {\n    readonly name: string;\n    readonly declaration: string;\n}',
+  },
+  {
+    name: 'UpdateTaskCriterionRequest',
+    declaration: 'export interface UpdateTaskCriterionRequest {\n    readonly criterion: TaskCriterion;\n    readonly expectedSeq: number;\n}',
   },
   {
     name: 'UserMessage',

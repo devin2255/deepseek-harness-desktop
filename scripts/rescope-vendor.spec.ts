@@ -1,11 +1,10 @@
 /**
- * Acceptance-path coverage for the rescope codemod's exact-edit classifier: a
- * duplicated insertion — what a non-idempotent apply produces — must be
- * rejected rather than applied again.
+ * Acceptance-path coverage for idempotent exact edits and product identifiers
+ * that resemble vendored package specifiers.
  */
 
 import { describe, expect, it } from 'vitest'
-import { exactEditState } from './rescope-vendor.ts'
+import { exactEditState, patterns, rewriteLine } from './rescope-vendor.ts'
 
 const ANCHOR = '\n## Sync procedure'
 const INSERTED = `\n15. **rescope**: one log entry.\n${ANCHOR}`
@@ -37,5 +36,21 @@ describe('exactEditState', () => {
     // A moved or partially applied site: neither state is complete.
     expect(exactEditState('a = 1\nb = 2\n', 'a = 1', 'b = 2', 1)).toBe('invalid')
     expect(exactEditState('x\n', 'a = 1', 'b = 2', 1)).toBe('invalid')
+  })
+})
+
+describe('vendored package token rewrite', () => {
+  const mappings = patterns(false)
+
+  it('rewrites real Cordis exports without changing unrelated event identifiers', () => {
+    expect(rewriteLine("from 'cordis/src/index'", 'sample.ts', mappings)).toBe("from '@deepseek-ai/cordis/src/index'")
+    expect(rewriteLine("from 'cordis/package.json'", 'sample.ts', mappings)).toBe("from '@deepseek-ai/cordis/package.json'")
+    expect(rewriteLine("ctx.emit('cordis/request-run')", 'sample.ts', mappings)).toBe("ctx.emit('cordis/request-run')")
+  })
+
+  it('preserves the Cordis UI namespace while still rewriting package imports', () => {
+    const file = 'packages/extensions/ui-cordis/src/client/index.ts'
+    expect(rewriteLine("name: 'cordis'", file, mappings)).toBe("name: 'cordis'")
+    expect(rewriteLine("from 'cosmokit'", file, mappings)).toBe("from '@deepseek-ai/cosmokit'")
   })
 })

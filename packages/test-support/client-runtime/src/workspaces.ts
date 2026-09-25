@@ -70,6 +70,12 @@ export class TestWorkspaces implements IWorkspaces {
     this.stubs.get('startSession')?.(workspaceId)
   }
 
+  /** Record a list refresh; fixture callers publish the resulting snapshot explicitly. */
+  refresh(): Promise<void> {
+    this.calls.push({ method: 'refresh', args: [] })
+    return Promise.resolve()
+  }
+
   /**
    * Create a Workspace (recorded). The default echoes a view derived from
    * the input; stub for failure or list-coupled flows.

@@ -2,6 +2,7 @@
 
 const REDACTION = '[redacted]'
 const SUPPRESSED_STDERR = '[stderr suppressed]'
+const SUPPRESSED_TEXT = '[sensitive text suppressed]'
 /** Limits compiled sensitive diagnostics to prevent inherited values from allocating unbounded matching state. */
 const MAX_REDACTION_CODE_POINTS = 8 * 1024
 /** Maximum retained stderr diagnostic suffix; decoded invalid UTF-8 uses deterministic replacement characters. */
@@ -111,6 +112,54 @@ class LiteralRedactor {
   incompleteLength(): number {
     return nodeAt(this.#nodes, this.#state).depth
   }
+}
+
+/**
+ * Redact sensitive literals from a complete message without retaining a diagnostic tail.
+ * @param text - Complete message to sanitize before persistence.
+ * @param patterns - Non-empty sensitive values removed from the message.
+ * @returns The full redacted message, or a suppression marker when patterns exceed safety limits.
+ */
+export function redactSensitiveText(text: string, patterns: readonly string[]): string {
+  const redactor = LiteralRedactor.compile(patterns)
+  if (redactor === undefined) return SUPPRESSED_TEXT
+  const codePoints = Array.from(text)
+  const deltas = new Int32Array(codePoints.length + 1)
+  for (let index = 0; index < codePoints.length; index += 1) {
+    const codePoint = codePoints[index]
+    if (codePoint === undefined) continue
+    const length = redactor.advance(codePoint)
+    if (length === 0) continue
+    addDelta(deltas, index - length + 1, 1)
+    addDelta(deltas, index + 1, -1)
+  }
+  const incompleteLength = redactor.incompleteLength()
+  if (incompleteLength > 0) {
+    addDelta(deltas, codePoints.length - incompleteLength, 1)
+    addDelta(deltas, codePoints.length, -1)
+  }
+  let activeRedactions = 0
+  let redactionOpen = false
+  const output: string[] = []
+  for (let index = 0; index < codePoints.length; index += 1) {
+    activeRedactions += deltas[index] ?? 0
+    if (activeRedactions > 0) {
+      if (!redactionOpen) output.push(REDACTION)
+      redactionOpen = true
+      continue
+    }
+    const codePoint = codePoints[index]
+    if (codePoint !== undefined) output.push(codePoint)
+    redactionOpen = false
+  }
+  return output.join('')
+}
+
+/** Update a known redaction range endpoint while preserving strict indexed-access checks. */
+function addDelta(deltas: Int32Array, index: number, change: number): void {
+  const current = deltas[index]
+  if (current === undefined) throw new Error('Invalid sensitive-text redaction range')
+  deltas[index] = current + change
 }
 
 /**

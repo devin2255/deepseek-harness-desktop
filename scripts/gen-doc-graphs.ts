@@ -97,6 +97,24 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'taskReview',
+    pkg: 'task-review',
+    title: 'Task worktree review and delivery',
+    mode: 'seam',
+    implementations: ['task-review-local'],
+    consumers: ['apiproxy', 'sdk-jsonrpc-server'],
+    note: 'Providers inspect and mutate only the recorded application-owned worktree assignment; Host consumers authorize lifecycle transitions and persist completed delivery receipts.',
+  },
+  {
+    key: 'taskWorktrees',
+    pkg: 'task-worktree',
+    title: 'Application-owned Task worktrees',
+    mode: 'seam',
+    implementations: ['task-worktree-local'],
+    consumers: ['apiproxy'],
+    note: 'The Host requests isolated Git checkouts; the Provider returns immutable assignment facts for the Task log and inspects live registration without repair.',
+  },
+  {
     key: 'attachments',
     pkg: 'attachment',
     title: 'Durable binary attachment storage',
@@ -353,6 +371,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Same-session goal domain',
     mode: 'core',
     note: 'Folds revisioned objective state from the session log and keeps live continuation activation process-local.',
+  },
+  {
+    key: 'tasks',
+    pkg: 'task',
+    title: 'Root task projection seam',
+    mode: 'seam',
+    implementations: ['task-session'],
+    consumers: ['apiproxy'],
+    note: 'Projects one root Session and its uninterrupted subagent descendants into durable acceptance state plus generation-scoped activity and attention.',
   },
   {
     key: 'e2b',

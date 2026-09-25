@@ -54,6 +54,11 @@ import {
   goalClearValueSchema,
 } from '../api/goals.schema.ts'
 import {
+  taskApplyValueSchema, taskCommitValueSchema, taskDefineValueSchema, taskDiscardValueSchema,
+  taskListValueSchema, taskRecordRiskValueSchema, taskReviewDiffValueSchema,
+  taskReviewSummaryValueSchema, taskReviewValueSchema, taskUpdateCriterionValueSchema,
+} from '../api/tasks.schema.ts'
+import {
   settingsDescribeValueSchema, settingsMutateValueSchema, settingsOpenDocumentValueSchema,
   settingsReplaceValueSchema, settingsUpdateValueSchema,
 } from '../api/settings.schema.ts'
@@ -144,6 +149,18 @@ export interface IApiClient {
     complete(payload: RequestPayload<'goal.complete'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'goal.complete'>>>
     clear(payload: RequestPayload<'goal.clear'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'goal.clear'>>>
   }
+  tasks: {
+    list(payload: RequestPayload<'task.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.list'>>>
+    define(payload: RequestPayload<'task.define'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.define'>>>
+    updateCriterion(payload: RequestPayload<'task.updateCriterion'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.updateCriterion'>>>
+    recordRisk(payload: RequestPayload<'task.recordRisk'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.recordRisk'>>>
+    review(payload: RequestPayload<'task.review'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.review'>>>
+    reviewSummary(payload: RequestPayload<'task.reviewSummary'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewSummary'>>>
+    reviewDiff(payload: RequestPayload<'task.reviewDiff'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewDiff'>>>
+    commit(payload: RequestPayload<'task.commit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.commit'>>>
+    apply(payload: RequestPayload<'task.apply'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.apply'>>>
+    discard(payload: RequestPayload<'task.discard'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.discard'>>>
+  }
   settings: {
     describe(payload: RequestPayload<'settings.describe'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'settings.describe'>>>
     openDocument(payload: RequestPayload<'settings.openDocument'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'settings.openDocument'>>>
@@ -211,6 +228,16 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'goal.resume': goalResumeValueSchema,
   'goal.complete': goalCompleteValueSchema,
   'goal.clear': goalClearValueSchema,
+  'task.list': taskListValueSchema,
+  'task.define': taskDefineValueSchema,
+  'task.updateCriterion': taskUpdateCriterionValueSchema,
+  'task.recordRisk': taskRecordRiskValueSchema,
+  'task.review': taskReviewValueSchema,
+  'task.reviewSummary': taskReviewSummaryValueSchema,
+  'task.reviewDiff': taskReviewDiffValueSchema,
+  'task.commit': taskCommitValueSchema,
+  'task.apply': taskApplyValueSchema,
+  'task.discard': taskDiscardValueSchema,
   'settings.describe': settingsDescribeValueSchema,
   'settings.openDocument': settingsOpenDocumentValueSchema,
   'settings.update': settingsUpdateValueSchema,
@@ -478,6 +505,19 @@ export abstract class AbstractApiClient implements IApiClient {
     resume: (payload, signal) => this.callUnary('goal.resume', payload, signal),
     complete: (payload, signal) => this.callUnary('goal.complete', payload, signal),
     clear: (payload, signal) => this.callUnary('goal.clear', payload, signal),
+  }
+
+  readonly tasks: IApiClient['tasks'] = {
+    list: (payload, signal) => this.callUnary('task.list', payload, signal),
+    define: (payload, signal) => this.callUnary('task.define', payload, signal),
+    updateCriterion: (payload, signal) => this.callUnary('task.updateCriterion', payload, signal),
+    recordRisk: (payload, signal) => this.callUnary('task.recordRisk', payload, signal),
+    review: (payload, signal) => this.callUnary('task.review', payload, signal),
+    reviewSummary: (payload, signal) => this.callUnary('task.reviewSummary', payload, signal),
+    reviewDiff: (payload, signal) => this.callUnary('task.reviewDiff', payload, signal),
+    commit: (payload, signal) => this.callUnary('task.commit', payload, signal),
+    apply: (payload, signal) => this.callUnary('task.apply', payload, signal),
+    discard: (payload, signal) => this.callUnary('task.discard', payload, signal),
   }
 
   readonly settings: IApiClient['settings'] = {

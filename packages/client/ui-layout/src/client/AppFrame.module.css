@@ -30,13 +30,22 @@
 }
 
 .centerCol {
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
+.centerCol[hidden],
+.detailsCol[hidden] {
+  display: none;
+}
+
 .detailsCol {
+  grid-column: 3;
+  grid-row: 1;
   min-width: 0;
   overflow: hidden;
   border-left: 1px solid var(--dsw-alias-border-l2);

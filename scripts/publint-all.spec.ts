@@ -13,7 +13,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-function fixture(exportPath = './lib/index.js'): string {
+function fixture(exportPath = './lib/index.js', files = ['lib']): string {
   const root = mkdtempSync(join(tmpdir(), 'dsh-publint-all-'))
   roots.push(root)
   const packageDir = join(root, 'packages/core/probe')
@@ -25,7 +25,7 @@ function fixture(exportPath = './lib/index.js'): string {
     license: 'MIT',
     engines: { node: '>=22.19' },
     sideEffects: false,
-    files: ['lib'],
+    files,
     exports: { '.': { default: exportPath } },
   }, null, 2)}\n`)
   writeFileSync(join(packageDir, 'README.md'), '# Probe\n')
@@ -63,5 +63,17 @@ describe('publint package runner', () => {
     const result = run(fixture('./lib/missing.js'))
     expect(result.status).toBe(1)
     expect(result.stdout).toContain('missing.js')
+  })
+
+  it('rejects a published module whose relative dependency is omitted', () => {
+    const root = fixture('./lib/index.js', ['lib/index.js'])
+    const packageDir = join(root, 'packages/core/probe')
+    writeFileSync(join(packageDir, 'lib/index.js'), "export { probe } from './chunk.js'\n")
+    writeFileSync(join(packageDir, 'lib/chunk.js'), 'export const probe = true\n')
+
+    const result = run(root)
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('lib/index.js -> ./chunk.js')
   })
 })

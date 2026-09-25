@@ -5,8 +5,13 @@
   ],
   "ignoreBinaries": [
     "bwrap",
+    "cmd.exe",
+    "ditto",
+    "hdiutil",
     "icacls",
     "musl-gcc",
+    "powershell.exe",
+    "pwsh",
     "python3",
     "sandbox-exec",
     "tar",
@@ -72,6 +77,46 @@
       ],
       "ignoreDependencies": [
         "@deepseek-ai/.+"
+      ]
+    },
+    "apps/desktop": {
+      "entry": [
+        "scripts/*.d.mts",
+        "tests/**/*.e2e.ts"
+      ],
+      "project": [
+        "scripts/*.{mjs,mts}",
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "@deepseek-ai/cordis-plugin-group",
+        "@deepseek-ai/dsh",
+        "@deepseek-ai/dsh-anonymous-user-id",
+        "@deepseek-ai/dsh-atomic-write",
+        "@deepseek-ai/dsh-bash-local",
+        "@deepseek-ai/dsh-code-runtime",
+        "@deepseek-ai/dsh-compaction",
+        "@deepseek-ai/dsh-fs",
+        "@deepseek-ai/dsh-output-retention",
+        "@deepseek-ai/dsh-sandbox",
+        "@deepseek-ai/dsh-session-telemetry",
+        "@deepseek-ai/dsh-session-title-llm",
+        "@deepseek-ai/dsh-shell",
+        "@deepseek-ai/dsh-spill",
+        "@deepseek-ai/dsh-subagent-in-process-driver",
+        "@deepseek-ai/dsh-subprocess",
+        "@deepseek-ai/dsh-timeout",
+        "@deepseek-ai/dsh-workflow",
+        "electron-builder",
+        "sharp"
+      ]
+    },
+    "packages/bundle/desktop-app": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-client-ui-task-overview",
+        "@deepseek-ai/dsh-task",
+        "@deepseek-ai/dsh-task-session"
       ]
     },
     "packages/util/home": {

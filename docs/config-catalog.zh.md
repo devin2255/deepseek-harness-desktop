@@ -2248,6 +2248,60 @@ export interface Config {
 
 来源：[`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
 
+<a id="deepseek-aidsh-task-review-local"></a>
+
+## `@deepseek-ai/dsh-task-review-local`
+
+依赖：`subprocess`
+
+```ts config-catalog
+/** User configuration accepted by the local Task review Provider. */
+export interface Config {
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+  /** Maximum UTF-8 bytes returned for one file patch. */
+  maxDiffBytes?: number
+  /** Maximum complete binary patch bytes accepted by Apply. */
+  maxPatchBytes?: number
+  /** Maximum file rows returned in one summary. */
+  maxFiles?: number
+}
+```
+
+来源：[`packages/task/task-review-local/src/index.ts:48`](../packages/task/task-review-local/src/index.ts)
+
+<a id="deepseek-aidsh-task-worktree-local"></a>
+
+## `@deepseek-ai/dsh-task-worktree-local`
+
+需要：`subprocess`
+
+```ts config-catalog
+/** User configuration accepted by the local Task worktree Provider. */
+export interface Config {
+  /** Explicit Harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
+  dshHome?: string
+  /** Minimum free bytes required on the Harness-home volume. */
+  minFreeBytes?: number
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+}
+```
+
+来源：[`packages/task/task-worktree-local/src/index.ts:31`](../packages/task/task-worktree-local/src/index.ts)
+
 <a id="deepseek-aidsh-terminal-bash"></a>
 
 ## `@deepseek-ai/dsh-terminal-bash`
@@ -3058,6 +3112,8 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-sidebar`（[`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-skill`（[`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-subagent`（[`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-task-overview`（[`packages/client/ui-task-overview/src/index.ts`](../packages/client/ui-task-overview/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-task-review`（[`packages/client/ui-task-review/src/index.ts`](../packages/client/ui-task-review/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-theme`（[`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-tool`（[`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-trajectory`（[`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts)）
@@ -3088,6 +3144,7 @@ export interface Config {
 - `@deepseek-ai/dsh-storage`（[`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts)）
 - `@deepseek-ai/dsh-subagent`（[`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts)）
 - `@deepseek-ai/dsh-subprocess-local`（[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
+- `@deepseek-ai/dsh-task-session` — 需要 `sessions` · `sessionPersistence`（[`packages/task/task-session/src/index.ts`](../packages/task/task-session/src/index.ts)）
 - `@deepseek-ai/dsh-terminal`（[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
 - `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
@@ -3114,6 +3171,8 @@ export interface Config {
 - `@deepseek-ai/dsh-shell` — 抽象 `ShellExecutor`（[`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts)）
 - `@deepseek-ai/dsh-spill` — 抽象 `SpillStore`（[`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts)）
 - `@deepseek-ai/dsh-subprocess` — 抽象 `SubprocessRuntime`（[`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts)）
+- `@deepseek-ai/dsh-task-review` — 抽象 `TaskReviewService`（[`packages/task/task-review/src/index.ts`](../packages/task/task-review/src/index.ts)）
+- `@deepseek-ai/dsh-task-worktree` — 抽象 `TaskWorktreeService`（[`packages/task/task-worktree/src/index.ts`](../packages/task/task-worktree/src/index.ts)）
 - `@deepseek-ai/dsh-workflow` — 抽象 `WorkflowEngine`（[`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts)）
 ## 库包（无插件入口）
 
@@ -3149,6 +3208,7 @@ export interface Config {
 - `@deepseek-ai/dsh-session-telemetry`（[`packages/session/session-telemetry/src/index.ts`](../packages/session/session-telemetry/src/index.ts)）
 - `@deepseek-ai/dsh-session-title-llm`（[`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts)）
 - `@deepseek-ai/dsh-subagent-in-process-driver`（[`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts)）
+- `@deepseek-ai/dsh-task`（[`packages/task/task/src/index.ts`](../packages/task/task/src/index.ts)）
 - `@deepseek-ai/dsh-timeout`（[`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts)）
 - `@deepseek-ai/dsh-typert-generator`（[`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts)）
 - `@deepseek-ai/dsh-typert-protocol`（[`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts)）

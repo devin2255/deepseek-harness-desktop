@@ -1,8 +1,10 @@
 /** Creates the sole sandboxed desktop window after the Harness endpoint is ready. */
 
 import { BrowserWindow } from 'electron'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { fileURLToPath } from 'node:url'
 import { configureAuthorizedSession, DESKTOP_SESSION_PARTITION, type AuthorizedSession } from './authorized-session.ts'
+import { DESKTOP_OPEN_SESSION_CHANNEL, parseDesktopSessionId } from './desktop-ipc.ts'
 
 /** BrowserWindow options owned by the desktop shell. */
 export interface DesktopWindowOptions {
@@ -41,12 +43,22 @@ export interface NavigationDetails {
 
 /** Native-window lifecycle controls returned after desktop startup succeeds. */
 export interface DesktopWindow {
+  /** Destroy the native window and revoke its session authorization. */
+  destroy(): void
+  /** Whether Electron has already destroyed this native window. */
+  isDestroyed(): boolean
   /** Whether the native window is minimized. */
   isMinimized(): boolean
   /** Restore a minimized native window. */
   restore(): void
   /** Focus the native window. */
   focus(): void
+  /** Show a hidden native window. */
+  show(): void
+  /** Hide the native window while background Tasks continue. */
+  hide(): void
+  /** Deliver one validated Session navigation target to the authorized renderer. */
+  openSession(sessionId: SessionId): void
   /** Subscribe to native close and return an idempotent disposer for this subscription. */
   onClosed(listener: () => void): () => void
 }
@@ -59,6 +71,10 @@ interface DesktopWindowStartupHandle {
   restore(): void
   /** Focus the native window. */
   focus(): void
+  /** Show a hidden native window. */
+  show(): void
+  /** Hide the native window. */
+  hide(): void
   /** Renderer controls associated with this browser window. */
   readonly webContents: {
     /** Electron's opaque renderer identity. */
@@ -67,6 +83,8 @@ interface DesktopWindowStartupHandle {
     on(event: 'will-navigate' | 'will-redirect', listener: (details: NavigationDetails) => void): void
     /** Deny every renderer request to open a second browser window. */
     setWindowOpenHandler(handler: (details: unknown) => { readonly action: 'deny' }): void
+    /** Send one named event into the isolated preload bridge. */
+    send(channel: string, sessionId: SessionId): void
   }
   /** Load the already authorized loopback page. */
   loadURL(url: string): Promise<void>
@@ -143,10 +161,22 @@ export async function createDesktopWindow(
     await desktopWindow.loadURL(endpoint.href)
     const loadedWindow = desktopWindow
     return {
+      destroy: () => {
+        if (!loadedWindow.isDestroyed()) loadedWindow.destroy()
+      },
+      isDestroyed: () => loadedWindow.isDestroyed(),
       focus: () => {
         loadedWindow.focus()
       },
       isMinimized: () => loadedWindow.isMinimized(),
+      hide: () => {
+        loadedWindow.hide()
+      },
+      openSession: (sessionId) => {
+        const target = parseDesktopSessionId(sessionId)
+        if (target === undefined) throw new Error('Desktop Session navigation target must be non-blank and bounded')
+        loadedWindow.webContents.send(DESKTOP_OPEN_SESSION_CHANNEL, target)
+      },
       onClosed(listener) {
         let listening = true
         const notifyClosed = (): void => {
@@ -169,6 +199,9 @@ export async function createDesktopWindow(
       },
       restore: () => {
         loadedWindow.restore()
+      },
+      show: () => {
+        loadedWindow.show()
       },
     }
   } catch (error: unknown) {

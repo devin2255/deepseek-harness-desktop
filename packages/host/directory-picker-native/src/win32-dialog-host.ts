@@ -13,15 +13,15 @@ import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
 
 /**
  * Spawn the dialog child process. Built consumers launch the bundled CJS
- * entry next to this module under plain node; unbuilt (source) consumers
- * bootstrap tsx first, mirroring the dsh CLI's source launch. The dialog is
- * the child's first window, so Windows activates it without a foreground
- * call.
+ * entry next to this module with Electron forced into Node mode; unbuilt
+ * consumers bootstrap tsx first, mirroring the dsh CLI's source launch. The
+ * dialog is the child's first window, so Windows activates it without a
+ * foreground call.
  * @param data - the child payload (dialog title).
  * @returns the spawned child process.
  */
 export function spawnDialogWorker(data: Win32DialogWorkerData): ReturnType<typeof spawn> {
-  const env = { ...process.env, DSH_DIALOG_TITLE: data.title }
+  const env = { ...process.env, DSH_DIALOG_TITLE: data.title, ELECTRON_RUN_AS_NODE: '1' }
   const stdio: StdioOptions = ['ignore', 'inherit', 'inherit', 'ipc']
   /* v8 ignore next 3 -- the built-output arm: tests always run unbuilt (src/) */
   if (!import.meta.url.endsWith('.ts')) {

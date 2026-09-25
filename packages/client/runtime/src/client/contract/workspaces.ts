@@ -2,7 +2,7 @@
  * The outward workspaces-service face — what `ctx.workspaces` exposes to
  * feature packages and the renderer host, and therefore exactly what the
  * test runtime's workspaces double must implement. Wire-pump entry points
- * (handleHostEnvelope/handleConnected/refresh/startInitialSelection) stay on
+ * (handleHostEnvelope/handleConnected/startInitialSelection) stay on
  * the concrete class. Widening this interface is the explicit act of
  * widening what features may do to the workspaces domain.
  */
@@ -15,11 +15,18 @@ export interface IWorkspaces {
   /** The useWorkspaces standard feed (read face — writes stay inside the domain). */
   readonly list: ObservableSnapshot<WorkspaceListState>
   /**
+   * Refresh registry membership and archive metadata through the workspace request owner.
+   * Failures remain on the list snapshot and preserve existing rows.
+   * @returns completion of the active registry request.
+   */
+  refresh(): Promise<void>
+  /**
    * Connect a Workspace to its reusable or freshly created blank session.
    * @param workspaceId - target workspace.
+   * @param isolation - explicit execution mode; worktree mode never reuses a direct blank Session.
    * @returns the connected session id.
    */
-  connectWorkspace(workspaceId: WorkspaceId): Promise<SessionId>
+  connectWorkspace(workspaceId: WorkspaceId, isolation: 'direct' | 'worktree'): Promise<SessionId>
   /**
    * The New Session flow: connect the explicit, current-Session, or recent
    * Workspace and open the resulting session; failures surface on the session

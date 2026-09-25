@@ -1,0 +1,117 @@
+--- initial ---
+Tasks
+Refresh
+Workspace for new task
+Current workspace or choose a directory
+New Task
+
+New tasks run in isolated Git worktrees by default and leave the project directory unchanged.
+
+Needs You
+Interrupted desktop task
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/0
+0 unresolved risk(s)
+Live
+Interrupted desktop task — Run failure: This Task was interrupted before the turn completed. Review the last tool result before continuing.
+Verify upgrade recovery
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/1
+1 unresolved risk(s)
+Live
+Upgrade recovery — Run failure: Upgrade recovery validation failed
+Ship the desktop installer
+Unassigned
+Needs attention
+0 known running subagent(s)
+Criteria 1/1
+0 unresolved risk(s)
+Live
+Installer reviewer — Approval: Review the descendant installer output
+Running
+
+No tasks are running.
+
+Other
+
+No other tasks.
+--- ready ---
+Tasks
+Refresh
+Workspace for new task
+Current workspace or choose a directory
+New Task
+
+New tasks run in isolated Git worktrees by default and leave the project directory unchanged.
+
+Needs You
+Interrupted desktop task
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/0
+0 unresolved risk(s)
+Live
+Interrupted desktop task — Run failure: This Task was interrupted before the turn completed. Review the last tool result before continuing.
+Verify upgrade recovery
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/1
+1 unresolved risk(s)
+Live
+Upgrade recovery — Run failure: Upgrade recovery validation failed
+Running
+
+No tasks are running.
+
+Other
+Ship the desktop installer
+Unassigned
+Ready
+0 known running subagent(s)
+Criteria 1/1
+0 unresolved risk(s)
+Live
+--- disconnected ---
+Tasks
+Refresh
+Workspace for new task
+Current workspace or choose a directory
+New Task
+
+New tasks run in isolated Git worktrees by default and leave the project directory unchanged.
+
+Needs You
+Interrupted desktop task
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/0
+0 unresolved risk(s)
+Last known before disconnect
+Interrupted desktop task — Run failure: This Task was interrupted before the turn completed. Review the last tool result before continuing.
+Verify upgrade recovery
+Unassigned
+Failed
+0 known running subagent(s)
+Criteria 0/1
+1 unresolved risk(s)
+Last known before disconnect
+Upgrade recovery — Run failure: Upgrade recovery validation failed
+Running
+
+No tasks are running.
+
+Other
+Ship the desktop installer
+Unassigned
+Ready
+0 known running subagent(s)
+Criteria 1/1
+0 unresolved risk(s)
+Last known before disconnect

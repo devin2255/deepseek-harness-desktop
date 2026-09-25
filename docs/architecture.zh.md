@@ -16,13 +16,13 @@
 
 运行中的 `dsh` 是一棵插件树，由启动时按序叠加的各层组合而成。
 
-**profile** 是存放在 Harness home 中的具名组装。它列出自己叠放的组合包，存放自己安装的树外插件，并保存用户自己的 `cordis.patch.yml`。`web` 和 `headless` 作为模板随发行版交付。
+**profile** 是存放在 Harness home 中的具名组装。它列出自己叠放的组合包，存放自己安装的树外插件，并保存用户自己的 `cordis.patch.yml`。`web`、`desktop` 和 `headless` 作为模板随发行版交付。
 
 **组合包**是 Cordis 配置项及其挂载代码的分发格式，因此它插入的内容始终可被其上各层 patch。
 
 两者都在各自的 `package.json` 中通过 `dsh` 字段声明自己：`dsh.profile` 列出一个 profile 的组合包，`dsh.bundle` 指向一个组合包的 patch 文件。
 
-[`dsh-base`](../packages/bundle/base/README.md) 是每个 profile 的第一层：模型适配器、工具、持久化、沙箱与审批策略、设置、凭据、遥测。[`dsh-web-app`](../packages/bundle/web-app/README.md) 增加浏览器应用；[`dsh-headless`](../packages/bundle/headless/README.md) 增加一次性运行器，且完全不带服务器。
+[`dsh-base`](../packages/bundle/base/README.md) 是每个 profile 的第一层：模型适配器、工具、持久化、沙箱与审批策略、设置、凭据、遥测。[`dsh-web-app`](../packages/bundle/web-app/README.md) 增加浏览器应用和本地 Task worktree 提供方；[`dsh-desktop-app`](../packages/bundle/desktop-app/README.md) 增加桌面授权、Task 提供方和任务总览；[`dsh-headless`](../packages/bundle/headless/README.md) 增加一次性运行器，且完全不带服务器。
 
 各层按此顺序应用在空条目列表之上：先按 profile 列出的顺序应用每个组合包，然后是 profile 的 `cordis.patch.yml`，然后是 home 级的那份，最后是任意 `--patch` overlay。一条 patch 按 id 定位某个条目并替换其整个 config，或插入新条目。
 
@@ -105,6 +105,18 @@ turn/end
 
 seam 正是替换一个提供方就能改变整个产品的原因。文件系统与进程提供方共享同一个执行世界，因此把它们指向远程沙箱，也就把 Bash、PTY 和 LSP 一并搬了过去，无需提供方专用 fork。[subagent 提供方](subsystems/subagent.md)在同一个接口之后同样千差万别，从新建一个子 agent，到把一个轮次委派给另一个产品。
 
+### Task 执行 worktree
+
+`dsh-task-worktree` 定义应用拥有的执行目录，`dsh-task-worktree-local` 通过 `ctx.subprocess` 创建并检查 Git worktree，`dsh-host-apiproxy` 只在显式收到带有 `isolation: worktree` 的 `session.create` 请求时消费该服务。Host 先创建 worktree，再创建 Session，使 Agent 从 worktree 路径启动，并通过 Task 服务追加 `task/worktree-assigned`。因此冷态回放可以恢复源 Workspace 身份和确切执行身份，无需从当前文件系统推断。
+
+本地提供方只接受已有 `HEAD` 的仓库根目录，拒绝嵌套仓库和 submodule，检查可用空间，按源仓库串行创建，并使用确定的应用所有路径和分支。它会记录源目录是否有未提交更改，但 worktree 始终基于已提交的 `HEAD`，所以既不会复制也不会修改源更改。Git 失败时保留部分路径或分支用于恢复。只有在路径、提交和分支仍与 Git 实时 worktree 注册表一致时，才会复用已有分配。
+
+### Task 审查与交付
+
+`dsh-task-review` 定义有界审查读取，以及由 revision 授权的提交、应用和丢弃操作。`dsh-task-review-local` 通过 `ctx.subprocess` 与 Git，针对持久 worktree 分配实现这些操作。`dsh-host-apiproxy` 校验根 Task 所有权与生命周期，调用提供方，并通过 Task 服务记录成功的变更回执。`dsh-client-ui-task-review` 从类型化客户端运行时状态渲染独立审查工作区；Electron 与浏览器均不获得 Git 权限。
+
+审查 revision 标识用户检查过的确切 Task 目录内容。提交在 Task 分支创建 commit，不移动源 checkout。应用按规范仓库串行执行，要求源目录在请求的 `HEAD` 上保持干净，通过临时索引预检完整二进制 patch，再次校验源状态后进行应用，同时保持源 `HEAD` 不变。丢弃只移除经验证的受管 worktree，并报告是否丢失未提交内容，以及已提交分支是否仍可恢复。`task/review-committed`、`task/review-applied` 和 `task/review-discarded` 使成功交付身份持久化并可严格回放。
+
 ## 新行为的归属位置
 
 新行为附加到已有文档记录的扩展点。改动循环本身时，本映射随之更新。
@@ -128,6 +140,8 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 | 生成会话标题 | 注册唯一的 `ctx.sessionTitle` 提供方 |
 | 管理同会话目标 | 使用 `ctx.goals`；通过 `agent/*` 续跑 |
 | fork 活跃会话 | `ctx.sessions.fork(source, boundary?, childSessionId?)` |
+| 将根任务与源 checkout 隔离 | 使用 Workspace 和 `isolation: worktree` 请求 `session.create`；Host 记录 `ctx.taskWorktrees` 返回的分配 |
+| 审查并交付隔离根任务 | 通过 `ctx.taskReview` 读取；使用确切审查 revision 授权变更，并通过 `ctx.tasks` 记录提供方回执 |
 | 将注册项限定到单个 agent | 使用该 agent 的 `agent.ctx` |
 
 [扩展实操手册](cookbook/extension-cookbook.md)将功能映射到能力，并索引[包](cookbook/adding-a-package.md)、[工具](cookbook/adding-a-tool.md)、[LLM（大语言模型）适配器](cookbook/adding-an-llm-adapter.md)、[Chat 节点](cookbook/adding-a-conversation-node.md)和[设置卡片](cookbook/adding-a-settings-card.md)的分步指南。

@@ -10,6 +10,15 @@
     surfaceContext: false
     trustedHosts: []
 
+# The Host API waits for the desktop's Task Provider even though this overlay
+# appends the Provider after the Web bundle's existing API row.
+- id: api-gateway
+  inject: [tasks]
+
 - insert:
     - id: desktop-app
       name: '@deepseek-ai/dsh-desktop-app'
+    - id: task-session
+      name: '@deepseek-ai/dsh-task-session'
+    - id: ui-task-overview
+      name: '@deepseek-ai/dsh-client-ui-task-overview'

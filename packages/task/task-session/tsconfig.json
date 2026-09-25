@@ -1,0 +1,21 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../core/session" },
+    { "path": "../../session/session-persistence" },
+    { "path": "../task" },
+    { "path": "../task-review" },
+    { "path": "../task-worktree" },
+    { "path": "../../interaction/user-approval" },
+    { "path": "../../workspace/workspace" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

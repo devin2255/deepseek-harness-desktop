@@ -61,6 +61,8 @@ describe('CI workflow', () => {
     expect(windows.name).toBe('windows node 24 / wine blocking')
     expect(windows.if).toBe("github.event_name == 'pull_request'")
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
+    const installWine = commandSteps.find(step => step.name === 'Install Wine')
+    expect(installWine?.run.trimStart().startsWith('sudo apt-get update\n')).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
     // Its pool is resolved by the Windows-specific switch.
@@ -388,9 +390,21 @@ describe('Issue lifecycle workflow', () => {
     expect(lifecyclePullRequest.types).toContain('review_requested')
     expect(lifecycleReview.types).toEqual(['submitted'])
     expect(lifecycleJob.if).toBe(
-      "${{ github.event_name != 'pull_request_review' || (github.event.action == 'submitted' && github.event.review.state == 'changes_requested') }}",
+      "${{ github.repository == 'deepseek-harness/deepseek-harness' && (github.event_name != 'pull_request_review' || (github.event.action == 'submitted' && github.event.review.state == 'changes_requested')) }}",
     )
     expect(policyPullRequest.types).toContain('ready_for_review')
+  })
+
+  it('does not run upstream project automation in forks', () => {
+    const lifecycle = loadWorkflow('.github/workflows/issue-lifecycle.yml')
+    const policy = loadWorkflow('.github/workflows/issue-policy.yml')
+
+    expect(workflowJob(lifecycle, 'lifecycle').if).toContain(
+      "github.repository == 'deepseek-harness/deepseek-harness'",
+    )
+    expect(workflowJob(policy, 'policy').if).toBe(
+      "${{ github.repository == 'deepseek-harness/deepseek-harness' }}",
+    )
   })
 })
 

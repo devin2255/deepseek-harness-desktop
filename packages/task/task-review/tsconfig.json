@@ -1,0 +1,18 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../core/session" },
+    { "path": "../../runtime-diagnostics/invariants" },
+    { "path": "../task-worktree" },
+    { "path": "../../util/brand" },
+    { "path": "../../workspace/workspace" }
+  ]
+}

@@ -13,6 +13,8 @@ import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import type { DirectoryPickerCapability } from '@deepseek-ai/dsh-host-directory-picker'
 import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
+import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
+import type { CreateTaskWorktreeRequest, TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 import type { HostFrame, WorkspaceId } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
@@ -64,6 +66,14 @@ async function harness(
   extras: {
     openPath?: (path: string, signal: AbortSignal) => Promise<void>
     canOpenPath?: () => boolean
+    taskWorktrees?: {
+      create: (request: { taskId: SessionId; workspaceId: WorkspaceId; workspacePath: string }) => Promise<TaskWorktreeAssignment>
+      inspect: (assignment: TaskWorktreeAssignment) => Promise<'available' | 'missing' | 'diverged'>
+    }
+    tasks?: {
+      snapshot: () => { generation: number; tasks: Array<{ taskId: SessionId; executionWorkspace?: TaskWorktreeAssignment }> }
+      assignWorktree: (sessionId: SessionId, request: { assignment: TaskWorktreeAssignment; expectedSeq: number }) => Promise<unknown>
+    }
   } = {},
 ) {
   const ctx = new Context()
@@ -77,6 +87,13 @@ async function harness(
   ctx.provide('storageDomain', storageDomain)
   ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
   await ctx.plugin(WorkspaceRegistry)
+  if (extras.taskWorktrees !== undefined) ctx.provide('taskWorktrees', extras.taskWorktrees as never)
+  if (extras.tasks !== undefined) ctx.provide('tasks', {
+    onChanged: () => () => {},
+    replaceLiveGeneration: () => {},
+    invalidateLiveGeneration: () => {},
+    ...extras.tasks,
+  } as never)
 
   const factory: AgentFactory = {
     async createAgent(_ownerCtx, options) {
@@ -408,6 +425,174 @@ describe('session creation and Workspace membership', () => {
 
     expectOk(await api.sessions.create(request({ workspaceId: created.workspaceId, sessionId })))
     expect(expectOk(await api.workspace.list(request({}))).items[0]?.sessionIds).toEqual([sessionId])
+  })
+
+  it('creates and records an isolated worktree without attaching the source Workspace', async () => {
+    const assignments: TaskWorktreeAssignment[] = []
+    let recorded: TaskWorktreeAssignment | undefined
+    const create = vi.fn(async ({ taskId, workspaceId, workspacePath }: CreateTaskWorktreeRequest) => {
+      const value: TaskWorktreeAssignment = {
+        kind: 'git-worktree', taskId, workspaceId, sourcePath: workspacePath,
+        path: join(workspacePath, '.isolated', String(taskId)), branch: 'dsh/task-0123456789abcdef01234567',
+        baseCommit: '0'.repeat(40), sourceHead: '0'.repeat(40), sourceDirty: false,
+        sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+      }
+      assignments.push(value)
+      return value
+    })
+    const inspect = vi.fn(async () => 'available' as const)
+    const assignWorktree = vi.fn(async (_sessionId: SessionId, value: { assignment: TaskWorktreeAssignment }) => {
+      recorded = value.assignment
+    })
+    const test = await harness(undefined, undefined, {
+      taskWorktrees: { create, inspect },
+      tasks: {
+        snapshot: () => ({ generation: 0, tasks: recorded === undefined ? [] : [{ taskId: sessionId, executionWorkspace: recorded }] }),
+        assignWorktree,
+      },
+    })
+    const workspace = expectOk(await test.api.workspace.create(request({ path: stageDir(test.root, 'isolated-project') }))).workspace
+    const sessionId = SessionId('session-isolated')
+
+    const created = expectOk(await test.api.sessions.create(request({
+      workspaceId: workspace.workspaceId, sessionId, isolation: 'worktree',
+    })))
+
+    expect(create).toHaveBeenCalledWith({ taskId: sessionId, workspaceId: workspace.workspaceId, workspacePath: workspace.path })
+    expect(assignWorktree).toHaveBeenCalledWith(sessionId, { assignment: assignments[0], expectedSeq: 0 })
+    expect(test.ctx.agents.get(sessionId)?.session.header.cwd).toBe(assignments[0]?.path)
+    expect(created.executionWorkspace).toEqual(assignments[0])
+    expect(expectOk(await test.api.workspace.list(request({}))).items[0]?.sessionIds).toEqual([])
+
+    const retried = expectOk(await test.api.sessions.create(request({
+      workspaceId: workspace.workspaceId, sessionId, isolation: 'worktree',
+    })))
+    expect(retried.executionWorkspace).toEqual(assignments[0])
+    expect(create).toHaveBeenCalledOnce()
+    expect(inspect).toHaveBeenCalledOnce()
+    expect(inspect).toHaveBeenCalledWith(assignments[0])
+    expect(assignWorktree).toHaveBeenCalledOnce()
+  })
+
+  it('refuses to reuse a recorded worktree that is missing or diverged', async () => {
+    const state: { recorded?: TaskWorktreeAssignment } = {}
+    const create = vi.fn(async () => { throw new Error('must not create a replacement') })
+    const inspect = vi.fn(async () => 'diverged' as const)
+    const test = await harness(undefined, undefined, {
+      taskWorktrees: { create, inspect },
+      tasks: {
+        snapshot: () => ({
+          generation: 0,
+          tasks: state.recorded === undefined
+            ? []
+            : [{ taskId: state.recorded.taskId, executionWorkspace: state.recorded }],
+        }),
+        assignWorktree: async () => undefined,
+      },
+    })
+    const workspace = expectOk(await test.api.workspace.create(request({ path: stageDir(test.root, 'diverged-worktree') }))).workspace
+    const sessionId = SessionId('session-diverged-worktree')
+    const recorded: TaskWorktreeAssignment = {
+      kind: 'git-worktree', taskId: sessionId, workspaceId: workspace.workspaceId, sourcePath: workspace.path,
+      path: join(workspace.path, '.isolated', String(sessionId)), branch: 'dsh/task-0123456789abcdef01234567',
+      baseCommit: '0'.repeat(40), sourceHead: '0'.repeat(40), sourceDirty: false,
+      sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+    }
+    state.recorded = recorded
+
+    const result = await test.api.sessions.create(request({
+      workspaceId: workspace.workspaceId, sessionId, isolation: 'worktree',
+    }))
+
+    expect(result.result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'workspace-isolation-unavailable',
+        details: {
+          sessionId,
+          workspaceId: workspace.workspaceId,
+          worktreeCode: 'WORKTREE_UNAVAILABLE',
+          preservedPath: recorded.path,
+        },
+      },
+    })
+    expect(inspect).toHaveBeenCalledWith(recorded)
+    expect(create).not.toHaveBeenCalled()
+    expect(test.ctx.sessions.get(sessionId)).toBeUndefined()
+  })
+
+  it('fails closed when isolation is unavailable or preflight rejects', async () => {
+    const missing = await harness()
+    const workspace = expectOk(await missing.api.workspace.create(request({ path: stageDir(missing.root, 'missing-service') }))).workspace
+    const missingId = SessionId('session-missing-isolation')
+    const unavailable = await missing.api.sessions.create(request({
+      workspaceId: workspace.workspaceId, sessionId: missingId, isolation: 'worktree',
+    }))
+    expect(unavailable.result).toMatchObject({ ok: false, error: { code: 'workspace-isolation-unavailable' } })
+    expect(missing.ctx.sessions.get(missingId)).toBeUndefined()
+
+    const create = vi.fn(async () => { throw new TaskWorktreeError('selected directory is not Git', 'WORKTREE_NOT_GIT') })
+    const rejected = await harness(undefined, undefined, {
+      taskWorktrees: { create, inspect: async () => 'available' },
+      tasks: { snapshot: () => ({ generation: 0, tasks: [] }), assignWorktree: async () => undefined },
+    })
+    const rejectedWorkspace = expectOk(await rejected.api.workspace.create(request({ path: stageDir(rejected.root, 'not-git') }))).workspace
+    const rejectedId = SessionId('session-preflight-rejected')
+    const result = await rejected.api.sessions.create(request({
+      workspaceId: rejectedWorkspace.workspaceId, sessionId: rejectedId, isolation: 'worktree',
+    }))
+    expect(result.result).toMatchObject({
+      ok: false,
+      error: { code: 'workspace-isolation-unavailable', details: { worktreeCode: 'WORKTREE_NOT_GIT' } },
+    })
+    expect(rejected.ctx.sessions.get(rejectedId)).toBeUndefined()
+
+    const directId = SessionId('session-existing-direct')
+    expectOk(await rejected.api.sessions.create(request({
+      workspaceId: rejectedWorkspace.workspaceId, sessionId: directId, isolation: 'direct',
+    })))
+    const collision = await rejected.api.sessions.create(request({
+      workspaceId: rejectedWorkspace.workspaceId, sessionId: directId, isolation: 'worktree',
+    }))
+    expect(collision.result).toMatchObject({
+      ok: false,
+      error: { code: 'workspace-isolation-unavailable', details: { sessionId: directId } },
+    })
+    expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a created worktree and published Session when assignment recording fails', async () => {
+    let assignment: TaskWorktreeAssignment | undefined
+    const test = await harness(undefined, undefined, {
+      taskWorktrees: { create: async ({ taskId, workspaceId, workspacePath }) => {
+        assignment = {
+          kind: 'git-worktree', taskId, workspaceId, sourcePath: workspacePath,
+          path: join(workspacePath, '.isolated', String(taskId)), branch: 'dsh/task-0123456789abcdef01234567',
+          baseCommit: '0'.repeat(40), sourceHead: '0'.repeat(40), sourceDirty: false,
+          sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+        }
+        return assignment
+      }, inspect: async () => 'available' },
+      tasks: {
+        snapshot: () => ({ generation: 0, tasks: [] }),
+        assignWorktree: async () => { throw new Error('persistence offline') },
+      },
+    })
+    const workspace = expectOk(await test.api.workspace.create(request({ path: stageDir(test.root, 'record-failure') }))).workspace
+    const sessionId = SessionId('session-record-failure')
+
+    const result = await test.api.sessions.create(request({
+      workspaceId: workspace.workspaceId, sessionId, isolation: 'worktree',
+    }))
+
+    expect(result.result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'workspace-isolation-unavailable',
+        details: { sessionId, workspaceId: workspace.workspaceId, preservedPath: assignment?.path },
+      },
+    })
+    expect(test.ctx.sessions.get(sessionId)?.header.cwd).toBe(assignment?.path)
   })
 })
 

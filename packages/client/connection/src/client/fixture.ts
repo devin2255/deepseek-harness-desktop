@@ -34,7 +34,7 @@ import { deriveEventMessage, foldSurface } from '@deepseek-ai/dsh-session/surfac
 import type {
   ApiProxy, ClientRequest, ClientResponse, HistoryEntry, HostFrame, MuxFrame, RpcReceipt,
   ModelProviderGroup, ModelSelection, RpcRequest, RpcResponse, RpcResult, ServerRequest, ServerResponse, SessionSummary,
-  ToolCallView, ToolEventView, ToolResultView, WorkspaceId, WorkspaceView,
+  TaskFileDiff, TaskReviewSummary, TaskSnapshot, ToolCallView, ToolEventView, ToolResultView, WorkspaceId, WorkspaceView,
 } from './api.ts'
 import type { RequestPayload, ResponseValue, RpcMethodMap } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AbstractApiClient, RpcId, SESSION_SEARCH_RESULT_LIMIT } from './api.ts'
@@ -1430,10 +1430,16 @@ interface ReasoningChunkStormState {
 export interface FixtureOptions {
   /** Start with no real Workspace or Session. */
   empty?: boolean
+  /** Add deterministic descendant activity for the assembled task-overview journey. */
+  taskOverviewRoster?: boolean
+  /** Add deterministic reviewable Tasks and stateful delivery responses. */
+  taskReviewRoster?: boolean
   /** Reject every prompt before appending its user event. */
   rejectPrompt?: boolean
   /** Publish the Session but fail its Workspace account write. */
   failWorkspaceAttach?: boolean
+  /** Reject explicit worktree isolation before publishing a Session. */
+  failWorktreeIsolation?: boolean
   /** Publish and frame the Session, then throw instead of returning create. */
   dropSessionCreateResponse?: boolean
   /** Order of the two successful create frames. */
@@ -1515,7 +1521,11 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   const sessions: SessionSummary[] = options.empty ? [] : [
     { sessionId: sid('fx-alpha'), updatedAt: Date.now(), running: true, blank: false, cwd: '/tmp/fixture' },
     { sessionId: sid('fx-beta'), updatedAt: Date.now() - 60_000, running: false, blank: false, parentSessionId: sid('fx-alpha'), cwd: '/tmp/fixture' },
-    { sessionId: sid('fx-gamma'), updatedAt: Date.now() - 120_000, running: false, blank: false, cwd: '/tmp/fixture' },
+    { sessionId: sid('fx-gamma'), updatedAt: Date.now() - 120_000, running: options.taskOverviewRoster === true, blank: false, cwd: '/tmp/fixture' },
+    ...(options.taskOverviewRoster === true ? [
+      { sessionId: sid('fx-child-running'), updatedAt: Date.now() - 10_000, running: true, blank: false, parentSessionId: sid('fx-alpha'), origin: 'subagent' as const, cwd: '/tmp/fixture' },
+      { sessionId: sid('fx-child-waiting'), updatedAt: Date.now() - 20_000, running: false, blank: false, parentSessionId: sid('fx-alpha'), origin: 'subagent' as const, cwd: '/tmp/fixture' },
+    ] : []),
   ]
   const logs = new Map<SessionId, SessionEvent[]>([[sid('fx-alpha'), buildAlphaLog()]])
   const modelSelections = new Map<SessionId, ModelSelection>(sessions.map(session => [
@@ -1547,15 +1557,84 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   let nextSession = 1
   let nextRpc = 1
   let attachedSessions = options.empty ? 0 : 1
+  const wid = (raw: string): WorkspaceId => raw as WorkspaceId
+  const taskWorktreeAssignments = new Map<SessionId, NonNullable<TaskSnapshot['executionWorkspace']>>()
+  const requestTaskId = sid('fx-gamma')
+  const deliveryTaskId = sid('fx-beta')
+  const initialReviewRevision = 'a'.repeat(64) as TaskReviewSummary['revision']
+  const committedReviewRevision = 'b'.repeat(64) as TaskReviewSummary['revision']
+  const fixtureCommit = '2'.repeat(40)
+  let changesRequested = false
+  let commitReceipt: NonNullable<TaskSnapshot['commitReceipt']> | undefined
+  let applyReceipt: NonNullable<TaskSnapshot['applyReceipt']> | undefined
+  const reviewAssignment = (
+    taskId: SessionId,
+    branch: string,
+  ): NonNullable<TaskSnapshot['executionWorkspace']> => ({
+    kind: 'git-worktree', taskId, workspaceId: wid('fx-ws-fixture'), sourcePath: '/tmp/fixture',
+    path: `/tmp/fixture-worktrees/${String(taskId)}`, branch, baseCommit: '0'.repeat(40),
+    sourceHead: '0'.repeat(40), sourceDirty: false, sourceStatusDigest: 'c'.repeat(64), createdAt: 1,
+  })
+  const requestAssignment = reviewAssignment(requestTaskId, 'dsh/task-fixture-request')
+  const deliveryAssignment = reviewAssignment(deliveryTaskId, 'dsh/task-fixture-delivery')
+  const requestTask = (): TaskSnapshot => ({
+    taskId: requestTaskId, workspaceId: wid('fx-ws-fixture'), executionWorkspace: requestAssignment,
+    definition: { goal: 'Fixture request changes', criteria: [] }, descendantSessionIds: [],
+    status: changesRequested ? 'running' : 'ready', freshness: 'live', attention: [], risks: [],
+    reviewDecision: changesRequested ? 'changes-requested' : 'ready', updatedAt: 6, asOfSeq: changesRequested ? 5 : 4,
+  })
+  const deliveryTask = (): TaskSnapshot => ({
+    taskId: deliveryTaskId, workspaceId: wid('fx-ws-fixture'), executionWorkspace: deliveryAssignment,
+    definition: { goal: 'Fixture review delivery', criteria: [{
+      id: 'fixture-criterion' as never, text: 'Review the fixture changes', status: 'satisfied',
+      evidence: [{ sessionId: deliveryTaskId, seq: 3 }],
+    }] },
+    descendantSessionIds: [], status: applyReceipt === undefined && commitReceipt === undefined ? 'ready' : 'settled',
+    freshness: 'live', attention: [], risks: [], reviewDecision: 'ready',
+    ...commitReceipt === undefined ? {} : { commitReceipt },
+    ...applyReceipt === undefined ? {} : { applyReceipt },
+    updatedAt: applyReceipt?.appliedAt ?? commitReceipt?.committedAt ?? 5,
+    asOfSeq: applyReceipt !== undefined ? 6 : commitReceipt !== undefined ? 5 : 4,
+  })
+  const reviewTasks = (): TaskSnapshot[] => [requestTask(), deliveryTask()]
+  const reviewSummary = (taskId: SessionId): TaskReviewSummary => {
+    const delivery = taskId === deliveryTaskId
+    const assignment = delivery ? deliveryAssignment : requestAssignment
+    const revision = delivery && commitReceipt !== undefined ? committedReviewRevision : initialReviewRevision
+    return {
+      taskId, workspaceId: wid('fx-ws-fixture'), revision, baseCommit: assignment.baseCommit,
+      headCommit: delivery && commitReceipt !== undefined ? fixtureCommit : assignment.baseCommit,
+      sourceHead: assignment.sourceHead, sourceDirty: false, branch: assignment.branch,
+      dirty: true, truncated: false,
+      files: delivery ? [
+        { path: 'src/delivery.ts', status: 'modified', binary: false, additions: 1, deletions: 1 },
+        { path: 'assets/fixture.png', status: 'added', binary: true, additions: null, deletions: null },
+      ] : [{ path: 'src/request.ts', status: 'modified', binary: false, additions: 1, deletions: 1 }],
+      additions: 1, deletions: 1,
+    }
+  }
+  const reviewDiff = (taskId: SessionId, path: string): TaskFileDiff => {
+    const summary = reviewSummary(taskId)
+    return {
+      taskId, workspaceId: summary.workspaceId, revision: summary.revision, path,
+      binary: path.endsWith('.png'), truncated: false,
+      patch: path === 'src/delivery.ts'
+        ? '@@ -1 +1 @@\n-delivered = false\n+delivered = true\n'
+        : path === 'src/request.ts'
+          ? '@@ -1 +1 @@\n-requested = true\n+requested = false\n'
+          : '',
+    }
+  }
   // Workspace entities mirroring the host registry: the fixture sessions all
   // live under one workspace, whose account carries them in attach order.
-  const wid = (raw: string): WorkspaceId => raw as WorkspaceId
   const fixtureEpoch = new Date(Date.now() - 300_000).toISOString()
   const workspaces: WorkspaceView[] = options.empty ? [] : [{
     workspaceId: wid('fx-ws-fixture'),
     path: '/tmp/fixture',
     title: 'fixture',
-    sessionIds: [sid('fx-alpha'), sid('fx-beta'), sid('fx-gamma')],
+    sessionIds: options.taskOverviewRoster === true
+      ? sessions.map(session => session.sessionId)
+      : [sid('fx-alpha'), sid('fx-beta'), sid('fx-gamma')],
     createdAt: fixtureEpoch,
     updatedAt: fixtureEpoch,
   }]
@@ -1601,6 +1680,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   /** Cleared once answered through respond; replay stops and approval/resolved is broadcast. */
   let approvalPending = true
   const pendingQuestionRpcId = mint()
+  const pendingQuestionSessionId = sid(options.taskOverviewRoster === true ? 'fx-child-waiting' : 'fx-alpha')
   let questionPending = true
   const fixtureQuestions: Extract<MuxFrame, { type: 'question/requested' }>['questions'] = [
     {
@@ -1635,6 +1715,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       ],
     },
   ]
+  const fixtureQuestionSummary = fixtureQuestions[0]?.question
+  if (fixtureQuestionSummary === undefined) throw new Error('task overview fixture requires its primary question')
 
   const muxConns = new Set<StreamConn<MuxFrame>>()
   const hostConns = new Set<StreamConn<HostFrame>>()
@@ -2229,8 +2311,19 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             details: { workspaceId: request.payload.workspaceId },
           })
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? '/tmp/fixture'
+        if (request.payload.isolation === 'worktree' && options.failWorktreeIsolation) {
+          return err(request, {
+            code: 'workspace-isolation-unavailable',
+            message: 'fixture could not create an isolated Git worktree',
+            details: {
+              ...(request.payload.workspaceId === undefined ? {} : { workspaceId: request.payload.workspaceId }),
+              worktreeCode: 'WORKTREE_GIT_FAILED',
+            },
+          })
+        }
         const requestedId = request.payload.sessionId
+        const existingAssignment = requestedId === undefined ? undefined : taskWorktreeAssignments.get(requestedId)
+        const requestedCwd = existingAssignment?.path ?? workspace?.path ?? request.payload.cwd ?? '/tmp/fixture'
         const attachWorkspace = (sessionId: SessionId): void => {
           /* v8 ignore next -- callers enter only when a target Workspace exists. */
           if (workspace === undefined || workspace.sessionIds.includes(sessionId)) return
@@ -2249,24 +2342,45 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         if (requestedId !== undefined) {
           const existing = summaryOf(requestedId)
           if (existing !== undefined) {
-            if (existing.cwd !== cwd) {
+            if (existing.cwd !== requestedCwd) {
               return err(request, {
                 code: 'session-conflict',
                 message: `session ${requestedId} already uses ${existing.cwd ?? 'no cwd'}`,
-                details: { sessionId: requestedId, requestedCwd: cwd, ...existing.cwd === undefined ? {} : { existingCwd: existing.cwd } },
+                details: { sessionId: requestedId, requestedCwd, ...existing.cwd === undefined ? {} : { existingCwd: existing.cwd } },
               })
             }
-            if (workspace !== undefined && !workspace.sessionIds.includes(requestedId)) {
+            if (workspace !== undefined && existingAssignment === undefined && !workspace.sessionIds.includes(requestedId)) {
               if (options.failWorkspaceAttach) return attachFailure(requestedId, workspace.workspaceId)
               attachWorkspace(requestedId)
             }
-            return ok(request, { sessionId: requestedId })
+            return ok(request, {
+              sessionId: requestedId,
+              ...existingAssignment === undefined ? {} : { executionWorkspace: existingAssignment },
+            })
           }
         }
+        const createdId = requestedId ?? sid(`fx-${nextSession++}`)
+        const executionWorkspace = request.payload.isolation === 'worktree' && workspace !== undefined
+          ? {
+            kind: 'git-worktree' as const,
+            taskId: createdId,
+            workspaceId: workspace.workspaceId,
+            sourcePath: workspace.path,
+            path: `/tmp/fixture-worktrees/${createdId}`,
+            branch: `dsh/task-${(taskWorktreeAssignments.size + 1).toString(16).padStart(24, '0')}`,
+            baseCommit: 'a'.repeat(40),
+            sourceHead: 'a'.repeat(40),
+            sourceDirty: false,
+            sourceStatusDigest: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            createdAt: Date.now(),
+          }
+          : undefined
+        const cwd = executionWorkspace?.path ?? requestedCwd
         const created: SessionSummary = {
-          sessionId: requestedId ?? sid(`fx-${nextSession++}`), updatedAt: Date.now(), running: false, blank: true, cwd,
+          sessionId: createdId, updatedAt: Date.now(), running: false, blank: true, cwd,
         }
         sessions.push(created)
+        if (executionWorkspace !== undefined) taskWorktreeAssignments.set(created.sessionId, executionWorkspace)
         modelSelections.set(created.sessionId, { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
         attachedSessions += 1
         const emitSession = (): void => {
@@ -2277,15 +2391,18 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           emitSession()
           return attachFailure(created.sessionId, workspace.workspaceId)
         }
-        if (workspace !== undefined && options.createFrameOrder === 'workspace-first') {
+        if (workspace !== undefined && executionWorkspace === undefined && options.createFrameOrder === 'workspace-first') {
           attachWorkspace(created.sessionId)
           emitSession()
         } else {
           emitSession()
-          if (workspace !== undefined) attachWorkspace(created.sessionId)
+          if (workspace !== undefined && executionWorkspace === undefined) attachWorkspace(created.sessionId)
         }
         if (options.dropSessionCreateResponse) throw new Error('fixture: dropped session.create response after publication')
-        return ok(request, { sessionId: created.sessionId })
+        return ok(request, {
+          sessionId: created.sessionId,
+          ...executionWorkspace === undefined ? {} : { executionWorkspace },
+        })
       },
       rename: (request) => {
         const missing = requireSession(request)
@@ -2508,7 +2625,15 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       },
     },
     subagents: {
-      list: request => ok(request, { entries: [], parentAvailable: true }),
+      list: request => ok(request, {
+        entries: options.taskOverviewRoster === true && request.payload.parentSessionId === sid('fx-alpha')
+          ? [
+            { kind: 'child' as const, id: sid('fx-child-running'), mode: 'continuable' as const, label: 'Running child', activity: 'running' as const, hasChildren: false },
+            { kind: 'child' as const, id: sid('fx-child-waiting'), mode: 'continuable' as const, label: 'Waiting child', activity: 'inactive' as const, hasChildren: false },
+          ]
+          : [],
+        parentAvailable: true,
+      }),
       history: (request) => {
         const log = logs.get(request.payload.childSessionId) ?? []
         return Promise.resolve(ok(
@@ -2829,6 +2954,112 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         ),
       ),
     },
+    tasks: {
+      list: request => ok(request, {
+        generation: taskWorktreeAssignments.size,
+        tasks: options.taskReviewRoster === true ? reviewTasks() : options.taskOverviewRoster === true ? [
+          {
+            taskId: sid('fx-alpha'), workspaceId: wid('fx-ws-fixture'),
+            definition: { goal: 'Fixture 历史会话', criteria: [] },
+            descendantSessionIds: [sid('fx-child-running'), sid('fx-child-waiting')],
+            status: 'needs-attention', freshness: 'live', risks: [], updatedAt: 3, asOfSeq: 0,
+            attention: [{
+              id: 'fx-child-waiting:question:harness-profile' as never,
+              taskId: sid('fx-alpha'), ownerSessionId: sid('fx-child-waiting'),
+              kind: 'question', severity: 'warning', summary: fixtureQuestionSummary,
+              createdAt: 1, sourceId: 'harness-profile', actionable: true,
+            }],
+          },
+          {
+            taskId: sid('fx-gamma'), workspaceId: wid('fx-ws-fixture'),
+            definition: { goal: 'fixture', criteria: [] }, descendantSessionIds: [],
+            status: 'running', freshness: 'live', attention: [], risks: [], updatedAt: 2, asOfSeq: 0,
+          },
+          {
+            taskId: sid('fx-beta'), workspaceId: wid('fx-ws-fixture'),
+            definition: { goal: 'fixture', criteria: [] }, descendantSessionIds: [],
+            status: 'settled', freshness: 'live', attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+          },
+          ...[...taskWorktreeAssignments.values()].map((assignment, index): TaskSnapshot => ({
+            taskId: assignment.taskId,
+            workspaceId: assignment.workspaceId,
+            executionWorkspace: assignment,
+            definition: { goal: `Fixture isolated task ${String(index + 1)}`, criteria: [] },
+            descendantSessionIds: [],
+            status: summaryOf(assignment.taskId)?.running === true ? 'running' : 'settled',
+            freshness: 'live', attention: [], risks: [], updatedAt: 4 + index, asOfSeq: 0,
+          })),
+        ] satisfies TaskSnapshot[] : [],
+      }),
+      define: request => err(request, {
+        code: 'task-unavailable', message: 'fixture task mutations are not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      updateCriterion: request => err(request, {
+        code: 'task-unavailable', message: 'fixture task mutations are not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      recordRisk: request => err(request, {
+        code: 'task-unavailable', message: 'fixture task mutations are not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+      review: (request) => {
+        if (options.taskReviewRoster !== true || request.payload.sessionId !== requestTaskId) {
+          return err(request, {
+            code: 'task-unavailable', message: 'fixture task mutations are not configured',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        changesRequested = true
+        return ok(request, requestTask())
+      },
+      reviewSummary: request => options.taskReviewRoster === true
+        ? ok(request, reviewSummary(request.payload.sessionId))
+        : err(request, {
+          code: 'task-review-unavailable', message: 'fixture task review is not configured',
+          details: { sessionId: request.payload.sessionId },
+        }),
+      reviewDiff: request => options.taskReviewRoster === true
+        ? ok(request, reviewDiff(request.payload.sessionId, request.payload.path))
+        : err(request, {
+          code: 'task-review-unavailable', message: 'fixture task review is not configured',
+          details: { sessionId: request.payload.sessionId },
+        }),
+      commit: (request) => {
+        if (options.taskReviewRoster !== true || request.payload.sessionId !== deliveryTaskId) {
+          return err(request, {
+            code: 'task-review-unavailable', message: 'fixture task review is not configured',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        commitReceipt = {
+          kind: 'commit', operationId: 'fixture-commit' as never, taskId: deliveryTaskId,
+          workspaceId: wid('fx-ws-fixture'), reviewRevision: initialReviewRevision,
+          committedRevision: committedReviewRevision, branch: deliveryAssignment.branch,
+          commit: fixtureCommit, committedAt: 7,
+        }
+        return ok(request, deliveryTask())
+      },
+      apply: (request) => {
+        if (options.taskReviewRoster !== true || request.payload.sessionId !== deliveryTaskId) {
+          return err(request, {
+            code: 'task-review-unavailable', message: 'fixture task review is not configured',
+            details: { sessionId: request.payload.sessionId },
+          })
+        }
+        applyReceipt = {
+          kind: 'apply', operationId: 'fixture-apply' as never, taskId: deliveryTaskId,
+          workspaceId: wid('fx-ws-fixture'), reviewRevision: committedReviewRevision,
+          commit: fixtureCommit, sourceHeadBefore: deliveryAssignment.sourceHead,
+          sourceHeadAfter: deliveryAssignment.sourceHead, appliedAt: 8,
+        }
+        return ok(request, deliveryTask())
+      },
+      discard: request => err(request, {
+        code: 'task-review-unavailable', message: 'fixture task review is not configured',
+        details: { sessionId: request.payload.sessionId },
+      }),
+    },
     events: {
       async *mux(_request, signal) {
         const conn = new FxInbox<MuxFrame>()
@@ -2846,7 +3077,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             conn.push({ rpcId: mint(), payload: { type: 'session/projection', sessionId: s.sessionId, key, value: values[key], seq: log.length - 1 } })
           }
         }
-        if (approvalPending) {
+        if (approvalPending && options.taskOverviewRoster !== true) {
           conn.push({
             rpcId: pendingApprovalRpcId,
             payload: {
@@ -2860,7 +3091,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           conn.push({
             rpcId: pendingQuestionRpcId,
             payload: {
-              type: 'question/requested', sessionId: sid('fx-alpha'), questions: fixtureQuestions,
+              type: 'question/requested',
+              sessionId: pendingQuestionSessionId,
+              questions: fixtureQuestions,
             },
           })
         }
@@ -2981,7 +3214,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       }
       questionPending = false
       emitMux({
-        type: 'question/resolved', sessionId: sid('fx-alpha'),
+        type: 'question/resolved', sessionId: pendingQuestionSessionId,
         questionRpcId: pendingQuestionRpcId,
         outcome: message.result.ok ? 'answered' : 'cancelled',
       })
@@ -3118,6 +3351,16 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'goal.resume': return this.api.goals.resume(request)
       case 'goal.complete': return this.api.goals.complete(request)
       case 'goal.clear': return this.api.goals.clear(request)
+      case 'task.list': return this.api.tasks.list(request)
+      case 'task.define': return this.api.tasks.define(request)
+      case 'task.updateCriterion': return this.api.tasks.updateCriterion(request)
+      case 'task.recordRisk': return this.api.tasks.recordRisk(request)
+      case 'task.review': return this.api.tasks.review(request)
+      case 'task.reviewSummary': return this.api.tasks.reviewSummary(request, signal)
+      case 'task.reviewDiff': return this.api.tasks.reviewDiff(request, signal)
+      case 'task.commit': return this.api.tasks.commit(request, signal)
+      case 'task.apply': return this.api.tasks.apply(request, signal)
+      case 'task.discard': return this.api.tasks.discard(request, signal)
       case 'settings.describe': return this.api.settings.describe(request)
       case 'settings.openDocument': return this.api.settings.openDocument(request, signal)
       case 'settings.update': return this.api.settings.update(request)
@@ -3180,8 +3423,11 @@ function fixtureOptionsFromLocation(): FixtureOptions {
   const query = new URLSearchParams(location.search)
   return {
     empty: query.get('fixture') === 'empty',
+    taskOverviewRoster: query.get('fixture') === 'task-overview' || query.get('fixture') === 'task-review',
+    taskReviewRoster: query.get('fixture') === 'task-review',
     rejectPrompt: query.get('fixturePrompt') === 'reject',
     failWorkspaceAttach: query.get('fixtureAttach') === 'fail',
+    failWorktreeIsolation: query.get('fixtureIsolation') === 'fail',
     dropSessionCreateResponse: query.get('fixtureSessionCreate') === 'drop-response',
     createFrameOrder: query.get('fixtureFrames') === 'workspace-first' ? 'workspace-first' : 'session-first',
   }

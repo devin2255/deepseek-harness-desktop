@@ -1,0 +1,16 @@
+:root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10131a; color: #edf2ff; }
+* { box-sizing: border-box; }
+body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 32px; }
+main { width: min(100%, 440px); }
+.brand { margin: 0 0 8px; color: #8ca8ff; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+h1 { margin: 0; font-size: 28px; }
+[data-phase] { margin: 28px 0 10px; color: #cbd5ee; }
+[data-progress] { height: 4px; overflow: hidden; border-radius: 99px; background: #252b3a; }
+[data-progress]::after { content: ''; display: block; width: 42%; height: 100%; border-radius: inherit; background: #688cff; animation: progress 1.2s ease-in-out infinite alternate; }
+[data-failure-actions] { margin-top: 24px; padding-top: 20px; border-top: 1px solid #2a3142; }
+[data-failure-message] { min-height: 42px; color: #d9dfef; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+button { border: 1px solid #3d4964; border-radius: 7px; padding: 8px 13px; background: #20283a; color: inherit; cursor: pointer; }
+button[data-retry] { border-color: #688cff; background: #3459c7; }
+@keyframes progress { from { transform: translateX(-20%); } to { transform: translateX(160%); } }
+@media (prefers-reduced-motion: reduce) { [data-progress]::after { animation: none; } }

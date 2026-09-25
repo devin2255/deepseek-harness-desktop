@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepSeek Harness</title>
+  <link rel="stylesheet" href="./startup.css">
+  <script type="module" src="./startup-renderer.js"></script>
+</head>
+<body>
+  <main>
+    <p class="brand">DeepSeek Harness</p>
+    <h1>Starting your workspace</h1>
+    <p data-phase>Preparing desktop</p>
+    <div data-progress role="progressbar" aria-label="Startup progress"></div>
+    <section data-failure-actions hidden aria-live="polite">
+      <p data-failure-message></p>
+      <div class="actions">
+        <button type="button" data-retry>Retry</button>
+        <button type="button" data-open-logs>Open logs</button>
+        <button type="button" data-exit>Exit</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
