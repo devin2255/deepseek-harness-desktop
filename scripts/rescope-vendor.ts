@@ -9,7 +9,8 @@
  * The generic pass rewrites ONLY delimited, complete package-name tokens:
  * `'old'` / `"old"` / `` `old` `` / `'old/subpath'`, plus a YAML `name: old`
  * scalar. A match needs a quote (or `name: `) immediately left and the matching
- * quote — optionally after a `/subpath` — immediately right, which excludes
+ * quote — optionally after a `/subpath` — immediately right. `cordis/` only
+ * rewrites exported `src/` and `package.json` paths, preserving event ids. This excludes
  * `cordis.yml`, the Loader's `cordis:` builtin prefix, `cordis-config-entry`,
  * `@deepseek-ai/dsh-tool-cordis`, and `cordiverse/cordis`, and makes the
  * rewrite idempotent because the scoped name's `cordis` is preceded by `/`.
@@ -104,6 +105,15 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   // GROUP_ORDER holds `packages/<group>/` directory names, not package names.
   { file: 'scripts/gen-module-graph.ts', upstream: ['cordis'] },
   { file: 'scripts/gen-doc-graphs.ts', upstream: ['cordis'] },
+  // These spellings are UI namespace and event-category ids, not imports.
+  { file: 'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/CordisActionRow.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/CordisDefineRow.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/CordisPanel.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/CordisRunRow.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/index.ts', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/locales.ts', upstream: ['cordis'] },
+  { file: 'scripts/gen-cordis-catalog.ts', upstream: ['cordis'] },
 ]
 
 /** A string that must appear exactly `count` times once the rescope has run. */
@@ -176,12 +186,12 @@ const EXACT_EDITS: readonly ExactEdit[] = [
         "@deepseek-ai/.+"
       ]
     },
-    "packages/util/home": {`,
+    "apps/desktop": {`,
     replace: `      "ignoreDependencies": [
         "@deepseek-ai/.+"
       ]
     },
-    "packages/util/home": {`,
+    "apps/desktop": {`,
     expect: 1,
   },
   {
@@ -462,7 +472,7 @@ const VENDORED_LIBRARY = /^@deepseek-ai\\/(cosmokit|schemastery)(\\/|$)/
 
 /** Files the rescope must never rewrite. */
 function excluded(file: string): boolean {
-  if (file === 'scripts/rescope-vendor.ts') return true // the mapping itself
+  if (file === 'scripts/rescope-vendor.ts' || file === 'scripts/rescope-vendor.spec.ts') return true // mapping and literal-name fixtures
   if (file.startsWith('.agents/notes/')) return true // notes record what was true when written
   // Recorded model payloads quote documentation verbatim, so they must mirror the
   // sources on disk — including the notes this rescope leaves alone.
@@ -488,7 +498,11 @@ interface Pattern {
   readonly yamlName: RegExp
 }
 
-function patterns(reverse: boolean): Pattern[] {
+/** Compile the vendored package-name tokens for one rename direction.
+ * @param reverse - Whether to restore upstream package names.
+ * @returns Regex mappings that preserve non-package Cordis identifiers.
+ */
+export function patterns(reverse: boolean): Pattern[] {
   return RENAMES
     .map(rename => ({
       upstream: rename.upstream,
@@ -498,7 +512,7 @@ function patterns(reverse: boolean): Pattern[] {
     .sort((left, right) => right.from.length - left.from.length)
     .map(rename => ({
       ...rename,
-      token: new RegExp(`(['"\`])${escapeRegExp(rename.from)}((?:/[^'"\`\\s]*)?)\\1`, 'g'),
+      token: new RegExp(`(['"\`])${escapeRegExp(rename.from)}(${rename.upstream === 'cordis' ? '(?:/(?:src/[^\'"\`\\s]*|package\\.json))?' : '(?:/[^\'"\`\\s]*)?'})\\1`, 'g'),
       yamlName: new RegExp(`^(\\s*(?:-\\s*)?name:[ \\t]+)${escapeRegExp(rename.from)}([ \\t]*(?:#.*)?)$`, 'gm'),
     }))
 }
@@ -507,7 +521,13 @@ function skipped(file: string, pattern: Pattern): boolean {
   return GENERIC_SKIPS.some(skip => skip.file === file && skip.upstream.includes(pattern.upstream))
 }
 
-function rewriteLine(line: string, file: string, all: readonly Pattern[]): string {
+/** Rewrite package names on one source line while preserving file-specific product ids.
+ * @param line - Source line to inspect.
+ * @param file - Repository-relative file path for exemptions.
+ * @param all - Compiled rename mappings.
+ * @returns Line with only package-name tokens replaced.
+ */
+export function rewriteLine(line: string, file: string, all: readonly Pattern[]): string {
   let out = line
   for (const pattern of all) {
     if (skipped(file, pattern)) continue
