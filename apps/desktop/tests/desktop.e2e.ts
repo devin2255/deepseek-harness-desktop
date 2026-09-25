@@ -254,6 +254,37 @@ describe('desktop Electron acceptance', () => {
     const workspaceA = join(temporaryRoot, 'workspace-a')
     const workspaceB = join(temporaryRoot, 'workspace-b')
     await Promise.all([mkdir(workspaceA), mkdir(workspaceB)])
+    await page.getByRole('button', { name: /^(Add workspace|添加工作区)$/u }).click()
+    const directoryDialog = page.getByRole('dialog', { name: /^(Select Workspace Directory|选择工作区目录)$/u })
+    await directoryDialog.waitFor({ timeout: 10_000 })
+    const editPath = directoryDialog.getByRole('button', { name: /^(Edit path|编辑路径)$/u })
+    const pickerTitle = await directoryDialog.getByRole('heading', { name: /^(Select Workspace Directory|选择工作区目录)$/u }).textContent()
+    const editPathLabel = await editPath.getAttribute('aria-label')
+    await editPath.click()
+    const directoryInput = directoryDialog.getByRole('textbox', { name: /^(Edit path|编辑路径)$/u })
+    expect({
+      title: canonicalDirectoryLabel(pickerTitle),
+      editButton: canonicalDirectoryLabel(editPathLabel),
+      pathInput: canonicalDirectoryLabel(await directoryInput.getAttribute('aria-label')),
+      open: canonicalDirectoryLabel(await directoryDialog.getByRole('button', { name: /^(Open|打开)$/u }).textContent()),
+    }).toMatchInlineSnapshot(`
+      {
+        "editButton": "Edit path",
+        "open": "Open",
+        "pathInput": "Edit path",
+        "title": "Select Workspace Directory",
+      }
+    `)
+    await directoryInput.fill(workspaceA)
+    await directoryInput.press('Enter')
+    await directoryDialog.getByRole('button', { name: /^(Open|打开)$/u }).click()
+    await directoryDialog.waitFor({ state: 'hidden', timeout: 10_000 })
+    await expect.poll(async () => {
+      const workspaces = await pageRpc<{ items: readonly { path: string }[] }>(page, 'workspace.list', {})
+      return workspaces.items.some(item => item.path === workspaceA)
+    }, { timeout: 10_000 }).toBe(true)
+    await page.getByRole('button', { name: /^(Tasks|任务)$/u }).click()
+    await overview.waitFor({ state: 'visible' })
     const [firstWorkspace, secondWorkspace] = await Promise.all([
       pageRpc<{ workspace: { workspaceId: string } }>(page, 'workspace.create', { path: workspaceA }),
       pageRpc<{ workspace: { workspaceId: string } }>(page, 'workspace.create', { path: workspaceB }),
@@ -774,6 +805,17 @@ describe('desktop Electron acceptance', () => {
     releaseProvider()
   }, 180_000)
 })
+
+/** Keep the desktop chooser snapshot stable across the supported UI locales. */
+function canonicalDirectoryLabel(label: string | null): string {
+  const value = label?.trim() ?? ''
+  switch (value) {
+    case '选择工作区目录': return 'Select Workspace Directory'
+    case '编辑路径': return 'Edit path'
+    case '打开': return 'Open'
+    default: return value
+  }
+}
 
 function git(cwd: string, args: readonly string[]): string {
   return execFileSync('git', ['-c', 'core.autocrlf=false', ...args], {

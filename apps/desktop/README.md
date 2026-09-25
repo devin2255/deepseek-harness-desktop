@@ -25,6 +25,10 @@ Main enables Chromium's sandbox before readiness and acquires Electron's single-
 
 Closing the last window leaves Harness and native background presence running on every desktop platform. An explicit quit with no active Task performs bounded cleanup immediately. Running Tasks or unavailable activity open a native choice: continue in the background hides the current window, stop and quit disposes background presence before stopping Harness, and cancel changes nothing. Concurrent quit requests share one decision. Installer replacement and startup-recovery exit bypass this prompt but retain bounded cleanup. After cleanup, an authenticated installer replacement uses `app.exit(0)` so a Renderer close handler cannot keep program files live; every other exit continues through `app.quit()`. A shutdown failure is reported but cannot prevent the final quit.
 
+## Workspace selection
+
+Adding a Workspace opens the in-app directory browser. Its path editor accepts a full existing Host directory path, including a Windows drive path, so selection does not depend on a native folder-dialog worker. The Host still validates and canonicalizes the chosen directory before registering it. The desktop profile pins this interaction; the Web profile keeps its adaptive choice. See the [desktop chooser decision](../../.agents/notes/implemented/feature/2026-09-26-desktop-in-app-directory-selection.md).
+
 ## Background tasks and notifications
 
 Electron Main polls authenticated `task.list` and `session.list` projections in serialized two-second intervals with a separate ten-second request timeout. The first live baseline is silent. Later values update one tray summary with active Task, Agent, and attention counts; a failed request marks freshness unavailable, retains the last counts, and retries without overlapping requests. Main stores only detached presentation values, never another durable Task record.

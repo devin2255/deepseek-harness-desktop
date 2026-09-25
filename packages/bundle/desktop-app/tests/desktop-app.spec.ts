@@ -288,6 +288,13 @@ describe('desktop launch capability', () => {
     expect(entries.find(entry => entry.id === 'ui-task-review')).toMatchObject({
       name: '@deepseek-ai/dsh-client-ui-task-review',
     })
+    expect(entries.find(entry => entry.id === 'directory-picker')).toMatchObject({ disabled: true })
+    expect(entries.find(entry => entry.id === 'directory-picker-browse')).toMatchObject({
+      name: '@deepseek-ai/dsh-host-directory-picker-browse',
+    })
+    expect(entries.find(entry => entry.id === 'ui-directory-picker-browse')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+    })
     expect(entries.find(entry => entry.id === 'api-gateway')?.inject).toContain('tasks')
     expect(entries.findIndex(entry => entry.id === 'task-session'))
       .toBeLessThan(entries.findIndex(entry => entry.id === 'ui-task-overview'))
@@ -298,6 +305,8 @@ describe('desktop launch capability', () => {
     expect(entries.findIndex(entry => entry.id === 'task-review-local'))
       .toBeLessThan(entries.findIndex(entry => entry.id === 'api-gateway'))
     expect(manifest.dependencies).toMatchObject({
+      '@deepseek-ai/dsh-client-ui-directory-picker-browse': 'workspace:^',
+      '@deepseek-ai/dsh-host-directory-picker-browse': 'workspace:^',
       '@deepseek-ai/dsh-task': 'workspace:^',
       '@deepseek-ai/dsh-task-session': 'workspace:^',
       '@deepseek-ai/dsh-client-ui-task-overview': 'workspace:^',
