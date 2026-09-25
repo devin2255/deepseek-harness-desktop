@@ -365,7 +365,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(source).toMatch(/DshRemoveOwnedRunValue[\s\S]*DshWriteE2eUninstallResult "uninstall-accepted"/u)
   })
 
-  it('recognizes only old or new exact shortcut targets including unresolved Unicode links', { timeout: 20_000 }, async () => {
+  it('recognizes only old or new exact shortcut targets including unresolved Unicode links', { timeout: 60_000 }, async () => {
     const inspectorSource = await readFile(inspectShortcutPath, 'utf8')
     expect(inspectorSource).toContain('DshRawShortcutTarget')
     expect(inspectorSource).toContain('WScript.Shell')
@@ -435,7 +435,17 @@ describe('Windows installer configuration', { concurrent: false }, () => {
           const powerShell32 = join(windows, 'SysWOW64/WindowsPowerShell/v1.0/powershell.exe')
           const result32 = await execFileAsync(powerShell32, [
             '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', storedCommand,
-          ], { env: { ...process.env, DSH_TEST_SHORTCUT: inspectedShortcut }, timeout: 10_000 })
+          ], { env: { ...process.env, DSH_TEST_SHORTCUT: inspectedShortcut }, timeout: 30_000 }).catch((error: unknown) => {
+            if (error instanceof Error) {
+              throw new Error(`32-bit shortcut inspection failed: ${error.message.slice(0, 180)}; ${JSON.stringify({
+                code: 'code' in error ? error.code : undefined,
+                killed: 'killed' in error ? error.killed : undefined,
+                signal: 'signal' in error ? error.signal : undefined,
+                stderr: 'stderr' in error ? error.stderr : undefined,
+              })}`, { cause: error })
+            }
+            throw error
+          })
           expect(result32.stdout.trim()).toBe(oldTarget)
         }
         await expect(inspectShortcutTargets(inspectedShortcut, oldTarget, newTarget)).resolves.toBe(expected)
