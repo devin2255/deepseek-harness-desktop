@@ -14,7 +14,7 @@ import { globSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import ts from 'typescript'
-import { cordisConfigFiles } from './cordis-config-files.ts'
+import { cordisConfigFiles, normalizeCordisConfigPath } from './cordis-config-files.ts'
 
 interface JsExpr {
   __jsExpr: string
@@ -36,7 +36,7 @@ const root = resolve(import.meta.dirname, '..')
 const appOverlayFiles = new Set([
   'examples/web-cordis/cordis.yml',
   'examples/web-schedule/cordis.yml',
-  ...globSync('examples/mcp-memory/*.cordis.yml', { cwd: root }),
+  ...globSync('examples/mcp-memory/*.cordis.yml', { cwd: root }).map(normalizeCordisConfigPath),
 ])
 const metadataFields = ['id', 'name', 'group', 'inject', 'intercept', 'isolate'] as const
 

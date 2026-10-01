@@ -561,6 +561,9 @@ importers:
       '@deepseek-ai/dsh-bash-sandbox':
         specifier: workspace:*
         version: link:../packages/shell/bash-sandbox
+      '@deepseek-ai/dsh-client-ui-task-overview':
+        specifier: workspace:*
+        version: link:../packages/client/ui-task-overview
       '@deepseek-ai/dsh-code-runtime-worker-thread':
         specifier: workspace:*
         version: link:../packages/code-runtime/code-runtime-worker-thread
@@ -750,6 +753,9 @@ importers:
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:*
         version: link:../packages/core/system-prompt
+      '@deepseek-ai/dsh-task-session':
+        specifier: workspace:*
+        version: link:../packages/task/task-session
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:*
         version: link:../packages/terminal/terminal

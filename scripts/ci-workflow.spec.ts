@@ -27,6 +27,15 @@ describe('CI workflow', () => {
     }
   })
 
+  it('prepares Linux sandboxing from the current distribution package and probes confinement', () => {
+    const script = readFileSync(resolve(root, 'scripts/prepare-ci-bubblewrap.sh'), 'utf8')
+
+    expect(script).toContain('sudo apt-get update -qq')
+    expect(script).toContain('sudo apt-get install -y -qq --no-install-recommends bubblewrap')
+    expect(script).toContain('bwrap --ro-bind / / --dev /dev --proc /proc --die-with-parent -- true')
+    expect(script).not.toContain('BUBBLEWRAP_URL')
+  })
+
   it('keeps a required Wine Windows job, a non-blocking native Windows job with failover, and a master-only standby', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     if (!isRecord(workflow.jobs)
