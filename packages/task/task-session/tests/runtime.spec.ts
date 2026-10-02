@@ -193,6 +193,13 @@ describe('TaskSessionProvider', () => {
   })
 
   it('rejects invalid worktree ownership before appending', async () => {
+    const withoutRegistry = await harness()
+    expect(withoutRegistry.ctx.get('workspaceRegistry')).toBeUndefined()
+    const unregisteredRoot = withoutRegistry.ctx.sessions.create(sid('unregistered'))
+    await expect(withoutRegistry.tasks.assignWorktree(unregisteredRoot.id, {
+      assignment: assignment(unregisteredRoot.id), expectedSeq: 0,
+    })).rejects.toMatchObject({ code: 'TASK_INVALID_WORKTREE' })
+
     const ctx = new Context()
     await ctx.plugin(SessionStore)
     const persisted = persistence()
@@ -289,6 +296,8 @@ describe('TaskSessionProvider', () => {
     test.tasks.replaceLiveGeneration(1, [question(1, 'q').facts[0]!, {
       kind: 'activity', taskId: root.id, ownerSessionId: child.id, sourceId: 'run', state: 'running', createdAt: 2,
     }])
+    await expect(test.tasks.review(root.id, { decision: 'ready', expectedSeq: 1 }))
+      .rejects.toMatchObject({ code: 'TASK_ACTIVE' })
     for (const operation of [
       () => test.tasks.recordCommit(root.id, { receipt: commitReceipt(), expectedSeq: 1 }),
       () => test.tasks.recordApply(root.id, { receipt: applyReceipt(), expectedSeq: 1 }),

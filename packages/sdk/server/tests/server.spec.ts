@@ -113,6 +113,87 @@ async function settleSubagent(
 }
 
 describe('HarnessSdkJsonRpcServer', () => {
+  it('rejects every Task entry point when the Task service is not installed', async () => {
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      get: vi.fn(() => undefined),
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    for (const [method, params] of [
+      ['task/list', {}],
+      ['task/define', { sessionId: 'root', goal: 'Ship', criteria: [], expectedSeq: 0 }],
+      ['task/updateCriterion', { sessionId: 'root', criterion: {}, expectedSeq: 0 }],
+      ['task/recordRisk', { sessionId: 'root', risk: {}, expectedSeq: 0 }],
+      ['task/review', { sessionId: 'root', decision: 'ready', expectedSeq: 0 }],
+      ['task/reviewSummary', { sessionId: 'root' }],
+    ] as const) {
+      await expect(server.handleRequest(method, params)).rejects.toThrow('Task service is unavailable')
+    }
+  })
+
+  it('rejects missing review targets and stale or already-delivered Task mutations', async () => {
+    const assignment = { kind: 'git-worktree', taskId: SessionId('root') } as TaskSnapshot['executionWorkspace']
+    const assigned = {
+      taskId: SessionId('root'), asOfSeq: 5, status: 'ready', executionWorkspace: assignment,
+    } as TaskSnapshot
+    const committed = { commit: '1'.repeat(40), committedRevision: 'b'.repeat(64) } as TaskSnapshot['commitReceipt']
+    let row: TaskSnapshot | undefined
+    let reviewAvailable = false
+    const review = { discard: vi.fn(async () => ({})) }
+    const tasks = {
+      snapshot: () => ({ generation: 1, tasks: row === undefined ? [] : [row] }),
+      recordDiscard: vi.fn(async () => row),
+    }
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      get: (name: string) => name === 'tasks' ? tasks : name === 'taskReview' && reviewAvailable ? review : undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    const commit = { sessionId: 'root', expectedRevision: 'b'.repeat(64), message: 'Ship', expectedSeq: 5 }
+    const apply = {
+      sessionId: 'root', expectedRevision: 'b'.repeat(64), expectedSourceHead: '2'.repeat(40),
+      commit: '1'.repeat(40), expectedSeq: 5,
+    }
+    const discard = { sessionId: 'root', expectedRevision: 'b'.repeat(64), confirmedUncommittedLoss: false, expectedSeq: 5 }
+
+    await expect(server.getTaskReviewSummary('root')).rejects.toThrow('does not exist')
+    row = { ...assigned, executionWorkspace: undefined }
+    await expect(server.getTaskReviewSummary('root')).rejects.toThrow('no application-owned Git worktree')
+    row = assigned
+    await expect(server.getTaskReviewSummary('root')).rejects.toThrow('Task review is unavailable')
+    reviewAvailable = true
+    await expect(server.commitTask({ ...commit, expectedSeq: 4 })).rejects.toThrow('expected sequence 4')
+
+    for (const invalid of [
+      { status: 'running' as const },
+      { commitReceipt: committed },
+      { discardReceipt: {} as TaskSnapshot['discardReceipt'] },
+    ]) {
+      row = { ...assigned, ...invalid }
+      await expect(server.commitTask(commit)).rejects.toThrow('Commit requires a ready Task')
+    }
+    for (const invalid of [
+      {},
+      { commitReceipt: committed, applyReceipt: {} as TaskSnapshot['applyReceipt'] },
+      { commitReceipt: committed, discardReceipt: {} as TaskSnapshot['discardReceipt'] },
+      { commitReceipt: { ...committed!, commit: 'wrong' } },
+      { commitReceipt: { ...committed!, committedRevision: 'wrong' } },
+    ]) {
+      row = { ...assigned, ...invalid }
+      await expect(server.applyTask(apply)).rejects.toThrow('Apply requires the exact recorded Task commit')
+    }
+    for (const invalid of [
+      { discardReceipt: {} as TaskSnapshot['discardReceipt'] },
+      { status: 'running' as const },
+    ]) {
+      row = { ...assigned, ...invalid }
+      await expect(server.discardTask(discard)).rejects.toThrow('Discard requires a ready or delivered Task')
+    }
+    row = { ...assigned, status: 'settled', applyReceipt: {} as TaskSnapshot['applyReceipt'] }
+    await expect(server.discardTask(discard)).resolves.toBe(row)
+    expect(review.discard).toHaveBeenCalledOnce()
+  })
+
   it('projects Task baselines and commands through the SDK request loop', async () => {
     const assignment = {
       kind: 'git-worktree' as const, taskId: SessionId('root'), workspaceId: 'workspace' as never,

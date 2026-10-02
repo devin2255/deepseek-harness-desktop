@@ -159,7 +159,7 @@ export class TaskSessionProvider extends TaskService {
       if (request.assignment.taskId !== sessionId) {
         throw new TaskError(`Worktree Task "${request.assignment.taskId}" does not match "${sessionId}"`, 'TASK_INVALID_WORKTREE')
       }
-      if (foldTask(input.events ?? []).assignment !== undefined) {
+      if (foldTask(input.events).assignment !== undefined) {
         throw new TaskError(`Task "${sessionId}" already has an execution worktree`, 'TASK_WORKTREE_ASSIGNED')
       }
       const registry = this.ctx.get('workspaceRegistry')
@@ -273,12 +273,12 @@ export class TaskSessionProvider extends TaskService {
     }
   }
 
-  private requireRoot(sessionId: SessionId): TaskSessionInput {
+  private requireRoot(sessionId: SessionId): TaskSessionInput & { events: readonly SessionEvent[] } {
     const input = this.inputs.get(sessionId)
     if (input === undefined) throw new TaskError(`Task "${sessionId}" does not exist`, 'TASK_NOT_FOUND')
     if (input.header.origin === 'subagent') throw new TaskError(`Session "${sessionId}" is not a root Task`, 'TASK_TARGET_NOT_ROOT')
     if (input.events === undefined) throw new TaskError(`Task "${sessionId}" is unavailable`, 'TASK_UNAVAILABLE')
-    return input
+    return input as TaskSessionInput & { events: readonly SessionEvent[] }
   }
 
   private treeIds(rootId: SessionId): Set<SessionId> {

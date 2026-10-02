@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DeepSeekHarness,
   HarnessClient,
@@ -228,6 +228,22 @@ describe('DeepSeekHarness', () => {
     await expect(harness.run('after-close')).rejects.toThrow(TransportClosedError)
   })
 
+  it('does not replace the runtime after a handshake fails during close', async () => {
+    const handshake = Promise.withResolvers<Awaited<ReturnType<HarnessClient['initialize']>>>()
+    const initialize = vi.spyOn(HarnessClient.prototype, 'initialize').mockImplementation(() => handshake.promise)
+    try {
+      const harness = harnessWith()
+      const client = harness.client
+      const starting = harness.start()
+      await harness.close()
+      handshake.reject(new Error('handshake failed after close'))
+      await expect(starting).rejects.toThrow('handshake failed after close')
+      expect(harness.client).toBe(client)
+    } finally {
+      initialize.mockRestore()
+    }
+  })
+
   it('rejects a malformed initialize result as a protocol error', async () => {
     const harness = harnessWith({ FAKE_MALFORMED: '1' })
     await expect(harness.run('bad')).rejects.toThrow(SdkProtocolError)
@@ -243,6 +259,39 @@ describe('DeepSeekHarness', () => {
     }
     // After scope exit the runtime is closed: reuse fails loudly.
     await expect(captured.run('after')).rejects.toThrow(TransportClosedError)
+  })
+
+  it('projects Task commands through the reusable high-level harness', async () => {
+    const harness = harnessWith()
+    const listed = await harness.listTasks()
+    expect(listed).toMatchObject({ generation: 4, tasks: [{ taskId: 'task-root' }] })
+    expect((await harness.defineTask('task-root', {
+      goal: 'Ship SDK', criteria: [{ text: 'Works' }], expectedSeq: 0,
+    })).definition?.goal).toBe('Ship SDK')
+    expect((await harness.updateTaskCriterion('task-root', {
+      criterion: { id: 'criterion' as never, text: 'Works', status: 'waived', evidence: [] }, expectedSeq: 1,
+    })).asOfSeq).toBe(2)
+    expect((await harness.recordTaskRisk('task-root', {
+      risk: { id: 'risk' as never, severity: 'high', summary: 'Signing' }, expectedSeq: 2,
+    })).risks[0]?.summary).toBe('Signing')
+    expect((await harness.reviewTask('task-root', { decision: 'ready', expectedSeq: 3 })).reviewDecision).toBe('ready')
+    const summary = await harness.getTaskReviewSummary('task-root')
+    expect(summary.revision).toBe(reviewRevision)
+    expect((await harness.getTaskReviewDiff('task-root', {
+      path: 'src/app.ts', expectedRevision: summary.revision,
+    })).patch).toContain('+new')
+    const committed = await harness.commitTask('task-root', {
+      expectedRevision: summary.revision, message: 'feat: ship', expectedSeq: 4,
+    })
+    expect(committed.commitReceipt).toMatchObject({ commit: '1'.repeat(40) })
+    expect((await harness.applyTask('task-root', {
+      expectedRevision: committed.commitReceipt!.committedRevision,
+      expectedSourceHead: '2'.repeat(40), commit: committed.commitReceipt!.commit, expectedSeq: 5,
+    })).applyReceipt).toMatchObject({ sourceHeadBefore: '2'.repeat(40) })
+    expect((await harness.discardTask('task-root', {
+      expectedRevision: committed.commitReceipt!.committedRevision,
+      confirmedUncommittedLoss: false, expectedSeq: 6,
+    })).discardReceipt).toMatchObject({ worktreeRemoved: true })
   })
 })
 

@@ -415,6 +415,7 @@ describe('Task wire schemas', () => {
     expect(taskDefineRequestSchema.safeParse({ sessionId: 'root', goal: ' ', criteria: [], expectedSeq: 0 }).success).toBe(false)
     expect(taskDefineRequestSchema.safeParse({ sessionId: 'root', goal: 'Ship', criteria: [], expectedSeq: -1 }).success).toBe(false)
     expect(taskDefineRequestSchema.safeParse({ sessionId: 'root', goal: 'Ship', criteria: [{ id: 'same', text: 'A' }, { id: 'same', text: 'B' }], expectedSeq: 0 }).success).toBe(false)
+    expect(taskDefineRequestSchema.safeParse({ sessionId: 'root', goal: 'Ship', criteria: [{ text: 'Choose later' }], expectedSeq: 0 }).success).toBe(true)
   })
 
   it('rejects invalid evidence and malformed baseline or change discriminants', () => {
@@ -452,5 +453,13 @@ describe('Task wire schemas', () => {
       ...row,
       definition: { goal: 'Ship', criteria: [criterion, { ...criterion, text: 'Duplicate' }] },
     }).success).toBe(false)
+  })
+
+  it('rejects mismatched worktree identities and an Apply receipt that moves source HEAD', () => {
+    expect(taskSnapshotSchema.safeParse({ ...reviewRow, taskId: 'other-task' }).success).toBe(false)
+    expect(taskSnapshotSchema.safeParse({ ...reviewRow, workspaceId: 'other-workspace' }).success).toBe(false)
+    expect(taskSnapshotSchema.safeParse({ ...reviewRow, applyReceipt: {
+      ...applyReceipt, sourceHeadAfter: '3'.repeat(40),
+    } }).success).toBe(false)
   })
 })
