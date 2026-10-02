@@ -17,9 +17,20 @@ const PERSIST_KEY = 'dsh.layout.panels'
 beforeEach(() => { localStorage.clear() })
 
 describe('createLayoutStore', () => {
+  it('starts on home and changes pages without changing panel preferences', () => {
+    const instance = createLayoutStore().create()
+    expect(instance.getSnapshot().centerPage).toBe('home')
+    instance.actions.openDetails()
+    instance.actions.showConversation()
+    expect(instance.getSnapshot()).toMatchObject({ centerPage: 'conversation', details: DETAILS_DEFAULT })
+    instance.actions.showHome()
+    expect(instance.getSnapshot()).toMatchObject({ centerPage: 'home', details: DETAILS_DEFAULT })
+    instance.actions.showReview()
+    expect(instance.getSnapshot()).toMatchObject({ centerPage: 'review', details: DETAILS_DEFAULT })
+  })
   it('initializes the sidebar at its default width, details closed, wide viewport assumed', () => {
     const { store } = createLayoutStore().create()
-    expect(store.getSnapshot()).toEqual({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false })
+    expect(store.getSnapshot()).toEqual({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, centerPage: 'home' })
   })
 
   it('each create() is an independent instance (factory is not a singleton)', () => {
@@ -55,7 +66,7 @@ describe('createLayoutStore', () => {
     actions.setSidebar(400)
     actions.setNarrow(true)
     actions.toggleSidebar()
-    expect(store.getSnapshot()).toEqual({ sidebar: 400, details: 0, narrow: true, narrowExpanded: true })
+    expect(store.getSnapshot()).toEqual({ sidebar: 400, details: 0, narrow: true, narrowExpanded: true, centerPage: 'home' })
     actions.toggleSidebar()
     expect(store.getSnapshot().narrowExpanded).toBe(false)
     expect(store.getSnapshot().sidebar).toBe(400)
@@ -98,6 +109,7 @@ describe('createLayoutStore', () => {
       details: 0,
       narrow: false,
       narrowExpanded: false,
+      centerPage: 'home',
     })
   })
 })

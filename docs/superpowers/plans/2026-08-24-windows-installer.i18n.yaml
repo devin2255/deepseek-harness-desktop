@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/superpowers/plans/2026-08-24-windows-installer.md
+2026-08-24-windows-installer.md: bc6afffa46c4c8af4d1b6fa09089e150f75e0988
+2026-08-24-windows-installer.zh.md: ed07a3fd249b72e86c9b766d84a129fdece1b10b

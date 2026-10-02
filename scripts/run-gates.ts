@@ -439,6 +439,17 @@ function ciWindowsCompleteGates(): Gate[] {
     pnpmScript('build', 'build'),
     pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
     desktopE2EGate(['build']),
+    // Packaging rebuilds desktop lib; wait until the Electron consumer releases it.
+    pnpmScript('desktop-installer', 'desktop:package', {
+      label: 'desktop Windows installer',
+      needs: ['build', 'desktop-e2e'],
+      allowFailure: true,
+    }),
+    pnpmScript('desktop-installer-validation', 'desktop:validate-package', {
+      label: 'desktop Windows installer validation',
+      needs: ['desktop-installer'],
+      allowFailure: true,
+    }),
     ...coverageGates(),
     ...observational,
   ]

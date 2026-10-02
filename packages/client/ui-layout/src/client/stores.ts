@@ -20,13 +20,16 @@ import {
  * `narrowExpanded` is the manual override that re-expands the auto-collapsed
  * sidebar over the squeezed center without rewriting the width preference.
  */
-type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowExpanded: boolean }
+type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowExpanded: boolean; centerPage: 'home' | 'conversation' | 'review' }
 
 /**
  * Annotation twin of the actions literal below (the export needs a declared
  * return type); drift fails assignability at the defineStore call.
  */
 type LayoutActions = {
+  showHome: (draft: LayoutState) => void
+  showConversation: (draft: LayoutState) => void
+  showReview: (draft: LayoutState) => void
   setSidebar: (draft: LayoutState, px: number) => void
   setDetails: (draft: LayoutState, px: number) => void
   toggleSidebar: (draft: LayoutState) => void
@@ -47,8 +50,11 @@ type LayoutActions = {
  */
 export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutActions>  {
   const handle = defineStore({
-    init: (): LayoutState => ({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false }),
+    init: (): LayoutState => ({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false, centerPage: 'home' }),
     actions: {
+      showHome: (d) => { d.centerPage = 'home' },
+      showConversation: (d) => { d.centerPage = 'conversation' },
+      showReview: (d) => { d.centerPage = 'review' },
       setSidebar: (d, px: number) => { d.sidebar = clampWidth(px, SIDEBAR_MIN, SIDEBAR_MAX) },
       setDetails: (d, px: number) => { d.details = clampWidth(px, DETAILS_MIN, DETAILS_MAX) },
       // Narrow toggles flip only the override: the width preference survives

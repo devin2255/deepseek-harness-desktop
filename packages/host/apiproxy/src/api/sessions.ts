@@ -8,6 +8,7 @@ import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session/types'
+import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 // The pure-type outlet: api/ is browser-importable, and the package root's
 // cordis Context merge (via dsh-agent) must not enter client aggregates.
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
@@ -249,7 +250,9 @@ export interface SessionsApi {
    * preallocate `sessionId`: retries with the same id and cwd return the same
    * session, while a different cwd fails with `session-conflict`. Workspace
    * creation attaches the session after publication; an attach failure
-   * returns `workspace-attach-failed` with the published session id.
+   * returns `workspace-attach-failed` with the published session id. Explicit
+   * `worktree` isolation requires a Workspace and fails closed when the Host
+   * cannot create and durably assign an application-owned Git worktree.
    *
    * `agentPreset` names the composition the new session's agent is built
    * from; omitted, the effective default applies — the user's stored choice
@@ -258,8 +261,17 @@ export interface SessionsApi {
    * id fails with `agent-preset-not-found`, and a preset whose composition
    * cannot be mounted fails with `agent-preset-invalid`.
    */
-  create(request: RpcRequest<{ workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId; agentPreset?: string }>):
-  Promise<RpcResponse<{ sessionId: SessionId; agentPreset?: string }>>
+  create(request: RpcRequest<{
+    workspaceId?: WorkspaceId
+    cwd?: string
+    sessionId?: SessionId
+    agentPreset?: string
+    isolation?: 'direct' | 'worktree'
+  }>): Promise<RpcResponse<{
+    sessionId: SessionId
+    agentPreset?: string
+    executionWorkspace?: TaskWorktreeAssignment
+  }>>
 
   /**
    * Reads a window of history events; page boundaries align to append-origin message

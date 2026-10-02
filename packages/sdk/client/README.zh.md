@@ -29,6 +29,8 @@ console.log(result.finalResponse)
 
 自有运行 API 之下的协议客户端：显式 `start()`/`initialize()`/`prompt()`/`request()`/`close()`，外加通知订阅。`prompt()` 在运行时接受排队消息后立即返回该消息的 ID，绝不等待 agent 活动。`subscribe(filter?)` 返回 `NotificationSubscription`（可等待的 `next()`、非阻塞 `tryNext()`、异步迭代）；`subscribeSessionTree(id)` 把范围限定到一个会话及从 `subagent.started` 血缘边发现的后代——运行时对上下文内每个会话都发通知，范围限定在客户端完成，与 Python SDK 完全一致。本包导出有明确类型的错误：`JsonRpcResponseError`（协议错误响应，保留 code/data）、`RequestTimeoutError`（配置的时限已到）、`SdkProtocolError`（响应超出文档化协议）、`TransportClosedError`（运行时已消失——消息携带退出码与有界 stderr 尾部）。
 
+两层客户端都提供 `listTasks`、`defineTask`、`updateTaskCriterion`、`recordTaskRisk` 和 `reviewTask`。隔离 Task 还提供 `getTaskReviewSummary`、`getTaskReviewDiff`、`commitTask`、`applyTask` 和 `discardTask`；每项变更都携带用户所见的准确审查 revision 与 Task sequence。它们返回运行时给出的分离 Task 基线、有界审查值或已提交完整行；`executionWorkspace` 会原样保留 Host 给出的源路径、Worktree 路径、分支和 Git 标识，不做路径改写。SDK 不执行 Git 操作，也不维护 Task 缓存；返回前会校验 Task 行、审查文件、Diff 和交付回执，格式错误的值会抛出 `SdkProtocolError`。
+
 `close()` 先请求协议 `shutdown`（受 `shutdownTimeoutMs` 约束，默认 1000 毫秒），然后走 stdin-EOF → SIGTERM → SIGKILL 阶梯（`disposeEofGraceMs` 默认 6000，`disposeGraceMs` 默认 3000）直到进程真正退出。该阶梯为本客户端私有：它运行在任何 harness 上下文之外，无法搭乘 [`dsh-subprocess`](../../subprocess/README.md) 服务——即该 seam 所记录的 SDK 托管传输例外。幂等，已关闭的客户端拒绝复用。
 
 `HarnessClientOptions.env` 给定时整体替换子进程环境（`undefined` 原样继承父进程环境）；凭据策略归调用方——`dsh-subprocess` 的 `scrubbedParentEnv` 是面向隔离启动的共享擦除基底。

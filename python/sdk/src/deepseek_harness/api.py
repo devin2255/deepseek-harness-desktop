@@ -3,11 +3,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 from .client import HarnessClient, HarnessConfig
 from .errors import SdkProtocolError
-from .models import JsonObject, Notification
+from .models import (
+    DefineTaskCriterion, JsonObject, Notification, TaskCriterion, TaskFileDiff,
+    TaskListSnapshot, TaskReviewSummary, TaskRisk, TaskSnapshot,
+)
 
 
 @dataclass(slots=True)
@@ -122,6 +125,92 @@ class DeepSeekHarness:
         on_notification: Callable[[Notification], None] | None = None,
     ) -> RunResult:
         return self.start_session(session_id).run(input, on_notification=on_notification)
+
+    def list_tasks(self) -> TaskListSnapshot:
+        """Return all root Tasks from the running harness."""
+        self.start()
+        return self._client.list_tasks()
+
+    def define_task(
+        self, session_id: str, *, goal: str, criteria: list[DefineTaskCriterion], expected_seq: int
+    ) -> TaskSnapshot:
+        """Define or replace one root Task."""
+        self.start()
+        return self._client.define_task(
+            session_id, goal=goal, criteria=criteria, expected_seq=expected_seq
+        )
+
+    def update_task_criterion(
+        self, session_id: str, *, criterion: TaskCriterion, expected_seq: int
+    ) -> TaskSnapshot:
+        """Replace one acceptance criterion."""
+        self.start()
+        return self._client.update_task_criterion(
+            session_id, criterion=criterion, expected_seq=expected_seq
+        )
+
+    def record_task_risk(
+        self, session_id: str, *, risk: TaskRisk, expected_seq: int
+    ) -> TaskSnapshot:
+        """Record or resolve one Task risk."""
+        self.start()
+        return self._client.record_task_risk(session_id, risk=risk, expected_seq=expected_seq)
+
+    def review_task(
+        self,
+        session_id: str,
+        *,
+        decision: Literal["changes-requested", "ready"],
+        expected_seq: int,
+    ) -> TaskSnapshot:
+        """Record one review or delivery decision."""
+        self.start()
+        return self._client.review_task(session_id, decision=decision, expected_seq=expected_seq)
+
+    def get_task_review_summary(self, session_id: str) -> TaskReviewSummary:
+        """Return one assigned Task's bounded review summary."""
+        self.start()
+        return self._client.get_task_review_summary(session_id)
+
+    def get_task_review_diff(
+        self, session_id: str, *, path: str, expected_revision: str
+    ) -> TaskFileDiff:
+        """Return one file from an exact Task review snapshot."""
+        self.start()
+        return self._client.get_task_review_diff(
+            session_id, path=path, expected_revision=expected_revision
+        )
+
+    def commit_task(
+        self, session_id: str, *, expected_revision: str, message: str, expected_seq: int
+    ) -> TaskSnapshot:
+        """Commit one exact ready Task review."""
+        self.start()
+        return self._client.commit_task(
+            session_id, expected_revision=expected_revision, message=message, expected_seq=expected_seq
+        )
+
+    def apply_task(
+        self, session_id: str, *, expected_revision: str, expected_source_head: str,
+        commit: str, expected_seq: int,
+    ) -> TaskSnapshot:
+        """Apply one exact recorded Task commit to its source checkout."""
+        self.start()
+        return self._client.apply_task(
+            session_id, expected_revision=expected_revision, expected_source_head=expected_source_head,
+            commit=commit, expected_seq=expected_seq,
+        )
+
+    def discard_task(
+        self, session_id: str, *, expected_revision: str,
+        confirmed_uncommitted_loss: bool, expected_seq: int,
+    ) -> TaskSnapshot:
+        """Explicitly release one exact Task worktree."""
+        self.start()
+        return self._client.discard_task(
+            session_id, expected_revision=expected_revision,
+            confirmed_uncommitted_loss=confirmed_uncommitted_loss, expected_seq=expected_seq,
+        )
 
 
 class Session:

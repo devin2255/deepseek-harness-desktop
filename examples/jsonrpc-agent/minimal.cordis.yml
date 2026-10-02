@@ -80,3 +80,6 @@
   config:
     root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
     compression: none
+
+- id: task-session
+  name: '@deepseek-ai/dsh-task-session'

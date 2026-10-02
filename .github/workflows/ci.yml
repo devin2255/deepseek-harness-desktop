@@ -45,11 +45,13 @@ jobs:
   # TODO(hosted-serial-ci): Re-enable the three hosted serial reference jobs before release.
   # The self-hosted standby remains active on every master push.
 
-  # Three enterprise jobs isolate coverage, static analysis, and the
+  # Three jobs isolate coverage, static analysis, and the
   # build-backed consumer tail. The consumer job owns the only Linux build so
   # all three jobs enter runner allocation independently.
   #
-  # FAILOVER (Linux): each Linux enterprise job resolves its pool through the
+  # The upstream repository uses enterprise pools; forks use standard hosted
+  # runners so required checks do not queue for runners they cannot access.
+  # FAILOVER (Linux): upstream resolves its pool through the
   # DSH_CI_FAILOVER_LINUX repository variable. Unset (normal), the expressions
   # pick the hosted enterprise pools below. Setting the variable to
   # 'selfhosted' (repo Settings → Actions → Variables; writer-manageable
@@ -63,13 +65,14 @@ jobs:
   node-24:
     if: github.event_name == 'pull_request'
     runs-on: >-
-      ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+      ${{ github.repository != 'deepseek-harness/deepseek-harness' && 'ubuntu-24.04'
+          || vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / static
     env:
-      DSH_GATE_CONCURRENCY: '8'
+      DSH_GATE_CONCURRENCY: ${{ github.repository == 'deepseek-harness/deepseek-harness' && '8' || '2' }}
     steps:
       # Fetch complete history so the archive gate can read the trusted PR base from a reused shallow checkout.
       - uses: actions/checkout@v6
@@ -115,7 +118,8 @@ jobs:
   node-24-coverage:
     if: github.event_name == 'pull_request'
     runs-on: >-
-      ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+      ${{ github.repository != 'deepseek-harness/deepseek-harness' && 'ubuntu-24.04'
+          || vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'dsh-ubuntu-24-04-16core' }}
@@ -125,8 +129,8 @@ jobs:
       # shares one 64-core VM across six always-on runner instances, so each
       # instance may use eight while keeping the worst case at 8 × 6 = 48
       # workers; process-bound suites remain isolated in forks.
-      DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '6' }}
-      DSH_GATE_CONCURRENCY: '3'
+      DSH_COVERAGE_MAX_WORKERS: ${{ github.repository != 'deepseek-harness/deepseek-harness' && '2' || vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '6' }}
+      DSH_GATE_CONCURRENCY: ${{ github.repository == 'deepseek-harness/deepseek-harness' && '3' || '2' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -178,18 +182,19 @@ jobs:
   node-24-consumers:
     if: github.event_name == 'pull_request'
     runs-on: >-
-      ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+      ${{ github.repository != 'deepseek-harness/deepseek-harness' && 'ubuntu-24.04'
+          || vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / snapshots and artifacts
     env:
-      DSH_GATE_CONCURRENCY: '8'
+      DSH_GATE_CONCURRENCY: ${{ github.repository == 'deepseek-harness/deepseek-harness' && '8' || '2' }}
       DSH_NODE_COMPAT_SKIP_TYPECHECK: '1'
-      DSH_OXLINT_THREADS: '8'
-      DSH_PUBLINT_CONCURRENCY: '8'
+      DSH_OXLINT_THREADS: ${{ github.repository == 'deepseek-harness/deepseek-harness' && '8' || '2' }}
+      DSH_PUBLINT_CONCURRENCY: ${{ github.repository == 'deepseek-harness/deepseek-harness' && '8' || '2' }}
       # Failover halves snapshot concurrency for the shared 64-core VM.
-      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '32' }}
+      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ github.repository != 'deepseek-harness/deepseek-harness' && '2' || vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '32' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -382,16 +387,16 @@ jobs:
 
       # Runner provisioning only — a developer machine installs Wine through
       # its own package manager; the gate script assumes a wine binary and
-      # fails loud without one. Wine from the apt cache when present; else
-      # download the full dependency closure once and keep it for the next
-      # run. The `wine` dispatcher package (not bare `wine64`) is what puts a
-      # binary on PATH.
+      # fails loud without one. Cached packages reduce repeat downloads, while
+      # fresh apt indexes let the current runner image fill dependencies that
+      # were already installed on the cache-seeding image. The `wine`
+      # dispatcher package (not bare `wine64`) is what puts a binary on PATH.
       - name: Install Wine
         run: |
+          sudo apt-get update
           if compgen -G "$HOME/wine-debs/*.deb" > /dev/null; then
             sudo apt-get install -y --no-install-recommends "$HOME"/wine-debs/*.deb
           else
-            sudo apt-get update
             sudo apt-get install -y --no-install-recommends --download-only wine
             mkdir -p "$HOME/wine-debs"
             cp /var/cache/apt/archives/*.deb "$HOME/wine-debs/" 2>/dev/null || true
@@ -447,7 +452,8 @@ jobs:
   windows-native:
     if: github.event_name == 'pull_request'
     runs-on: >-
-      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+      ${{ github.repository != 'deepseek-harness/deepseek-harness' && 'windows-2025'
+          || vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
           || 'dsh-windows-2025-16core' }}
@@ -459,7 +465,7 @@ jobs:
       # under the complete lane's concurrent gate load.
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
       DSH_GATE_CONCURRENCY: '2'
-      DSH_PUBLINT_CONCURRENCY: '8'
+      DSH_PUBLINT_CONCURRENCY: ${{ github.repository == 'deepseek-harness/deepseek-harness' && '8' || '2' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -575,7 +581,7 @@ jobs:
   # tool caches make them redundant (and saving here would poison the hosted
   # cache namespace with self-hosted paths).
   serial-linux-selfhosted:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'
     name: serial / linux (self-hosted standby)
     runs-on: [self-hosted, linux, x64, vm-backup]
     steps:
@@ -659,7 +665,7 @@ jobs:
   # and tool caches make them redundant (and saving here would poison the
   # hosted cache namespace with self-hosted paths).
   serial-windows:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'
     name: serial / windows (self-hosted standby)
     runs-on: [self-hosted, dsh-win-ci, windows]
     timeout-minutes: 120
@@ -701,7 +707,7 @@ jobs:
   # Manual, bounded comparison of the actual critical Linux and Windows lanes.
   # The named pools are restricted at the organization level to this repository.
   larger-runner-benchmark:
-    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -792,7 +798,7 @@ jobs:
   # complete unsharded primary aggregate with bounded in-runner parallelism;
   # Windows runs both blocking build targets concurrently through run-gates.
   consolidated-runner-benchmark:
-    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'
+    if: github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -924,7 +930,8 @@ jobs:
     # (DSH_CI_FAILOVER_LINUX), not the Windows one, because it aggregates the
     # required Linux workers and runs on the vm-backup pool.
     runs-on: >-
-      ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+      ${{ github.repository != 'deepseek-harness/deepseek-harness' && 'ubuntu-24.04'
+          || vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}

@@ -2,9 +2,9 @@
  * Install packed tarballs into a throwaway consumer outside the repository and
  * drive the installed executable with plain Node.
  *
- * Every tarball the installed tree needs comes from `--from`, so the only
- * registry traffic is for external dependencies. That matters beyond hermetic
- * verification: the harness packages declare the vendored framework as a peer,
+ * Every required first-party tarball comes from `--from`; optional Landlock
+ * platform packages may resolve from the registry or be absent. The harness
+ * packages declare the vendored framework as a peer,
  * those packages live in another release sequence, and this job must not depend
  * on the registry already carrying versions that match — one pull request may
  * bump both families before either publishes — so a dsh verification passes the
@@ -16,9 +16,10 @@
  * checkout cannot stand in for a missing file here.
  */
 
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { releaseFamily } from './families.ts'
@@ -66,6 +67,45 @@ function packedDependencies(directories: readonly string[]): Map<string, { url: 
   return dependencies
 }
 
+/** Run a probe with the Linux Landlock platform package unavailable to its entry package.
+ * @param consumerRoot - Temporary installed consumer root.
+ * @param platform - Platform of the installed consumer.
+ * @param arch - Architecture of the installed consumer.
+ * @param probe - Installed-entry check to run while the platform package is absent.
+ */
+export function probeWithoutLandlockPlatformPackage(
+  consumerRoot: string,
+  platform: NodeJS.Platform,
+  arch: string,
+  probe: () => void,
+): void {
+  if (platform !== 'linux' || (arch !== 'x64' && arch !== 'arm64')) return
+  const entryManifest = join(consumerRoot, 'node_modules', '@deepseek-ai', 'node-addon-landlock-run', 'package.json')
+  const platformName = `@deepseek-ai/node-addon-landlock-run-linux-${arch}`
+  const requireFromEntry = createRequire(entryManifest)
+  const platformRoots: string[] = []
+  for (const modulesRoot of requireFromEntry.resolve.paths(platformName) ?? []) {
+    const withinConsumer = relative(consumerRoot, modulesRoot)
+    if (withinConsumer === '' || withinConsumer === '..' || withinConsumer.startsWith(`..${sep}`) || isAbsolute(withinConsumer)) continue
+    const candidate = join(modulesRoot, '@deepseek-ai', `node-addon-landlock-run-linux-${arch}`)
+    if (existsSync(join(candidate, 'package.json'))) {
+      platformRoots.push(candidate)
+    }
+  }
+  const moved: { root: string; hidden: string }[] = []
+  try {
+    for (const root of platformRoots) {
+      const hidden = `${root}.dsh-absent-probe`
+      if (existsSync(hidden)) throw new Error(`release verify-packed-install: probe destination already exists: ${hidden}`)
+      renameSync(root, hidden)
+      moved.push({ root, hidden })
+    }
+    probe()
+  } finally {
+    for (const { root, hidden } of moved.reverse()) renameSync(hidden, root)
+  }
+}
+
 /** Install every tarball under `--from` and drive the `--family` entry. */
 function main(): void {
   const { values } = parseArgs({
@@ -99,12 +139,10 @@ function main(): void {
 
     const environment = consumerEnvironment(consumerRoot)
     console.log(`release verify-packed-install: installing ${String(packed.size)} tarball(s) into ${consumerRoot}`)
-    // Optional dependencies are omitted: the Landlock platform packages behind
-    // them need a musl toolchain and one build per architecture, and a consumer
-    // that cannot install them must still start — which is what optional means
-    // here. Their entry package is a plain dependency of dsh-sandbox-local, so
-    // its tarball is supplied through --from.
-    capture('npm', ['install', '--no-audit', '--no-fund', '--package-lock=false', '--omit=optional'],
+    // Default npm installation retains native prebuilds supplied as optional
+    // dependencies, including Koffi's Linux binary. Landlock's platform
+    // package is withheld only for the separate absent-platform probe below.
+    capture('npm', ['install', '--no-audit', '--no-fund', '--package-lock=false'],
       { cwd: consumerRoot, env: environment })
 
     const bin = join(consumerRoot, 'node_modules', ...entry.packageName.split('/'), entry.binPath)
@@ -113,6 +151,12 @@ function main(): void {
       throw new Error(`installed ${entry.packageName} --version reported ${JSON.stringify(version)}, expected ${expected.version}`)
     }
     console.log(`release verify-packed-install: installed ${entry.packageName} reports ${version}`)
+    probeWithoutLandlockPlatformPackage(consumerRoot, process.platform, process.arch, () => {
+      const withoutPlatform = capture(process.execPath, [bin, '--version'], { cwd: consumerRoot, env: environment })
+      if (withoutPlatform !== expected.version) {
+        throw new Error(`installed ${entry.packageName} without Landlock platform package reported ${JSON.stringify(withoutPlatform)}, expected ${expected.version}`)
+      }
+    })
   } finally {
     rmSync(consumerRoot, { recursive: true, force: true })
   }

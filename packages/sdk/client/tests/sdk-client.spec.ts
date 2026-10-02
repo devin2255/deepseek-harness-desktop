@@ -19,8 +19,12 @@ import {
   SdkProtocolError,
   TransportClosedError,
   type HarnessNotification,
+  type TaskReviewRevision,
+  type TaskWorktreeAssignment,
 } from '../src/index.ts'
 import { finalResponse, normalizeInput } from '../src/api.ts'
+
+const reviewRevision = 'b'.repeat(64) as TaskReviewRevision
 
 const fakeRuntime = fileURLToPath(new URL('./fake-runtime.ts', import.meta.url))
 
@@ -243,6 +247,122 @@ describe('DeepSeekHarness', () => {
 })
 
 describe('HarnessClient', () => {
+  it('projects Task list and compare-and-set commands through typed methods', async () => {
+    const client = new HarnessClient(fakeLaunch())
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+
+    const listed = await client.listTasks()
+    expect(listed).toMatchObject({ generation: 4, tasks: [{ taskId: 'task-root', status: 'running' }] })
+    const assignment: TaskWorktreeAssignment | undefined = listed.tasks[0]?.executionWorkspace
+    expect(assignment).toMatchObject({
+      sourcePath: 'D:\\source\\project',
+      path: 'D:\\harness\\worktrees\\task-root',
+      branch: 'dsh/task-0123456789abcdef01234567',
+    })
+    const defined = await client.defineTask('task-root', {
+      goal: 'Ship SDK', criteria: [{ text: 'Works' }], expectedSeq: 0,
+    })
+    expect(defined.definition?.goal).toBe('Ship SDK')
+    expect((await client.updateTaskCriterion('task-root', {
+      criterion: { id: 'criterion' as never, text: 'Works', status: 'waived', evidence: [] }, expectedSeq: 1,
+    })).asOfSeq).toBe(2)
+    expect((await client.recordTaskRisk('task-root', {
+      risk: { id: 'risk' as never, severity: 'high', summary: 'Signing' }, expectedSeq: 2,
+    })).risks[0]?.summary).toBe('Signing')
+    expect((await client.reviewTask('task-root', { decision: 'ready', expectedSeq: 3 })).reviewDecision).toBe('ready')
+    const summary = await client.getTaskReviewSummary('task-root')
+    expect(summary).toMatchObject({ revision: 'b'.repeat(64), files: [{ path: 'src/app.ts', additions: 2 }] })
+    const diff = await client.getTaskReviewDiff('task-root', { path: 'src/app.ts', expectedRevision: summary.revision })
+    expect(diff.patch).toContain('+new')
+    const committed = await client.commitTask('task-root', {
+      expectedRevision: summary.revision, message: 'feat: ship', expectedSeq: 4,
+    })
+    expect(committed.commitReceipt).toMatchObject({ commit: '1'.repeat(40), committedRevision: 'c'.repeat(64) })
+    const applied = await client.applyTask('task-root', {
+      expectedRevision: committed.commitReceipt!.committedRevision,
+      expectedSourceHead: '2'.repeat(40), commit: committed.commitReceipt!.commit, expectedSeq: 5,
+    })
+    expect(applied.applyReceipt).toMatchObject({ sourceHeadBefore: '2'.repeat(40) })
+    const discarded = await client.discardTask('task-root', {
+      expectedRevision: committed.commitReceipt!.committedRevision,
+      confirmedUncommittedLoss: false, expectedSeq: 6,
+    })
+    expect(discarded.discardReceipt).toMatchObject({ worktreeRemoved: true })
+  })
+
+  it('rejects malformed Task projections as protocol errors', async () => {
+    const client = new HarnessClient(fakeLaunch({ FAKE_MALFORMED_TASK: '1' }))
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+    await expect(client.listTasks()).rejects.toThrow(SdkProtocolError)
+  })
+
+  it('rejects malformed Task worktree assignments as protocol errors', async () => {
+    const client = new HarnessClient(fakeLaunch({ FAKE_MALFORMED_TASK_WORKTREE: '1' }))
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+    await expect(client.listTasks()).rejects.toThrow(SdkProtocolError)
+  })
+
+  it.each([
+    'snapshot-non-record',
+    'review-decision-number',
+    'review-decision-invalid',
+    'commit-receipt-invalid',
+    'apply-receipt-invalid',
+    'discard-receipt-invalid',
+  ])('rejects the malformed Task projection case %s', async (taskCase) => {
+    const client = new HarnessClient(fakeLaunch({ FAKE_TASK_CASE: taskCase }))
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+    await expect(client.listTasks()).rejects.toThrow(SdkProtocolError)
+  })
+
+  it.each([
+    ['summary-non-record', 'summary', undefined],
+    ['summary-previous-path', 'summary', '1'],
+    ['diff-non-record', 'diff', undefined],
+    ['diff-previous-path', 'diff', '1'],
+    ['discard-recoverable', 'discard', '1'],
+  ] as const)('rejects the malformed Task review response case %s', async (taskCase, method, invalid) => {
+    const client = new HarnessClient(fakeLaunch({
+      FAKE_TASK_CASE: taskCase,
+      ...(invalid === undefined ? {} : { FAKE_TASK_INVALID: invalid }),
+    }))
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+
+    const call = method === 'summary'
+      ? client.getTaskReviewSummary('task-root')
+      : method === 'diff'
+        ? client.getTaskReviewDiff('task-root', { path: 'src/app.ts', expectedRevision: reviewRevision })
+        : client.discardTask('task-root', {
+          expectedRevision: reviewRevision, confirmedUncommittedLoss: false, expectedSeq: 6,
+        })
+    await expect(call).rejects.toThrow(SdkProtocolError)
+  })
+
+  it('accepts validated previous paths and a recoverable discard commit', async () => {
+    const summaryClient = new HarnessClient(fakeLaunch({ FAKE_TASK_CASE: 'summary-previous-path' }))
+    const diffClient = new HarnessClient(fakeLaunch({ FAKE_TASK_CASE: 'diff-previous-path' }))
+    const discardClient = new HarnessClient(fakeLaunch({ FAKE_TASK_CASE: 'discard-recoverable' }))
+    cleanups.push(() => Promise.all([summaryClient.close(), diffClient.close(), discardClient.close()]).then(() => undefined))
+    await Promise.all([summaryClient, diffClient, discardClient].map(client => (
+      client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+    )))
+
+    await expect(summaryClient.getTaskReviewSummary('task-root')).resolves.toMatchObject({
+      files: [{ previousPath: 'src/old.ts' }],
+    })
+    await expect(diffClient.getTaskReviewDiff('task-root', {
+      path: 'src/app.ts', expectedRevision: reviewRevision,
+    })).resolves.toMatchObject({ previousPath: 'src/old.ts' })
+    await expect(discardClient.discardTask('task-root', {
+      expectedRevision: reviewRevision, confirmedUncommittedLoss: false, expectedSeq: 6,
+    })).resolves.toMatchObject({ discardReceipt: { recoverableCommit: '3'.repeat(40) } })
+  })
+
   it('times out a hung request at the per-call bound', async () => {
     const client = new HarnessClient(fakeLaunch({ FAKE_HANG_PROMPT: '1' }))
     cleanups.push(() => client.close())

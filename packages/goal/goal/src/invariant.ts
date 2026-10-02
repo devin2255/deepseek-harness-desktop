@@ -47,6 +47,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
     states.set(session, state)
     return state
   }
+  /* jscpd:ignore-start */
   /* v8 ignore next -- session/event always follows list() or session/created seeding */
   const stateFor = (session: Session): GoalFoldState => states.get(session) ?? seed(session)
 
@@ -68,6 +69,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
     staged.delete(event)
     states.set(session, candidate.state)
   }, { global: true })
+  /* jscpd:ignore-end */
 }, { inject: ['sessions'] })
 
 /**

@@ -1,0 +1,67 @@
+name: Desktop macOS arm64 smoke
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['dsh-v*', 'v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  desktop:
+    name: macOS arm64 / desktop runtime
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Require Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace artifacts
+        run: pnpm run build
+
+      - name: Exercise desktop entry and windows
+        run: pnpm run test:desktop:e2e:ci
+
+      - name: Build unsigned DMG and ZIP
+        run: pnpm run desktop:package:macos:unsigned
+
+      - name: Install and launch the DMG application
+        env:
+          DSH_MACOS_PACKAGE_E2E: '1'
+        run: pnpm exec vitest run --config vitest.desktop-e2e.config.ts apps/desktop/tests/mac-installed.e2e.ts
+
+      - name: Retain unsigned test packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos-arm64-${{ github.sha }}
+          path: |
+            .artifacts/desktop/installer/*.dmg
+            .artifacts/desktop/installer/*.zip
+          if-no-files-found: error
+          retention-days: 30

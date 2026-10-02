@@ -36,6 +36,7 @@ import {
 } from '../api/host.schema.ts'
 import {
   workspaceArchiveSessionRequestSchema,
+  workspaceUnarchiveSessionRequestSchema,
   workspaceCreateRequestSchema,
   workspaceDeleteRequestSchema,
   workspaceInsertBeforeRequestSchema,
@@ -56,6 +57,11 @@ import {
   goalCompleteRequestSchema,
   goalClearRequestSchema,
 } from '../api/goals.schema.ts'
+import {
+  taskApplyRequestSchema, taskCommitRequestSchema, taskDefineRequestSchema, taskDiscardRequestSchema,
+  taskListRequestSchema, taskRecordRiskRequestSchema, taskReviewDiffRequestSchema,
+  taskReviewRequestSchema, taskReviewSummaryRequestSchema, taskUpdateCriterionRequestSchema,
+} from '../api/tasks.schema.ts'
 import {
   settingsDescribeRequestSchema, settingsMutateRequestSchema, settingsOpenDocumentRequestSchema,
   settingsReplaceRequestSchema, settingsUpdateRequestSchema,
@@ -116,6 +122,7 @@ const UNARY_ROUTES: UnaryRoutes = {
   'workspace.insertBefore': { schema: workspaceInsertBeforeRequestSchema, invoke: (api, r) => api.workspace.insertBefore(r) },
   'workspace.insertSessionBefore': { schema: workspaceInsertSessionBeforeRequestSchema, invoke: (api, r) => api.workspace.insertSessionBefore(r) },
   'workspace.archiveSession': { schema: workspaceArchiveSessionRequestSchema, invoke: (api, r) => api.workspace.archiveSession(r) },
+  'workspace.unarchiveSession': { schema: workspaceUnarchiveSessionRequestSchema, invoke: (api, r) => api.workspace.unarchiveSession(r) },
   'skill.list': { schema: skillListRequestSchema, invoke: (api, r) => api.skills.list(r) },
   'agentPreset.list': { schema: agentPresetListRequestSchema, invoke: (api, r) => api.agentPresets.list(r) },
   'agentPreset.select': { schema: agentPresetSelectRequestSchema, invoke: (api, r) => api.agentPresets.select(r) },
@@ -129,6 +136,16 @@ const UNARY_ROUTES: UnaryRoutes = {
   'goal.resume': { schema: goalResumeRequestSchema, invoke: (api, r) => api.goals.resume(r) },
   'goal.complete': { schema: goalCompleteRequestSchema, invoke: (api, r) => api.goals.complete(r) },
   'goal.clear': { schema: goalClearRequestSchema, invoke: (api, r) => api.goals.clear(r) },
+  'task.list': { schema: taskListRequestSchema, invoke: (api, r) => api.tasks.list(r) },
+  'task.define': { schema: taskDefineRequestSchema, invoke: (api, r) => api.tasks.define(r) },
+  'task.updateCriterion': { schema: taskUpdateCriterionRequestSchema, invoke: (api, r) => api.tasks.updateCriterion(r) },
+  'task.recordRisk': { schema: taskRecordRiskRequestSchema, invoke: (api, r) => api.tasks.recordRisk(r) },
+  'task.review': { schema: taskReviewRequestSchema, invoke: (api, r) => api.tasks.review(r) },
+  'task.reviewSummary': { schema: taskReviewSummaryRequestSchema, invoke: (api, r, signal) => api.tasks.reviewSummary(r, signal) },
+  'task.reviewDiff': { schema: taskReviewDiffRequestSchema, invoke: (api, r, signal) => api.tasks.reviewDiff(r, signal) },
+  'task.commit': { schema: taskCommitRequestSchema, invoke: (api, r, signal) => api.tasks.commit(r, signal) },
+  'task.apply': { schema: taskApplyRequestSchema, invoke: (api, r, signal) => api.tasks.apply(r, signal) },
+  'task.discard': { schema: taskDiscardRequestSchema, invoke: (api, r, signal) => api.tasks.discard(r, signal) },
   'settings.describe': { schema: settingsDescribeRequestSchema, invoke: (api, r) => api.settings.describe(r) },
   'settings.openDocument': { schema: settingsOpenDocumentRequestSchema, invoke: (api, r, signal) => api.settings.openDocument(r, signal) },
   'settings.update': { schema: settingsUpdateRequestSchema, invoke: (api, r) => api.settings.update(r) },

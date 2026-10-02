@@ -21,8 +21,16 @@ import {
   type SessionPromptParams,
 } from '@deepseek-ai/dsh-sdk-protocol'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
+  TaskSnapshot, UpdateTaskCriterionRequest,
+} from '@deepseek-ai/dsh-task/types'
+import type { TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 import { disposeRuntimeProcess } from './dispose.ts'
-import type { HarnessClientOptions, HarnessNotification, NotificationFilter } from './types.ts'
+import type {
+  ApplyTaskRequest, CommitTaskRequest, DiscardTaskRequest, GetTaskReviewDiffRequest,
+  HarnessClientOptions, HarnessNotification, NotificationFilter,
+} from './types.ts'
 
 /** Retained stderr lines used to diagnose an unexpected runtime death. */
 const STDERR_TAIL_LIMIT = 400
@@ -290,6 +298,107 @@ export class HarnessClient {
   }
 
   /**
+   * Read the complete detached Task baseline.
+   * @returns the validated Task list.
+   */
+  async listTasks(): Promise<TaskListSnapshot> {
+    const result = await this.request('task/list')
+    if (!isRecord(result) || !Number.isSafeInteger(result.generation) || !Array.isArray(result.tasks)) {
+      throw new SdkProtocolError(`task/list returned a malformed baseline: ${JSON.stringify(result)}`)
+    }
+    return { generation: result.generation as number, tasks: result.tasks.map(decodeTaskSnapshot) }
+  }
+
+  /**
+   * Define or replace a root Task.
+   * @param sessionId - root Session.
+   * @param request - Task definition command.
+   * @returns the committed Task.
+   */
+  async defineTask(sessionId: string, request: DefineTaskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/define', { sessionId, ...request }))
+  }
+
+  /**
+   * Replace one Task criterion.
+   * @param sessionId - root Session.
+   * @param request - criterion command.
+   * @returns the committed Task.
+   */
+  async updateTaskCriterion(sessionId: string, request: UpdateTaskCriterionRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/updateCriterion', { sessionId, ...request }))
+  }
+
+  /**
+   * Record or resolve one Task risk.
+   * @param sessionId - root Session.
+   * @param request - risk command.
+   * @returns the committed Task.
+   */
+  async recordTaskRisk(sessionId: string, request: RecordTaskRiskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/recordRisk', { sessionId, ...request }))
+  }
+
+  /**
+   * Record one Task review decision.
+   * @param sessionId - root Session.
+   * @param request - review command.
+   * @returns the committed Task.
+   */
+  async reviewTask(sessionId: string, request: ReviewTaskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/review', { sessionId, ...request }))
+  }
+
+  /**
+   * Load one assigned Task's bounded review summary.
+   * @param sessionId - root Session.
+   * @returns the validated review summary.
+   */
+  async getTaskReviewSummary(sessionId: string): Promise<TaskReviewSummary> {
+    return decodeTaskReviewSummary(await this.request('task/reviewSummary', { sessionId }))
+  }
+
+  /**
+   * Load one file from an exact Task review snapshot.
+   * @param sessionId - root Session.
+   * @param request - exact revision and repository-relative file path.
+   * @returns the validated bounded file diff.
+   */
+  async getTaskReviewDiff(sessionId: string, request: GetTaskReviewDiffRequest): Promise<TaskFileDiff> {
+    return decodeTaskFileDiff(await this.request('task/reviewDiff', { sessionId, ...request }))
+  }
+
+  /**
+   * Commit one exact ready Task review inside its isolated worktree.
+   * @param sessionId - root Session.
+   * @param request - commit message, exact review revision, and Task sequence.
+   * @returns the Task carrying its durable commit receipt.
+   */
+  async commitTask(sessionId: string, request: CommitTaskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/commit', { sessionId, ...request }))
+  }
+
+  /**
+   * Apply one recorded Task commit to its source checkout.
+   * @param sessionId - root Session.
+   * @param request - exact commit, review revision, source head, and Task sequence.
+   * @returns the Task carrying its durable apply receipt.
+   */
+  async applyTask(sessionId: string, request: ApplyTaskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/apply', { sessionId, ...request }))
+  }
+
+  /**
+   * Explicitly release one Task worktree.
+   * @param sessionId - root Session.
+   * @param request - exact revision, loss confirmation, and Task sequence.
+   * @returns the Task carrying its durable discard receipt.
+   */
+  async discardTask(sessionId: string, request: DiscardTaskRequest): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/discard', { sessionId, ...request }))
+  }
+
+  /**
    * Send one JSON-RPC request and await its result.
    * @param method - the wire method name.
    * @param params - the params object; omitted params send `{}`.
@@ -464,6 +573,166 @@ export class HarnessClient {
  */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Validate the required fields of one detached Task projection. */
+function decodeTaskSnapshot(value: unknown): TaskSnapshot {
+  if (!isRecord(value)
+    || typeof value.taskId !== 'string'
+    || !Array.isArray(value.descendantSessionIds)
+    || !value.descendantSessionIds.every(id => typeof id === 'string')
+    || !['needs-attention', 'failed', 'running', 'reviewing', 'ready', 'settled'].includes(String(value.status))
+    || !['live', 'disconnected', 'unavailable'].includes(String(value.freshness))
+    || !Array.isArray(value.attention)
+    || !Array.isArray(value.risks)
+    || typeof value.updatedAt !== 'number'
+    || !Number.isSafeInteger(value.asOfSeq)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  if (value.executionWorkspace !== undefined
+    && !isTaskWorktreeAssignment(value.executionWorkspace, value.taskId, value.workspaceId)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  if (value.reviewDecision !== undefined
+    && (typeof value.reviewDecision !== 'string' || !['changes-requested', 'ready'].includes(value.reviewDecision))) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  if (value.commitReceipt !== undefined && !isCommitReceipt(value.commitReceipt, value.taskId, value.workspaceId)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  if (value.applyReceipt !== undefined && !isApplyReceipt(value.applyReceipt, value.taskId, value.workspaceId)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  if (value.discardReceipt !== undefined && !isDiscardReceipt(value.discardReceipt, value.taskId, value.workspaceId)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  return value as unknown as TaskSnapshot
+}
+
+/** Validate a bounded Task review summary without trusting provider output. */
+function decodeTaskReviewSummary(value: unknown): TaskReviewSummary {
+  if (!isRecord(value)
+    || typeof value.taskId !== 'string'
+    || typeof value.workspaceId !== 'string'
+    || !isRevision(value.revision)
+    || !isObjectId(value.baseCommit)
+    || !isObjectId(value.headCommit)
+    || !isObjectId(value.sourceHead)
+    || typeof value.sourceDirty !== 'boolean'
+    || typeof value.branch !== 'string' || value.branch.length === 0
+    || typeof value.dirty !== 'boolean'
+    || typeof value.truncated !== 'boolean'
+    || !Array.isArray(value.files) || !value.files.every(isReviewFile)
+    || !isCount(value.additions) || !isCount(value.deletions)) {
+    throw new SdkProtocolError(`task/reviewSummary returned a malformed snapshot: ${JSON.stringify(value)}`)
+  }
+  return value as unknown as TaskReviewSummary
+}
+
+/** Validate one bounded file diff without interpreting patch text. */
+function decodeTaskFileDiff(value: unknown): TaskFileDiff {
+  if (!isRecord(value)
+    || typeof value.taskId !== 'string'
+    || typeof value.workspaceId !== 'string'
+    || !isRevision(value.revision)
+    || !isReviewPath(value.path)
+    || value.previousPath !== undefined && !isReviewPath(value.previousPath)
+    || typeof value.binary !== 'boolean'
+    || typeof value.truncated !== 'boolean'
+    || typeof value.patch !== 'string') {
+    throw new SdkProtocolError(`task/reviewDiff returned a malformed diff: ${JSON.stringify(value)}`)
+  }
+  return value as unknown as TaskFileDiff
+}
+
+const REVIEW_FILE_STATUSES = new Set([
+  'added', 'modified', 'deleted', 'renamed', 'copied', 'type-changed', 'untracked', 'conflicted',
+])
+
+/** Validate one review file row. */
+function isReviewFile(value: unknown): boolean {
+  return isRecord(value)
+    && isReviewPath(value.path)
+    && (value.previousPath === undefined || isReviewPath(value.previousPath))
+    && REVIEW_FILE_STATUSES.has(String(value.status))
+    && typeof value.binary === 'boolean'
+    && (value.additions === null || isCount(value.additions))
+    && (value.deletions === null || isCount(value.deletions))
+}
+
+function isCommitReceipt(value: unknown, taskId: string, workspaceId: unknown): boolean {
+  return isRecord(value) && value.kind === 'commit' && isReceiptIdentity(value, taskId, workspaceId)
+    && isRevision(value.reviewRevision) && isRevision(value.committedRevision)
+    && typeof value.branch === 'string' && value.branch.length > 0
+    && isObjectId(value.commit) && isTimestamp(value.committedAt)
+}
+
+function isApplyReceipt(value: unknown, taskId: string, workspaceId: unknown): boolean {
+  return isRecord(value) && value.kind === 'apply' && isReceiptIdentity(value, taskId, workspaceId)
+    && isRevision(value.reviewRevision) && isObjectId(value.commit)
+    && isObjectId(value.sourceHeadBefore) && isObjectId(value.sourceHeadAfter)
+    && isTimestamp(value.appliedAt)
+}
+
+function isDiscardReceipt(value: unknown, taskId: string, workspaceId: unknown): boolean {
+  return isRecord(value) && value.kind === 'discard' && isReceiptIdentity(value, taskId, workspaceId)
+    && isRevision(value.reviewRevision) && typeof value.branch === 'string' && value.branch.length > 0
+    && typeof value.branchPreserved === 'boolean' && typeof value.worktreeRemoved === 'boolean'
+    && typeof value.uncommittedChangesDiscarded === 'boolean'
+    && (value.recoverableCommit === undefined || isObjectId(value.recoverableCommit))
+    && isTimestamp(value.discardedAt)
+}
+
+function isReceiptIdentity(value: Record<string, unknown>, taskId: string, workspaceId: unknown): boolean {
+  return isUuid(value.operationId) && value.taskId === taskId
+    && typeof workspaceId === 'string' && value.workspaceId === workspaceId
+}
+
+function isReviewPath(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && !value.includes('\\') && !value.startsWith('/')
+    && !value.includes('\0') && !value.split('/').some(segment => segment === '' || segment === '.' || segment === '..')
+}
+
+function isObjectId(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/u.test(value)
+}
+
+function isRevision(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value)
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+}
+
+function isTimestamp(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+}
+
+/** Validate an application-owned worktree assignment without rewriting its paths. */
+function isTaskWorktreeAssignment(
+  value: unknown,
+  taskId: string,
+  workspaceId: unknown,
+): value is NonNullable<TaskSnapshot['executionWorkspace']> {
+  return isRecord(value)
+    && value.kind === 'git-worktree'
+    && value.taskId === taskId
+    && typeof workspaceId === 'string'
+    && value.workspaceId === workspaceId
+    && typeof value.sourcePath === 'string' && value.sourcePath.length > 0
+    && typeof value.path === 'string' && value.path.length > 0
+    && typeof value.branch === 'string' && /^dsh\/task-[0-9a-f]{24}$/u.test(value.branch)
+    && typeof value.baseCommit === 'string' && /^[0-9a-f]{40}$/u.test(value.baseCommit)
+    && value.sourceHead === value.baseCommit
+    && typeof value.sourceDirty === 'boolean'
+    && typeof value.sourceStatusDigest === 'string' && /^[0-9a-f]{64}$/u.test(value.sourceStatusDigest)
+    && Number.isSafeInteger(value.createdAt) && Number(value.createdAt) >= 0
 }
 
 /** The message of a thrown value (the transport only throws `Error`s; `String` covers the rest). */

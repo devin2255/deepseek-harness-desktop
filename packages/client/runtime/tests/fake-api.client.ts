@@ -4,7 +4,7 @@
 import type {
   ClientResponse, HostFrame, IApiClient, ModelSelection, MuxFrame,
   RpcError, RpcReceipt, RpcRequest, RpcResponse, SessionId, SessionModels, SessionSearchItem, SkillEntry,
-  WorkspaceId, WorkspaceView,
+  WorkspaceId, WorkspaceView, TaskFileDiff, TaskListSnapshot, TaskReviewSummary, TaskSnapshot,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { RpcId } from '@deepseek-ai/dsh-client-connection/client'
 import type { SessionRemotes } from '../src/client/sessions/remotes.ts'
@@ -182,6 +182,28 @@ export class FakeApiClient implements IApiClient {
     openPath: (payload: unknown) => this.record('host.openPath', payload, this.onOpenPath(payload)),
   }
 
+  onTaskList: (payload: unknown) => Promise<RpcResponse<TaskListSnapshot>> =
+    () => Promise.resolve(ok({ generation: 0, tasks: [] }))
+  onTaskMutation: (payload: unknown) => Promise<RpcResponse<TaskSnapshot>> =
+    () => Promise.resolve(err({ code: 'task-unavailable', message: 'stub', details: {} }))
+  onTaskReviewSummary: (payload: unknown) => Promise<RpcResponse<TaskReviewSummary>> =
+    () => Promise.resolve(err({ code: 'task-review-unavailable', message: 'stub', details: { sessionId: 'root' as SessionId } }))
+  onTaskReviewDiff: (payload: unknown) => Promise<RpcResponse<TaskFileDiff>> =
+    () => Promise.resolve(err({ code: 'task-review-unavailable', message: 'stub', details: { sessionId: 'root' as SessionId } }))
+
+  readonly tasks: IApiClient['tasks'] = {
+    list: (payload: unknown) => this.record('task.list', payload, this.onTaskList(payload)),
+    define: (payload: unknown) => this.record('task.define', payload, this.onTaskMutation(payload)),
+    updateCriterion: (payload: unknown) => this.record('task.updateCriterion', payload, this.onTaskMutation(payload)),
+    recordRisk: (payload: unknown) => this.record('task.recordRisk', payload, this.onTaskMutation(payload)),
+    review: (payload: unknown) => this.record('task.review', payload, this.onTaskMutation(payload)),
+    reviewSummary: (payload: unknown) => this.record('task.reviewSummary', payload, this.onTaskReviewSummary(payload)),
+    reviewDiff: (payload: unknown) => this.record('task.reviewDiff', payload, this.onTaskReviewDiff(payload)),
+    commit: (payload: unknown) => this.record('task.commit', payload, this.onTaskMutation(payload)),
+    apply: (payload: unknown) => this.record('task.apply', payload, this.onTaskMutation(payload)),
+    discard: (payload: unknown) => this.record('task.discard', payload, this.onTaskMutation(payload)),
+  }
+
   // The archive-set field defaults at the binding below so list stubs keep
   // the pre-archive `{ items }` shape; a stub carrying the field wins.
   onWorkspaceList: (payload: unknown) => Promise<RpcResponse<{ items: never[]; archivedSessionIds?: never[] }>> =
@@ -204,6 +226,9 @@ export class FakeApiClient implements IApiClient {
   onWorkspaceArchiveSession: (payload: unknown) => Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>> =
     payload => Promise.resolve(ok({ archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId] }))
 
+  onWorkspaceUnarchiveSession: (payload: unknown) => Promise<RpcResponse<{ archivedSessionIds: SessionId[] }>> =
+    () => Promise.resolve(ok({ archivedSessionIds: [] }))
+
   readonly workspace: IApiClient['workspace'] = {
     list: (payload: unknown) => this.record('workspace.list', payload, this.onWorkspaceList(payload).then(response => (
       response.result.ok
@@ -219,6 +244,8 @@ export class FakeApiClient implements IApiClient {
       this.record('workspace.insertSessionBefore', payload, this.onWorkspaceInsertSessionBefore(payload)),
     archiveSession: (payload: unknown) =>
       this.record('workspace.archiveSession', payload, this.onWorkspaceArchiveSession(payload)),
+    unarchiveSession: (payload: unknown) =>
+      this.record('workspace.unarchiveSession', payload, this.onWorkspaceUnarchiveSession(payload)),
   }
 
   // Payloads stay `unknown` (lint-lane note above); response rows are the real

@@ -32,6 +32,13 @@
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/dsh-client-ui-directory-picker-browse": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-task-overview": "workspace:^",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "workspace:^",
+    "@deepseek-ai/dsh-task": "workspace:^",
+    "@deepseek-ai/dsh-task-session": "workspace:^"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

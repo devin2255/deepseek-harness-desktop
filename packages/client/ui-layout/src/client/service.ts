@@ -21,6 +21,12 @@ export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>
  * only).
  */
 export interface ILayout {
+  /** Show the registered home surface without changing the selected session. */
+  showHome(): void
+  /** Reveal the selected conversation, including an existing blank draft. */
+  showConversation(): void
+  /** Reveal the separate Task Review workspace. */
+  showReview(): void
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void
   /** Open the details panel (no-op when already open). */
@@ -32,6 +38,24 @@ export interface ILayout {
 /** Cross-plugin panel-action face (ctx.layout). */
 export class LayoutController implements ILayout {
   #panels: PanelActions | undefined
+
+  /** @param navigate - publish explicit center navigation, including repeated destinations. */
+  constructor(private readonly navigate: (page: 'home' | 'conversation' | 'review') => void) {}
+
+  showHome(): void {
+    this.#require().showHome()
+    this.navigate('home')
+  }
+
+  showConversation(): void {
+    this.#require().showConversation()
+    this.navigate('conversation')
+  }
+
+  showReview(): void {
+    this.#require().showReview()
+    this.navigate('review')
+  }
 
   /**
    * Adopt the root entry's bound store actions. Called from the root

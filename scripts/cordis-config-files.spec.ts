@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { cordisConfigFiles } from './cordis-config-files.ts'
+import { cordisConfigFiles, normalizeCordisConfigPath } from './cordis-config-files.ts'
 
 const roots: string[] = []
 
@@ -11,6 +11,11 @@ afterEach(() => {
 })
 
 describe('cordisConfigFiles', () => {
+  it('normalizes Windows paths before classifying example and overlay ownership', () => {
+    expect(normalizeCordisConfigPath('examples\\mcp-memory\\engram.cordis.yml'))
+      .toBe('examples/mcp-memory/engram.cordis.yml')
+  })
+
   it('finds Loader YAML without treating translation records as configs', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-cordis-config-files-'))
     roots.push(root)
@@ -29,8 +34,8 @@ describe('cordisConfigFiles', () => {
     }
 
     expect(cordisConfigFiles(root)).toEqual([
-      join('examples', 'agent.cordis.yaml'),
-      join('examples', 'headless.cordis.yml'),
+      'examples/agent.cordis.yaml',
+      'examples/headless.cordis.yml',
     ])
   })
 })

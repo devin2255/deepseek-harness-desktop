@@ -43,6 +43,9 @@
     # Snapshot runs read the raw JSONL back; production keeps zstd frames.
     compression: !!js "process.env.DSH_SNAPSHOT === undefined ? 'zstd' : 'none'"
 
+- id: task-session
+  name: '@deepseek-ai/dsh-task-session'
+
 - id: session-checkpoints
   name: '@deepseek-ai/dsh-session-checkpoint-policy'
 

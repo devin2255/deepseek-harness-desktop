@@ -16,6 +16,8 @@ export const inject = ['invariants']
 /**
  * No runtime invariant: this package retains no independently observable
  * mutable state; WebServer owns required-guard admission and its lifecycle.
+ * The bundle composition test validates the static Task Provider and overview
+ * rows because those relationships exist in cordis.patch.yml, not at runtime.
  */
 const install: InvariantInstaller = () => {}
 

@@ -16,6 +16,16 @@ The shared wire protocol for the DeepSeek Harness SDK runtime: one newline-delim
 |---|---|---|
 | client→server | `initialize` | `InitializeParams` → `InitializeResult` |
 | client→server | `session/prompt` | `SessionPromptParams` → `SessionPromptResult` (durable enqueue receipt) |
+| client→server | `task/list` | no params → `TaskListSnapshot` |
+| client→server | `task/define` | `TaskDefineParams` → `TaskSnapshot` |
+| client→server | `task/updateCriterion` | `TaskUpdateCriterionParams` → `TaskSnapshot` |
+| client→server | `task/recordRisk` | `TaskRecordRiskParams` → `TaskSnapshot` |
+| client→server | `task/review` | `TaskReviewParams` → `TaskSnapshot` |
+| client→server | `task/reviewSummary` | `TaskReviewSummaryParams` → `TaskReviewSummary` |
+| client→server | `task/reviewDiff` | `TaskReviewDiffParams` → `TaskFileDiff` |
+| client→server | `task/commit` | `TaskCommitParams` → `TaskSnapshot` |
+| client→server | `task/apply` | `TaskApplyParams` → `TaskSnapshot` |
+| client→server | `task/discard` | `TaskDiscardParams` → `TaskSnapshot` |
 | client→server | `shutdown` | no params → `{}` |
 | server→client | `session.event` | `SessionEventNotification` (every session in the runtime, unfiltered) |
 | server→client | `session.status` | `SessionStatusNotification` (whole-agent `running`/`idle` transition) |

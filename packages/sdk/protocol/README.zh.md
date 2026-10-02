@@ -16,6 +16,16 @@ DeepSeek Harness SDK 运行时的共享协议格式（wire format）：一个按
 |---|---|---|
 | client→server | `initialize` | `InitializeParams` → `InitializeResult` |
 | client→server | `session/prompt` | `SessionPromptParams` → `SessionPromptResult`（持久入队回执） |
+| client→server | `task/list` | 无参数 → `TaskListSnapshot` |
+| client→server | `task/define` | `TaskDefineParams` → `TaskSnapshot` |
+| client→server | `task/updateCriterion` | `TaskUpdateCriterionParams` → `TaskSnapshot` |
+| client→server | `task/recordRisk` | `TaskRecordRiskParams` → `TaskSnapshot` |
+| client→server | `task/review` | `TaskReviewParams` → `TaskSnapshot` |
+| client→server | `task/reviewSummary` | `TaskReviewSummaryParams` → `TaskReviewSummary` |
+| client→server | `task/reviewDiff` | `TaskReviewDiffParams` → `TaskFileDiff` |
+| client→server | `task/commit` | `TaskCommitParams` → `TaskSnapshot` |
+| client→server | `task/apply` | `TaskApplyParams` → `TaskSnapshot` |
+| client→server | `task/discard` | `TaskDiscardParams` → `TaskSnapshot` |
 | client→server | `shutdown` | 无参数 → `{}` |
 | server→client | `session.event` | `SessionEventNotification`（运行时内每个会话，不过滤） |
 | server→client | `session.status` | `SessionStatusNotification`（整个 agent（智能体）的 `running`/`idle` 转换） |

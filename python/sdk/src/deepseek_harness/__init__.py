@@ -1,7 +1,28 @@
 from .api import DeepSeekHarness, DeepSeekHarnessConfig, RunResult, Session
 from .client import HarnessClient, HarnessConfig
 from .errors import SdkProtocolError
-from .models import IncomingRequest, InitializeResponse, JsonObject, Notification, ServerInfo
+from .models import (
+    AttentionItem,
+    DefineTaskCriterion,
+    IncomingRequest,
+    InitializeResponse,
+    JsonObject,
+    Notification,
+    ServerInfo,
+    TaskCriterion,
+    TaskApplyReceipt,
+    TaskCommitReceipt,
+    TaskDiscardReceipt,
+    TaskDefinition,
+    TaskEvidenceRef,
+    TaskFileDiff,
+    TaskListSnapshot,
+    TaskReviewFile,
+    TaskReviewSummary,
+    TaskRisk,
+    TaskSnapshot,
+    TaskWorktreeAssignment,
+)
 
 __all__ = [
     "DeepSeekHarness",
@@ -16,4 +37,19 @@ __all__ = [
     "JsonObject",
     "Notification",
     "ServerInfo",
+    "AttentionItem",
+    "DefineTaskCriterion",
+    "TaskCriterion",
+    "TaskApplyReceipt",
+    "TaskCommitReceipt",
+    "TaskDiscardReceipt",
+    "TaskDefinition",
+    "TaskEvidenceRef",
+    "TaskFileDiff",
+    "TaskListSnapshot",
+    "TaskReviewFile",
+    "TaskReviewSummary",
+    "TaskRisk",
+    "TaskSnapshot",
+    "TaskWorktreeAssignment",
 ]

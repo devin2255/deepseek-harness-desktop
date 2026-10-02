@@ -43,6 +43,8 @@ with DeepSeekHarness(
 
 `HarnessClient` 会在运行时进程的整个生命周期内保留已发现的 subagent 谱系。每次执行 `Session.run()` 时，`RunResult.notifications` 与 `on_notification` 会按协议传输顺序收到根会话及所有已知后代的通知，其中包括嵌套 subagent 的生命周期事件与会话事件。`RunResult.events` 只包含根会话事件，因此后代消息不会覆盖根会话回复。底层 `session_prompt()` 会立即返回已排队消息的 `MessageId`；绕过 `Session.run()` 的调用方必须自行负责后续的活动边界。
 
+`DeepSeekHarness` 和 `HarnessClient` 提供 `list_tasks()`、`define_task()`、`update_task_criterion()`、`record_task_risk()` 与 `review_task()`。隔离 Task 还提供 `get_task_review_summary()`、`get_task_review_diff()`、`commit_task()`、`apply_task()` 与 `discard_task()`，其协议词汇与 TypeScript SDK 完全一致。Pydantic 会校验每个 Task 基线、审查摘要、文件 Diff、已提交完整行、可选的 `execution_workspace` 和交付回执，同时原样保留源路径、Worktree 路径、分支、协议标识与判别字段；无效响应会抛出 `SdkProtocolError`。SDK 不执行 Git 操作，也不在 SDK 侧维护 Task 缓存。
+
 也可以通过 `DSH_CORDIS_CONFIG` 为运行时子进程指定配置。注入逻辑位于 `HarnessClient.start()`，因此底层客户端按默认方式启动时也具有该行为：如果启动方式最终解析为内置运行时，且既没有设置 `cordis`，也没有设置非空的 `DSH_CORDIS_CONFIG`（运行时将空值视为未设置，注入检查也是如此），系统就会使用内置默认配置；显式指定 `runtime_bin`、`bridge_bin` 或 `launch_args_override` 时，则会完全禁用该注入。运行时载体（生产用 exe 与仅限开发的 `node` 闭包）及其获取方式见 [sdk-runtime README](https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk-runtime/README.md)。
 
 `cwd` 与 `runtime_cwd` 会在启动子进程、注入环境变量和协议握手前解析为绝对路径。公开 API 只暴露由 SDK 直接应用的选项：部署 persona 和持久化配置应在 `cordis.yml` 中定义；`session_root` 则保留为设置 `DSH_SESSION_ROOT` 的高层便捷参数。

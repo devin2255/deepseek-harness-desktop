@@ -87,6 +87,7 @@ function makeHost() {
   const storeCache = new Map<StoredEntry, Map<string, StoreInstanceLike>>()
   const list = observable<{ ids: string[] }>({ ids: [] })
   const workspaces = observable<{ ids: string[] }>({ ids: [] })
+  const tasks = observable<{ ids: string[] }>({ ids: [] })
   const absentInfo: SessionMaybeProvideInfo = { sessionId: undefined, hooks: {}, props: {} }
   const provide = observable<SessionMaybeProvideInfo>(absentInfo)
   let currentId: string | undefined
@@ -153,11 +154,13 @@ function makeHost() {
       provideInfo: provide,
     },
     workspaces: { list: workspaces },
+    tasks: { list: tasks },
   }
   return {
     host,
     list,
     workspaces,
+    tasks,
     // Driver surface: set(id) publishes the resolved bundle (or the absent
     // projection) through the provide source.
     current: {
@@ -640,6 +643,19 @@ describe('standard-kit synthesis', () => {
     expect(view.container.textContent).toBe('0')
     act(() => { h.workspaces.set({ ids: ['w1'] }) })
     expect(view.container.textContent).toBe('1')
+  })
+
+  it('delivers a live useTasks hook when the host exposes the Task projection', () => {
+    const h = makeHost()
+    h.declare('k.single', SINGLE_ROOT)
+    h.add('k.single', {
+      component: ({ useTasks }: { useTasks: <S>(sel: (s: { ids: string[] }) => S) => S }) =>
+        <b>{useTasks(s => s.ids.length)}</b>,
+    })
+    const { view } = mountRoot(h, { 'k.single': SINGLE_ROOT }, renderSlot => renderSlot('k.single', {}))
+    expect(view.container.textContent).toBe('0')
+    act(() => { h.tasks.set({ ids: ['t1', 't2'] }) })
+    expect(view.container.textContent).toBe('2')
   })
 
   it('delivers the session pair (bound useSession + sessionId) under SessionProvider', () => {

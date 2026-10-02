@@ -1,0 +1,24 @@
+[
+  {
+    "group": "Needs You",
+    "tasks": []
+  },
+  {
+    "group": "Running",
+    "tasks": [
+      "fixturefixtureRunning0 known running subagent(s)Criteria 0/00 unresolved risk(s)Live"
+    ]
+  },
+  {
+    "group": "Other",
+    "tasks": [
+      "fixtureArchive taskfixtureSettled0 known running subagent(s)Criteria 0/00 unresolved risk(s)Live"
+    ]
+  },
+  {
+    "group": "Archived tasks (1)",
+    "tasks": [
+      "Fixture 历史会话fixtureNeeds attentionRestore task"
+    ]
+  }
+]

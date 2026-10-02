@@ -1,0 +1,12 @@
+# Keyless assembled Task-queue acceptance over the shipped Web composition.
+# It mounts the same Task Provider and overview rows as the desktop bundle
+# without the Electron launch capability guard, so Playwright can exercise the
+# projection through the ordinary loopback Web transport.
+- id: api-gateway
+  inject: [tasks]
+
+- insert:
+    - id: task-session
+      name: '@deepseek-ai/dsh-task-session'
+    - id: ui-task-overview
+      name: '@deepseek-ai/dsh-client-ui-task-overview'

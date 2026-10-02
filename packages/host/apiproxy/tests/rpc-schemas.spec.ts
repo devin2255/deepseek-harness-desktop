@@ -194,8 +194,16 @@ describe('sessions domain schemas', () => {
     expect(sessionCreateRequestSchema.parse({ cwd: '/w' }).cwd).toBe('/w')
     // The refine's both-sides branch: workspaceId alone passes, workspaceId+cwd rejects.
     expect(sessionCreateRequestSchema.parse({ workspaceId: 'w1', sessionId: 's1' }).sessionId).toBe('s1')
+    expect(sessionCreateRequestSchema.parse({ workspaceId: 'w1', isolation: 'worktree' }).isolation).toBe('worktree')
+    expect(() => sessionCreateRequestSchema.parse({ isolation: 'worktree' })).toThrow(/requires workspaceId/)
+    expect(() => sessionCreateRequestSchema.parse({ cwd: '/w', isolation: 'worktree' })).toThrow(/requires workspaceId/)
     expect(() => sessionCreateRequestSchema.parse({ workspaceId: 'w1', cwd: '/w' })).toThrow(/not both/)
     expect(sessionCreateValueSchema.parse({ sessionId: 's1' }).sessionId).toBe('s1')
+    expect(sessionCreateValueSchema.parse({ sessionId: 's1', executionWorkspace: {
+      kind: 'git-worktree', taskId: 's1', workspaceId: 'w1', sourcePath: '/source', path: '/worktree',
+      branch: 'dsh/task-0123456789abcdef01234567', baseCommit: '0'.repeat(40), sourceHead: '0'.repeat(40),
+      sourceDirty: false, sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+    } }).executionWorkspace?.path).toBe('/worktree')
     expect(sessionHistoryRequestSchema.parse({ sessionId: 's1', beforeSeq: 3, maxMessages: 5 }).beforeSeq).toBe(3)
     expect(() => sessionHistoryRequestSchema.parse({ sessionId: 's1', maxMessages: 0 })).toThrow()
     expect(sessionHistoryValueSchema.parse({

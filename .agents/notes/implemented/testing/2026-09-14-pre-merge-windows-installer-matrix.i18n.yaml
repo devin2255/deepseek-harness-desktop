@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-09-14-pre-merge-windows-installer-matrix.md
+2026-09-14-pre-merge-windows-installer-matrix.md: 58e452999d264f84d9c0c1906a4ffb40c5f9a1d5
+2026-09-14-pre-merge-windows-installer-matrix.zh.md: 07f4a30fd8fcd2c2f0d07300d30fc591051e00c9

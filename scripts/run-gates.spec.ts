@@ -123,6 +123,50 @@ describe('gate graph validation', () => {
     }
   })
 
+  it('packages and validates the installer observationally after the Windows build and desktop consumer', async () => {
+    const subject = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
+    expect(subject.find(item => item.id === 'desktop-installer')).toMatchObject({
+      args: ['/private/pnpm.cjs', 'run', 'desktop:package'],
+      needs: ['build', 'desktop-e2e'],
+      allowFailure: true,
+    })
+    expect(subject.find(item => item.id === 'desktop-installer-validation')).toMatchObject({
+      args: ['/private/pnpm.cjs', 'run', 'desktop:validate-package'],
+      needs: ['desktop-installer'],
+      allowFailure: true,
+    })
+    const completed = new Set<string>()
+    await runGates(subject, subject.length, async (item) => {
+      for (const dependency of item.needs ?? []) expect(completed.has(dependency)).toBe(true)
+      completed.add(item.id)
+      return resultFor(item)
+    })
+    expect(completed.has('desktop-installer-validation')).toBe(true)
+  })
+
+  it('rejects an installer graph without its artifact build before executing any gate', async () => {
+    const subject = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
+      .filter(item => item.id.startsWith('desktop-installer'))
+    const execute = vi.fn(async (item: Gate) => resultFor(item))
+    await expect(runGates(subject, 1, execute)).rejects.toThrow('depends on unknown gate "build"')
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('skips installer validation when observational packaging fails', async () => {
+    const subject = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
+    const executed: string[] = []
+    const results = await runGates(subject, subject.length, async (item) => {
+      executed.push(item.id)
+      return resultFor(item, item.id === 'desktop-installer' ? 'failed' : 'passed')
+    })
+    expect(executed).toContain('desktop-installer')
+    expect(executed).not.toContain('desktop-installer-validation')
+    expect(results.find(item => item.gate.id === 'desktop-installer-validation')).toMatchObject({
+      status: 'skipped',
+      gate: { allowFailure: true },
+    })
+  })
+
   it('keeps Vitest timeout defaults when the coverage override is absent', () => {
     const gates = withEnv('DSH_COVERAGE_TEST_TIMEOUT_MS', undefined, () =>
       withPnpmEntrypoint(() => gatesForMode('ci-windows-complete')))

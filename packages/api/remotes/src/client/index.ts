@@ -40,6 +40,9 @@ export type {
   RpcRequest, RpcResponse, RpcResult, SessionId, SessionModels, SessionSearchItem,
   SessionSummary, SettingsNamespaceView, SettingsPathOpView, SkillEntry, StreamChunk,
   SubagentAddress, SubagentCatalog, JobView, ToolCallView, ToolEventView, ToolResultView,
+  AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
+  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskListChange, TaskListSnapshot,
+  TaskReviewDecision, TaskReviewFile, TaskReviewSummary, TaskRisk, TaskSnapshot,
   WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-client-connection/client'
 export type {} from '@deepseek-ai/dsh-api-gateway/client'
