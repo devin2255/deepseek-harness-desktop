@@ -136,7 +136,7 @@ describe('HarnessSdkJsonRpcServer', () => {
     const assigned = {
       taskId: SessionId('root'), asOfSeq: 5, status: 'ready', executionWorkspace: assignment,
     } as TaskSnapshot
-    const committed = { commit: '1'.repeat(40), committedRevision: 'b'.repeat(64) } as TaskSnapshot['commitReceipt']
+    const committed = { commit: '1'.repeat(40), committedRevision: 'b'.repeat(64) } as NonNullable<TaskSnapshot['commitReceipt']>
     let row: TaskSnapshot | undefined
     let reviewAvailable = false
     const review = { discard: vi.fn(async () => ({})) }
@@ -157,40 +157,45 @@ describe('HarnessSdkJsonRpcServer', () => {
     const discard = { sessionId: 'root', expectedRevision: 'b'.repeat(64), confirmedUncommittedLoss: false, expectedSeq: 5 }
 
     await expect(server.getTaskReviewSummary('root')).rejects.toThrow('does not exist')
-    row = { ...assigned, executionWorkspace: undefined }
+    const withoutAssignment = { ...assigned }
+    delete withoutAssignment.executionWorkspace
+    row = withoutAssignment
     await expect(server.getTaskReviewSummary('root')).rejects.toThrow('no application-owned Git worktree')
     row = assigned
     await expect(server.getTaskReviewSummary('root')).rejects.toThrow('Task review is unavailable')
     reviewAvailable = true
-    await expect(server.commitTask({ ...commit, expectedSeq: 4 })).rejects.toThrow('expected sequence 4')
+    await expect(server.handleRequest('task/commit', { ...commit, expectedSeq: 4 })).rejects.toThrow('expected sequence 4')
 
-    for (const invalid of [
-      { status: 'running' as const },
-      { commitReceipt: committed },
-      { discardReceipt: {} as TaskSnapshot['discardReceipt'] },
-    ]) {
-      row = { ...assigned, ...invalid }
-      await expect(server.commitTask(commit)).rejects.toThrow('Commit requires a ready Task')
+    const invalidCommitRows: TaskSnapshot[] = [
+      { ...assigned, status: 'running' },
+      { ...assigned, commitReceipt: committed },
+      { ...assigned, discardReceipt: {} as NonNullable<TaskSnapshot['discardReceipt']> },
+    ]
+    for (const invalid of invalidCommitRows) {
+      row = invalid
+      await expect(server.handleRequest('task/commit', commit)).rejects.toThrow('Commit requires a ready Task')
     }
-    for (const invalid of [
-      {},
-      { commitReceipt: committed, applyReceipt: {} as TaskSnapshot['applyReceipt'] },
-      { commitReceipt: committed, discardReceipt: {} as TaskSnapshot['discardReceipt'] },
-      { commitReceipt: { ...committed!, commit: 'wrong' } },
-      { commitReceipt: { ...committed!, committedRevision: 'wrong' } },
-    ]) {
-      row = { ...assigned, ...invalid }
-      await expect(server.applyTask(apply)).rejects.toThrow('Apply requires the exact recorded Task commit')
+    const invalidApplyRows: TaskSnapshot[] = [
+      { ...assigned },
+      { ...assigned, commitReceipt: committed, applyReceipt: {} as NonNullable<TaskSnapshot['applyReceipt']> },
+      { ...assigned, commitReceipt: committed, discardReceipt: {} as NonNullable<TaskSnapshot['discardReceipt']> },
+      { ...assigned, commitReceipt: { ...committed, commit: 'wrong' } },
+      { ...assigned, commitReceipt: { ...committed, committedRevision: 'wrong' as never } },
+    ]
+    for (const invalid of invalidApplyRows) {
+      row = invalid
+      await expect(server.handleRequest('task/apply', apply)).rejects.toThrow('Apply requires the exact recorded Task commit')
     }
-    for (const invalid of [
-      { discardReceipt: {} as TaskSnapshot['discardReceipt'] },
-      { status: 'running' as const },
-    ]) {
-      row = { ...assigned, ...invalid }
-      await expect(server.discardTask(discard)).rejects.toThrow('Discard requires a ready or delivered Task')
+    const invalidDiscardRows: TaskSnapshot[] = [
+      { ...assigned, discardReceipt: {} as NonNullable<TaskSnapshot['discardReceipt']> },
+      { ...assigned, status: 'running' },
+    ]
+    for (const invalid of invalidDiscardRows) {
+      row = invalid
+      await expect(server.handleRequest('task/discard', discard)).rejects.toThrow('Discard requires a ready or delivered Task')
     }
-    row = { ...assigned, status: 'settled', applyReceipt: {} as TaskSnapshot['applyReceipt'] }
-    await expect(server.discardTask(discard)).resolves.toBe(row)
+    row = { ...assigned, status: 'settled', applyReceipt: {} as NonNullable<TaskSnapshot['applyReceipt']> }
+    await expect(server.handleRequest('task/discard', discard)).resolves.toBe(row)
     expect(review.discard).toHaveBeenCalledOnce()
   })
 

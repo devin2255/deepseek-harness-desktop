@@ -449,7 +449,7 @@ describe('desktop launch capability', () => {
     expect(guard({
       headersDistinct: { authorization: [`Bearer ${LAUNCH_CAPABILITY}`] },
       headers: {},
-    } as IncomingMessage)).toBe(false)
+    } as unknown as IncomingMessage)).toBe(false)
     await disposeContext(ctx)
   })
 

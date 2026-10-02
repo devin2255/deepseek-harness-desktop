@@ -368,8 +368,8 @@ describe('task replay fold', () => {
   })
 
   it('records a ready worktree discard without a recoverable commit', () => {
-    const receipt = structuredClone(discardReceipt)
-    delete receipt.recoverableCommit
+    const { recoverableCommit, ...receipt } = discardReceipt
+    expect(recoverableCommit).toBe(commitReceipt.commit)
     const state = foldTask([worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded(receipt, 4)])
     expect(state.discardReceipt).toEqual(receipt)
     expect(state.commitReceipt).toBeUndefined()
