@@ -58,6 +58,151 @@ function props(): TaskOverviewProps {
 }
 
 describe('TaskOverview', () => {
+  it('uses an owner id for attention when its Session summary is unavailable', () => {
+    const p = props()
+    const sessions = p.useSessions(value => value)
+    p.useSessions = selector => selector({ ...sessions, byId: {
+      ['root' as SessionId]: sessions.byId['root' as SessionId]!,
+    } })
+    const view = render(<TaskOverview {...p} />)
+    expect(view.getByRole('button', { name: 'child — Question: Choose mode' })).toBeTruthy()
+  })
+
+  it('suppresses a superseded navigation error', async () => {
+    const p = props()
+    let rejectOpen!: (error: unknown) => void
+    p.openTask = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectOpen = reject }))
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Ship desktop' }))
+    await waitFor(() => { expect(p.openTask).toHaveBeenCalledOnce() })
+    fireEvent.click(view.getByRole('button', { name: 'Refresh' }))
+    rejectOpen(new Error('Superseded navigation'))
+    await waitFor(() => { expect(p.refresh).toHaveBeenCalledOnce() })
+    expect(view.queryByRole('alert')).toBeNull()
+  })
+
+  it('ignores a task-start result that settles after the overview unmounts', async () => {
+    for (const outcome of ['resolve', 'reject'] as const) {
+      const p = props()
+      let resolveStart!: () => void
+      let rejectStart!: (error: unknown) => void
+      p.startTask = vi.fn(() => new Promise<void>((resolve, reject) => {
+        resolveStart = resolve
+        rejectStart = reject
+      }))
+      const view = render(<TaskOverview {...p} />)
+      fireEvent.click(view.getByRole('button', { name: 'New Task' }))
+      expect(view.getByRole('button', { name: 'Creating…' })).toBeTruthy()
+      view.unmount()
+      if (outcome === 'resolve') resolveStart()
+      else rejectStart(new Error('Task start finished late'))
+      await Promise.resolve()
+    }
+  })
+
+  it('reports ordinary and non-Error task-start failures without offering isolation bypass', async () => {
+    const p = props()
+    p.startTask = vi.fn(async () => { throw new Error('Task creation failed') })
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'New Task' }))
+    expect((await view.findByRole('alert')).textContent).toContain('Task creation failed')
+    expect(view.queryByRole('button', { name: 'Use project directly' })).toBeNull()
+    p.startTask = vi.fn(async () => { throw 'Unavailable' })
+    view.rerender(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'New Task' }))
+    await waitFor(() => { expect(view.getByRole('alert').textContent).toContain('Unavailable') })
+  })
+
+  it('labels unassigned running and idle ordinary Session activity', () => {
+    const p = props()
+    const sessions = p.useSessions(value => value)
+    const workspaces = p.useWorkspaces(value => value)
+    const withoutPending = { ...sessions.byId }
+    for (const summary of Object.values(sessions.byId)) {
+      const copy = { ...summary }
+      delete copy.pendingInteraction
+      withoutPending[summary.id] = copy
+    }
+    delete p.useTasks
+    p.useSessions = selector => selector({ ...sessions, byId: withoutPending })
+    p.useWorkspaces = selector => selector({ ...workspaces, items: [] })
+    const view = render(<TaskOverview {...p} />)
+    expect(view.getByText('Unassigned')).toBeTruthy()
+    expect(view.getAllByText('Running').length).toBeGreaterThan(1)
+    const idleSessions = { ...withoutPending }
+    for (const summary of Object.values(withoutPending)) idleSessions[summary.id] = { ...summary, running: false }
+    p.useSessions = selector => selector({ ...sessions, byId: idleSessions })
+    view.rerender(<TaskOverview {...p} />)
+    expect(view.getByText('Idle')).toBeTruthy()
+  })
+
+  it('renders ordinary Session activity without a Task service and distinguishes duplicate pending owners', async () => {
+    const p = props()
+    const sessions = p.useSessions(value => value)
+    const child = sessions.byId['child' as SessionId]!
+    delete p.useTasks
+    p.useSessions = selector => selector({
+      ...sessions,
+      byId: {
+        [sessions.ids[0]!]: sessions.byId[sessions.ids[0]!]!,
+        ['child-111111' as SessionId]: { ...child, id: 'child-111111' as SessionId, displayTitle: 'Duplicate' },
+        ['child-112222' as SessionId]: { ...child, id: 'child-112222' as SessionId, displayTitle: 'Duplicate' },
+      },
+    })
+    const view = render(<TaskOverview {...p} />)
+    expect(view.getByText('Session activity only')).toBeTruthy()
+    expect(view.getByRole('button', { name: 'Duplicate · child-111 — Question' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'Duplicate · child-112 — Question' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Root task' }))
+    fireEvent.click(view.getByRole('button', { name: 'Duplicate · child-111 — Question' }))
+    await waitFor(() => { expect(p.openTask).toHaveBeenCalledWith('child-111111') })
+    expect(p.openTask).toHaveBeenCalledWith('root')
+  })
+
+  it('renders status transitions and refreshes without losing visible rows', async () => {
+    const p = props()
+    const sessions = p.useSessions(value => value)
+    const workspaces = p.useWorkspaces(value => value)
+    const tasks = p.useTasks!(value => value)!
+    p.useSessions = selector => selector({ ...sessions, current: 'root' as SessionId })
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => { expect(p.refresh).toHaveBeenCalledOnce() })
+    fireEvent.change(view.getByLabelText('Workspace for new task'), { target: { value: '' } })
+    p.useTasks = selector => selector({ ...tasks, freshness: 'stale' })
+    view.rerender(<TaskOverview {...p} />)
+    expect(view.getByText('Task data may be out of date.')).toBeTruthy()
+    p.useSessions = selector => selector({ ...sessions, state: 'loading' })
+    view.rerender(<TaskOverview {...p} />)
+    expect(view.getByText('Refreshing; displayed information may be out of date.')).toBeTruthy()
+    p.useSessions = selector => selector({ ...sessions, state: 'error', error: { code: 'internal', message: 'Session failed', details: {} } })
+    view.rerender(<TaskOverview {...p} />)
+    expect(view.getByRole('alert').textContent).toContain('Session failed')
+    p.useSessions = selector => selector(sessions)
+    p.useWorkspaces = selector => selector({ ...workspaces, state: 'error', error: { code: 'internal', message: 'Workspace failed', details: {} } })
+    view.rerender(<TaskOverview {...p} />)
+    expect(view.getByRole('alert').textContent).toContain('Workspace failed')
+    p.useWorkspaces = selector => selector({ ...workspaces, phase: 'pending' })
+    p.useHostDescription = selector => selector(undefined)
+    view.rerender(<TaskOverview {...p} />)
+    expect(view.getByText('Loading tasks and workspaces…')).toBeTruthy()
+  })
+
+  it('shows a failed archive without losing the settled Task', async () => {
+    const p = props()
+    const state = p.useTasks!(value => value)!
+    const task = state.byId['root' as SessionId]!
+    p.useTasks = selector => selector({ ...state, byId: { [task.taskId]: {
+      ...task, status: 'settled', attention: [], descendantSessionIds: [],
+    } } })
+    p.archiveTask = vi.fn(async () => { throw 'Archive denied' })
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Archive task' }))
+    expect((await view.findByRole('alert')).textContent).toContain('Archive denied')
+    expect(view.getByRole('button', { name: 'Ship desktop' })).toBeTruthy()
+    expect((view.getByRole('button', { name: 'Archive task' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('shows the empty archive and reports a rejected restore without hiding its entry', async () => {
     const p = props()
     const view = render(<TaskOverview {...p} />)
@@ -135,6 +280,8 @@ describe('TaskOverview', () => {
     expect(view.getByText('1 unresolved risk(s)')).toBeTruthy()
     expect(view.getByText('Live')).toBeTruthy()
     expect(view.getByText('1 known running subagent(s)')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Ship desktop' }))
+    await waitFor(() => { expect(p.openTask).toHaveBeenCalledWith('root') })
     fireEvent.click(view.getByRole('button', { name: 'Child task — Question: Choose mode' }))
     await waitFor(() => { expect(p.openTask).toHaveBeenCalledWith('child') })
     expect(view.getByRole('button', { name: 'Root task — Approval: Allow command' })).toBeTruthy()
@@ -186,6 +333,8 @@ describe('TaskOverview', () => {
     expect(document.activeElement).toBe(alert)
     expect(p.startTask).toHaveBeenCalledTimes(1)
     expect(view.getByRole('button', { name: 'Retry isolation' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Retry isolation' }))
+    await waitFor(() => { expect(p.startTask).toHaveBeenCalledTimes(2) })
     fireEvent.click(view.getByRole('button', { name: 'Use project directly' }))
     await waitFor(() => { expect(p.startTask).toHaveBeenLastCalledWith('ws', 'direct') })
     expect(document.activeElement).toBe(trigger)

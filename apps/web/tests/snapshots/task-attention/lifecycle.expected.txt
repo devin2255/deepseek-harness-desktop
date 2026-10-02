@@ -39,6 +39,9 @@ No tasks are running.
 Other
 
 No other tasks.
+
+Archived tasks (0)
+Show archived tasks
 --- ready ---
 Tasks
 Refresh
@@ -77,6 +80,8 @@ Ready
 Criteria 1/1
 0 unresolved risk(s)
 Live
+Archived tasks (0)
+Show archived tasks
 --- disconnected ---
 Tasks
 Refresh
@@ -115,3 +120,5 @@ Ready
 Criteria 1/1
 0 unresolved risk(s)
 Last known before disconnect
+Archived tasks (0)
+Show archived tasks

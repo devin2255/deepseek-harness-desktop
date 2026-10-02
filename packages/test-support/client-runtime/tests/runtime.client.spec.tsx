@@ -591,6 +591,9 @@ describe('workspaces action face', () => {
     expect(ws.list.getSnapshot().archivedSessionIds).toEqual(['s1'])
     expect(ws.calls.map(c => c.method)).toEqual(
       ['create', 'create', 'pickDirectory', 'rename', 'delete', 'openPath', 'insertBefore', 'insertSessionBefore', 'archiveSession'])
+    await ws.unarchiveSession('s1' as SessionId)
+    expect(ws.list.getSnapshot().archivedSessionIds).toEqual([])
+    await ws.archiveSession('s1' as SessionId)
 
     ws.stub('create', () => Promise.resolve({ workspaceId: 'ws-x', title: 'X', path: '/x', sessionIds: [] } as never))
     ws.stub('pickDirectory', () => Promise.resolve('/picked'))
@@ -601,6 +604,7 @@ describe('workspaces action face', () => {
     ws.stub('insertBefore', insertBefore)
     ws.stub('insertSessionBefore', () => Promise.resolve({ workspaceId: 'w1', title: '', path: '', sessionIds: [] } as never))
     ws.stub('archiveSession', () => Promise.resolve())
+    ws.stub('unarchiveSession', () => Promise.resolve())
     expect((await ws.create({ path: '/y' })).title).toBe('X')
     await expect(ws.pickDirectory()).resolves.toBe('/picked')
     expect((await ws.rename('w1' as WorkspaceId, 'z')).title).toBe('S')
@@ -611,6 +615,7 @@ describe('workspaces action face', () => {
     expect((await ws.insertSessionBefore('w1' as WorkspaceId, 's1' as SessionId)).sessionIds).toEqual([])
     // The stub replaces the default set mutation: the set stays as-is.
     await ws.archiveSession('s2' as SessionId)
+    await ws.unarchiveSession('s1' as SessionId)
     expect(ws.list.getSnapshot().archivedSessionIds).toEqual(['s1'])
     await runtime.dispose()
   })

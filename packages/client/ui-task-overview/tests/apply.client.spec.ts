@@ -4,6 +4,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply, inject, type OverviewInjected } from '../src/client/index.ts'
+import { apply as applyHost } from '../src/index.ts'
 
 async function bench(includeTasks = true) {
   const ctx = new Context()
@@ -45,6 +46,10 @@ function installDesktopBridge(
 }
 
 describe('overview composition', () => {
+  it('has no host-side effects', () => {
+    expect(applyHost).not.toThrow()
+  })
+
   it('ignores interactions while loading and rejects archive changes without Task projection', async () => {
     const b = await bench(false)
     b.declare()

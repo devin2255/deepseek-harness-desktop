@@ -17,6 +17,41 @@ function bench() {
 }
 
 describe('task navigation', () => {
+  it('rejects a missing Task and ignores navigation after disposal', async () => {
+    const b = bench()
+    await expect(b.navigation.open(id('missing'))).rejects.toThrow('Task is no longer available')
+    b.navigation.dispose()
+    await b.navigation.open(id('root'))
+    expect(b.sessions.open).not.toHaveBeenCalled()
+  })
+
+  it('uses a known child address without refreshing its parent', async () => {
+    const b = bench()
+    const address: SubagentAddress = { parentSessionId: id('parent'), childSessionId: id('child'), mode: 'continuable' }
+    b.setAddress(address)
+    await b.navigation.open(id('child'))
+    expect(b.sessions.refreshSubagents).not.toHaveBeenCalled()
+    expect(b.sessions.openSubagent).toHaveBeenCalledWith(address)
+  })
+
+  it('propagates a live catalog failure but suppresses one after cancellation', async () => {
+    const live = bench()
+    live.sessions.refreshSubagents.mockRejectedValueOnce(new Error('Catalog unavailable'))
+    await expect(live.navigation.open(id('child'))).rejects.toThrow('Catalog unavailable')
+    expect(live.showConversation).not.toHaveBeenCalled()
+
+    const cancelled = bench()
+    let rejectRefresh!: (error: unknown) => void
+    cancelled.sessions.refreshSubagents.mockImplementation(() => new Promise<void>((_resolve, reject) => {
+      rejectRefresh = reject
+    }))
+    const opening = cancelled.navigation.open(id('child'))
+    cancelled.navigation.cancel()
+    rejectRefresh(new Error('Late catalog failure'))
+    await opening
+    expect(cancelled.showConversation).not.toHaveBeenCalled()
+  })
+
   it('opens an ordinary root and reveals even an already selected conversation', async () => {
     const b = bench()
     await b.navigation.open(id('root'))

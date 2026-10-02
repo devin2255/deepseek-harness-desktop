@@ -88,7 +88,7 @@ describe('web snapshot: durable Task attention lifecycle', () => {
     tripwire = watchConsole(page)
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-    await page.getByRole('button', { name: 'Tasks' }).click()
+    await page.getByRole('button', { name: 'Tasks', exact: true }).click()
     await page.getByRole('main', { name: 'Tasks' }).waitFor({ timeout: 15_000 })
   }, 120_000)
 

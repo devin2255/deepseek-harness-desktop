@@ -37,11 +37,8 @@ function matchesBearer(req: IncomingMessage, capability: Buffer): boolean {
   if (req.headersDistinct.authorization?.length !== 1) return false
   const authorization = req.headers.authorization
   if (typeof authorization !== 'string') return false
-  const match = /^Bearer ([A-Za-z0-9_-]+)$/.exec(authorization)
-  if (match === null) return false
-  const suppliedValue = match[1]
-  if (suppliedValue === undefined) return false
-  const supplied = Buffer.from(suppliedValue, 'utf8')
+  if (!/^Bearer [A-Za-z0-9_-]+$/u.test(authorization)) return false
+  const supplied = Buffer.from(authorization.slice('Bearer '.length), 'utf8')
   return supplied.length === capability.length && timingSafeEqual(supplied, capability)
 }
 

@@ -140,7 +140,7 @@ export function TaskOverview({
   const status = !connected ? t(initial ? 'loading' : 'disconnected')
     : failed ? t('failed') : initial ? t('loading') : loading ? t('refreshing')
       : tasks?.freshness === 'stale' ? t('stale') : undefined
-  const rowCount = taskRows?.length ?? activityRows?.length ?? 0
+  const rowCount = taskRows?.length ?? activityRows?.length
 
   return (
     <main className={css.root} aria-label={t('tasks')}>
