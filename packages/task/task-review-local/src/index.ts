@@ -119,7 +119,7 @@ function truncateUtf8(value: string, maxBytes: number): { text: string; truncate
   const bytes = Buffer.from(value)
   if (bytes.byteLength <= maxBytes) return { text: value, truncated: false }
   let end = maxBytes
-  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--
+  while (end > 0 && (bytes.readUInt8(end) & 0xc0) === 0x80) end--
   return { text: bytes.subarray(0, end).toString('utf8'), truncated: true }
 }
 
@@ -207,7 +207,7 @@ export class LocalTaskReview extends TaskReviewService {
     try {
       return await resolution
     } catch (error) {
-      if (this.executable === resolution) this.executable = undefined
+      this.executable = undefined
       throw failure(`Git executable ${JSON.stringify(this.config.gitCommand)} is unavailable.`, 'REVIEW_GIT_FAILED', error)
     }
   }
@@ -372,6 +372,7 @@ export class LocalTaskReview extends TaskReviewService {
     for (const path of untracked.stdout.split('\0').filter(Boolean).sort(lexicalCompare)) {
       if (!validReviewPath(path)) throw failure('Git returned an invalid untracked path.', 'REVIEW_GIT_FAILED')
       const absolutePath = resolve(worktreePath, ...path.split('/'))
+      /* v8 ignore next 2 -- POSIX normalized relative segments stay inside the worktree; Windows drive-relative paths retain this check. */
       if (absolutePath !== worktreePath && !absolutePath.startsWith(`${worktreePath}${sep}`)) {
         throw failure('Git returned an untracked path outside the Task worktree.', 'REVIEW_GIT_FAILED')
       }

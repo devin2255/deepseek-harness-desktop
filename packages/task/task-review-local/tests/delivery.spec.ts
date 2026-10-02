@@ -138,6 +138,29 @@ describe('local Task review delivery', () => {
     }
   })
 
+  it('rejects a commit whose post-commit hook leaves an unreviewed change', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    try {
+      const hooks = join(fixture.root, 'hooks')
+      mkdirSync(hooks)
+      const postCommit = join(hooks, 'post-commit')
+      writeFileSync(postCommit, '#!/bin/sh\nprintf "late\\n" > late-after-commit.txt\n')
+      chmodSync(postCommit, 0o755)
+      git(assignment.path, ['config', 'core.hooksPath', hooks])
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed\n')
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      await expect(ctx.taskReview.commit({
+        assignment, expectedRevision: reviewed.revision, message: 'Hook changes worktree',
+      })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+      expect(git(assignment.path, ['rev-parse', 'HEAD']).trim()).not.toBe(assignment.baseCommit)
+      expect(git(assignment.path, ['status', '--porcelain=v1', '-z'])).toContain('late-after-commit.txt')
+    } finally {
+      await test.dispose()
+    }
+  })
+
   it('preflights and applies one committed Task patch to a clean source index', async () => {
     const fixture = repository()
     const test = await mount(fixture)
@@ -291,6 +314,63 @@ describe('local Task review delivery', () => {
       })).rejects.toMatchObject({ code: 'REVIEW_EMPTY' } satisfies Partial<TaskReviewError>)
       expect(git(fixture.source, ['status', '--porcelain=v1', '-z'])).toBe('')
     } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects Apply when the complete reviewed file list is not visible', async () => {
+    const fixture = repository()
+    const test = await mount(fixture, { maxFiles: 1 })
+    const { assignment, ctx } = test
+    try {
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'committed task change\n')
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      const committed = await ctx.taskReview.commit({
+        assignment, expectedRevision: reviewed.revision, message: 'Task',
+      })
+      writeFileSync(join(assignment.path, 'late-untracked.txt'), 'not part of commit\n')
+      const incomplete = await ctx.taskReview.summarize({ assignment })
+      expect(incomplete.truncated).toBe(true)
+      await expect(ctx.taskReview.apply({
+        assignment, expectedRevision: incomplete.revision,
+        expectedSourceHead: incomplete.sourceHead, commit: committed.commit,
+      })).rejects.toMatchObject({ code: 'REVIEW_INCOMPLETE' } satisfies Partial<TaskReviewError>)
+      expect(git(fixture.source, ['status', '--porcelain=v1', '-z'])).toBe('')
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects a failed Apply preflight before modifying the source checkout', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'task change\n')
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const committed = await ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Task' })
+    const ready = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (spec.argv.includes('apply') && spec.argv.includes('--check')) {
+        return {
+          done: Promise.resolve({ exitCode: 1, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: '', lossy: false }) },
+            stderr: { readFrom: () => ({ text: 'scripted preflight conflict', lossy: false }) },
+          },
+        } as unknown as ReturnType<typeof ctx.subprocess.spawn>
+      }
+      return spawn(spec)
+    })
+    try {
+      await expect(ctx.taskReview.apply({
+        assignment, expectedRevision: ready.revision,
+        expectedSourceHead: ready.sourceHead, commit: committed.commit,
+      })).rejects.toMatchObject({ code: 'REVIEW_APPLY_CONFLICT' } satisfies Partial<TaskReviewError>)
+      expect(readFileSync(join(fixture.source, 'tracked.txt'), 'utf8')).toBe('base\n')
+      expect(git(fixture.source, ['status', '--porcelain=v1', '-z'])).toBe('')
+    } finally {
+      intercepted.mockRestore()
       await test.dispose()
     }
   })

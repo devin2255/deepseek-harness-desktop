@@ -209,12 +209,40 @@ describe('local Task review snapshots', () => {
     }
   })
 
+  it('does not emit a partial multibyte character at the patch byte limit', async () => {
+    const fixture = repository()
+    const test = await mount(fixture, { maxDiffBytes: 1 })
+    const { assignment, ctx } = test
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed\n')
+    const summary = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (spec.argv.includes('--no-ext-diff')) {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: '€', lossy: false }) },
+            stderr: { readFrom: () => ({ text: '', lossy: false }) },
+          },
+        } as unknown as ReturnType<typeof ctx.subprocess.spawn>
+      }
+      return spawn(spec)
+    })
+    try {
+      const diff = await ctx.taskReview.diff({ assignment, path: 'tracked.txt', expectedRevision: summary.revision })
+      expect(diff).toMatchObject({ patch: '', truncated: true })
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
+  })
+
   it('rejects malformed Git paths and missing counts before exposing a review', async () => {
     const fixture = repository()
     const test = await mount(fixture)
     const { assignment, ctx } = test
     writeFileSync(join(assignment.path, 'new.txt'), 'new\n')
-    let mode: 'changed-path' | 'previous-path' | 'missing-counts' | 'untracked-path' | 'duplicate' = 'changed-path'
+    let mode: 'changed-path' | 'previous-path' | 'missing-counts' | 'untracked-path' | 'drive-relative' | 'duplicate' = 'changed-path'
     const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
     const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
       let output: string | undefined
@@ -225,6 +253,7 @@ describe('local Task review snapshots', () => {
       }
       if (spec.argv.includes('ls-files') && spec.argv.includes('--others')) {
         if (mode === 'untracked-path') output = '../outside\0'
+        else if (mode === 'drive-relative') output = 'Z:escape\0'
         else if (mode === 'duplicate') output = 'new.txt\0new.txt\0'
       }
       if (output !== undefined) {
@@ -241,6 +270,11 @@ describe('local Task review snapshots', () => {
     try {
       for (const invalid of ['changed-path', 'previous-path', 'missing-counts', 'untracked-path'] as const) {
         mode = invalid
+        await expect(ctx.taskReview.summarize({ assignment }))
+          .rejects.toMatchObject({ code: 'REVIEW_GIT_FAILED' } satisfies Partial<TaskReviewError>)
+      }
+      if (process.platform === 'win32') {
+        mode = 'drive-relative'
         await expect(ctx.taskReview.summarize({ assignment }))
           .rejects.toMatchObject({ code: 'REVIEW_GIT_FAILED' } satisfies Partial<TaskReviewError>)
       }
