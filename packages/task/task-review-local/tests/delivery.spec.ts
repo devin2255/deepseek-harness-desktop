@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TaskReviewError } from '@deepseek-ai/dsh-task-review'
 import { cleanupFixtures, git, mount, repository } from './fixture.ts'
 
@@ -60,6 +60,11 @@ describe('local Task review delivery', () => {
     await expect(empty.ctx.taskReview.commit({
       assignment: empty.assignment,
       expectedRevision: emptyReview.revision,
+      message: 'Invalid\0message',
+    })).rejects.toMatchObject({ code: 'REVIEW_INVALID_MESSAGE' } satisfies Partial<TaskReviewError>)
+    await expect(empty.ctx.taskReview.commit({
+      assignment: empty.assignment,
+      expectedRevision: emptyReview.revision,
       message: 'Nothing',
     })).rejects.toMatchObject({ code: 'REVIEW_EMPTY' } satisfies Partial<TaskReviewError>)
     await empty.dispose()
@@ -107,6 +112,30 @@ describe('local Task review delivery', () => {
     })).rejects.toMatchObject({ code: 'REVIEW_GIT_FAILED' } satisfies Partial<TaskReviewError>)
     expect(git(hook.assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(hook.assignment.baseCommit)
     await hook.dispose()
+  })
+
+  it('rejects a worktree changed between review and Git staging', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed\n')
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (spec.argv.includes('add') && spec.argv.includes('-A')) {
+        writeFileSync(join(assignment.path, 'tracked.txt'), 'changed during staging\n')
+      }
+      return spawn(spec)
+    })
+    try {
+      await expect(ctx.taskReview.commit({
+        assignment, expectedRevision: reviewed.revision, message: 'Should not commit',
+      })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+      expect(git(assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(assignment.baseCommit)
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
   })
 
   it('preflights and applies one committed Task patch to a clean source index', async () => {
@@ -214,6 +243,135 @@ describe('local Task review delivery', () => {
     await conflict.dispose()
   }, 20_000)
 
+  it('rejects invalid Apply identities and a Task worktree changed after Commit', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    try {
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'task change\n')
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      const committed = await ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Task' })
+      const ready = await ctx.taskReview.summarize({ assignment })
+      for (const invalid of [
+        { commit: 'HEAD', expectedSourceHead: ready.sourceHead, code: 'REVIEW_GIT_FAILED' },
+        { commit: committed.commit, expectedSourceHead: 'HEAD', code: 'REVIEW_GIT_FAILED' },
+        { commit: 'f'.repeat(40), expectedSourceHead: ready.sourceHead, code: 'REVIEW_STALE' },
+      ] as const) {
+        await expect(ctx.taskReview.apply({
+          assignment, expectedRevision: ready.revision,
+          commit: invalid.commit, expectedSourceHead: invalid.expectedSourceHead,
+        })).rejects.toMatchObject({ code: invalid.code } satisfies Partial<TaskReviewError>)
+      }
+      writeFileSync(join(assignment.path, 'late-untracked.txt'), 'later\n')
+      await expect(ctx.taskReview.apply({
+        assignment, expectedRevision: ready.revision,
+        commit: committed.commit, expectedSourceHead: ready.sourceHead,
+      })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+      const changed = await ctx.taskReview.summarize({ assignment })
+      await expect(ctx.taskReview.apply({
+        assignment, expectedRevision: changed.revision,
+        commit: committed.commit, expectedSourceHead: changed.sourceHead,
+      })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+      expect(readFileSync(join(fixture.source, 'tracked.txt'), 'utf8')).toBe('base\n')
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects an empty patch from a committed Task branch', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    try {
+      git(assignment.path, ['commit', '--allow-empty', '-m', 'Empty task commit'])
+      const ready = await ctx.taskReview.summarize({ assignment })
+      await expect(ctx.taskReview.apply({
+        assignment, expectedRevision: ready.revision,
+        commit: ready.headCommit, expectedSourceHead: ready.sourceHead,
+      })).rejects.toMatchObject({ code: 'REVIEW_EMPTY' } satisfies Partial<TaskReviewError>)
+      expect(git(fixture.source, ['status', '--porcelain=v1', '-z'])).toBe('')
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it.each([
+    ['changed source files', 'REVIEW_SOURCE_DIRTY'],
+    ['moved source HEAD', 'REVIEW_SOURCE_MOVED'],
+  ] as const)('rejects %s after Apply simulation without writing the Task patch', async (mode, code) => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'task change\n')
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const committed = await ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Task' })
+    const ready = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    let changed = false
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (!changed && spec.argv.includes('apply') && spec.argv.includes('--cached')) {
+        changed = true
+        if (mode === 'changed source files') {
+          writeFileSync(join(fixture.source, 'late.txt'), 'late source change\n')
+        } else {
+          writeFileSync(join(fixture.source, 'source-move.txt'), 'new source commit\n')
+          git(fixture.source, ['add', 'source-move.txt'])
+          git(fixture.source, ['commit', '-m', 'Source moved'])
+        }
+      }
+      return spawn(spec)
+    })
+    try {
+      await expect(ctx.taskReview.apply({
+        assignment, expectedRevision: ready.revision,
+        expectedSourceHead: ready.sourceHead, commit: committed.commit,
+      })).rejects.toMatchObject({ code })
+      expect(changed).toBe(true)
+      expect(readFileSync(join(fixture.source, 'tracked.txt'), 'utf8')).toBe('base\n')
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
+  })
+
+  it('rejects a failed isolated-index Apply simulation and removes its temporary index', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'task change\n')
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const committed = await ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Task' })
+    const ready = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    let temporaryIndex: string | undefined
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (spec.argv.includes('apply') && spec.argv.includes('--cached')) {
+        temporaryIndex = spec.env?.GIT_INDEX_FILE
+        return {
+          done: Promise.resolve({ exitCode: 1, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: '', lossy: false }) },
+            stderr: { readFrom: () => ({ text: 'scripted conflict', lossy: false }) },
+          },
+        } as unknown as ReturnType<typeof ctx.subprocess.spawn>
+      }
+      return spawn(spec)
+    })
+    try {
+      await expect(ctx.taskReview.apply({
+        assignment, expectedRevision: ready.revision,
+        expectedSourceHead: ready.sourceHead, commit: committed.commit,
+      })).rejects.toMatchObject({ code: 'REVIEW_APPLY_CONFLICT' } satisfies Partial<TaskReviewError>)
+      expect(temporaryIndex).toBeDefined()
+      expect(existsSync(temporaryIndex!)).toBe(false)
+      expect(existsSync(`${temporaryIndex!}.lock`)).toBe(false)
+      expect(readFileSync(join(fixture.source, 'tracked.txt'), 'utf8')).toBe('base\n')
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
+  })
+
   it('requires loss confirmation and preserves committed branches when discarding worktrees', async () => {
     const dirtyFixture = repository()
     const dirty = await mount(dirtyFixture)
@@ -269,6 +427,81 @@ describe('local Task review delivery', () => {
     await committed.dispose()
   })
 
+  it('rejects a discard request after the reviewed worktree changes', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    try {
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed\n')
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'changed before discard\n')
+      await expect(ctx.taskReview.discard({
+        assignment, expectedRevision: reviewed.revision, confirmedUncommittedLoss: true,
+      })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+      expect(existsSync(assignment.path)).toBe(true)
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects Git removal success when the Task worktree directory remains', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (spec.argv.includes('worktree') && spec.argv.includes('remove')) {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: '', lossy: false }) },
+            stderr: { readFrom: () => ({ text: '', lossy: false }) },
+          },
+        } as unknown as ReturnType<typeof ctx.subprocess.spawn>
+      }
+      return spawn(spec)
+    })
+    try {
+      await expect(ctx.taskReview.discard({
+        assignment, expectedRevision: reviewed.revision, confirmedUncommittedLoss: false,
+      })).rejects.toMatchObject({ code: 'REVIEW_GIT_FAILED' } satisfies Partial<TaskReviewError>)
+      expect(existsSync(assignment.path)).toBe(true)
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
+  })
+
+  it('rejects a removed worktree when Git cannot confirm branch preservation', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (spec.argv.includes('show-ref')) {
+        return {
+          done: Promise.resolve({ exitCode: 1, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: '', lossy: false }) },
+            stderr: { readFrom: () => ({ text: '', lossy: false }) },
+          },
+        } as unknown as ReturnType<typeof ctx.subprocess.spawn>
+      }
+      return spawn(spec)
+    })
+    try {
+      await expect(ctx.taskReview.discard({
+        assignment, expectedRevision: reviewed.revision, confirmedUncommittedLoss: false,
+      })).rejects.toMatchObject({ code: 'REVIEW_GIT_FAILED' } satisfies Partial<TaskReviewError>)
+      expect(existsSync(assignment.path)).toBe(false)
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
+  })
+
   it('rejects delivery when configured review or Apply bounds hide required content', async () => {
     const fileFixture = repository()
     const fileBound = await mount(fileFixture, { maxFiles: 1 })
@@ -280,6 +513,11 @@ describe('local Task review delivery', () => {
       assignment: fileBound.assignment,
       expectedRevision: truncated.revision,
       message: 'Hidden file',
+    })).rejects.toMatchObject({ code: 'REVIEW_INCOMPLETE' } satisfies Partial<TaskReviewError>)
+    await expect(fileBound.ctx.taskReview.discard({
+      assignment: fileBound.assignment,
+      expectedRevision: truncated.revision,
+      confirmedUncommittedLoss: true,
     })).rejects.toMatchObject({ code: 'REVIEW_INCOMPLETE' } satisfies Partial<TaskReviewError>)
     await fileBound.dispose()
 
