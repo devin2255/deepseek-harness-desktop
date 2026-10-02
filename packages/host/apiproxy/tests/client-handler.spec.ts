@@ -7,6 +7,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
+import type { TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review'
 import type { ApiProxy, GoalRef, HostFrame, MuxFrame, RpcMessage, RpcRequest, RpcResponse, TaskSnapshot } from '@deepseek-ai/dsh-host-apiproxy'
 import { InProcessApiClient, RpcId, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 
@@ -682,12 +684,29 @@ describe('tasks unary surface', () => {
   it('round-trips the baseline and every mutation through the strict route table', async () => {
     const seen: { method: string; payload: unknown }[] = []
     const record = recorderInto(seen)
+    const revision = TaskReviewRevision('a'.repeat(64))
+    const commit = 'b'.repeat(40)
+    const summary: TaskReviewSummary = {
+      taskId: sid('root'), workspaceId: 'w1' as never, revision,
+      baseCommit: commit, headCommit: commit, sourceHead: commit, sourceDirty: false,
+      branch: 'dsh/task-0123456789abcdef01234567', dirty: false, truncated: false,
+      files: [], additions: 0, deletions: 0,
+    }
+    const diff: TaskFileDiff = {
+      taskId: sid('root'), workspaceId: 'w1' as never, revision,
+      path: 'tracked.txt', binary: false, truncated: false, patch: '@@ -1 +1 @@\n-old\n+new\n',
+    }
     const api = scriptedApi({ tasks: {
       list: record('task.list', r => ok(r, { generation: 1, tasks: [task] })),
       define: record('task.define', r => ok(r, task)),
       updateCriterion: record('task.updateCriterion', r => ok(r, task)),
       recordRisk: record('task.recordRisk', r => ok(r, task)),
       review: record('task.review', r => ok(r, task)),
+      reviewSummary: record('task.reviewSummary', r => ok(r, summary)),
+      reviewDiff: record('task.reviewDiff', r => ok(r, diff)),
+      commit: record('task.commit', r => ok(r, task)),
+      apply: record('task.apply', r => ok(r, task)),
+      discard: record('task.discard', r => ok(r, task)),
     } })
     const c = client(api)
     expect((await c.tasks.list({})).result).toEqual({ ok: true, value: { generation: 1, tasks: [task] } })
@@ -695,8 +714,20 @@ describe('tasks unary surface', () => {
     await c.tasks.updateCriterion({ sessionId: sid('root'), criterion: { id: 'c1' as never, text: 'Passes', status: 'satisfied', evidence: [] }, expectedSeq: 1 })
     await c.tasks.recordRisk({ sessionId: sid('root'), risk: { id: 'r1' as never, severity: 'high', summary: 'Signing' }, expectedSeq: 2 })
     await c.tasks.review({ sessionId: sid('root'), decision: 'ready', expectedSeq: 3 })
+    expect((await c.tasks.reviewSummary({ sessionId: sid('root') })).result)
+      .toEqual({ ok: true, value: summary })
+    expect((await c.tasks.reviewDiff({ sessionId: sid('root'), path: 'tracked.txt', expectedRevision: revision })).result)
+      .toEqual({ ok: true, value: diff })
+    await c.tasks.commit({ sessionId: sid('root'), expectedRevision: revision, message: 'Task', expectedSeq: 4 })
+    await c.tasks.apply({
+      sessionId: sid('root'), expectedRevision: revision, expectedSourceHead: commit, commit, expectedSeq: 5,
+    })
+    await c.tasks.discard({
+      sessionId: sid('root'), expectedRevision: revision, confirmedUncommittedLoss: false, expectedSeq: 6,
+    })
     expect(seen.map(entry => entry.method)).toEqual([
       'task.list', 'task.define', 'task.updateCriterion', 'task.recordRisk', 'task.review',
+      'task.reviewSummary', 'task.reviewDiff', 'task.commit', 'task.apply', 'task.discard',
     ])
   })
 })
