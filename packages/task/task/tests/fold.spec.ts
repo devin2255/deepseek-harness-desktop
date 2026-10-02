@@ -134,7 +134,9 @@ describe('task replay fold', () => {
     ['task id', { ...assignment, taskId: ' root ' }, 'worktree taskId must be non-empty and normalized'],
     ['workspace id', { ...assignment, workspaceId: '' }, 'worktree workspaceId must be non-empty and normalized'],
     ['source path', { ...assignment, sourcePath: ' source ' }, 'worktree sourcePath must be non-empty and normalized'],
+    ['null source path', { ...assignment, sourcePath: 'source\u0000path' }, 'worktree sourcePath must not contain a null character'],
     ['path', { ...assignment, path: '' }, 'worktree path must be non-empty and normalized'],
+    ['same path', { ...assignment, path: assignment.sourcePath }, 'worktree path must differ from sourcePath'],
     ['branch', { ...assignment, branch: 'main' }, 'worktree branch is invalid'],
     ['base commit', { ...assignment, baseCommit: 'HEAD' }, 'worktree baseCommit must be a lowercase forty-character Git object id'],
     ['source head', { ...assignment, sourceHead: 'A'.repeat(40) }, 'worktree sourceHead must be a lowercase forty-character Git object id'],
@@ -340,15 +342,37 @@ describe('task replay fold', () => {
     ['malformed review revision', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, reviewRevision: 'bad' })], 'commit receipt reviewRevision must be a lowercase SHA-256 digest'],
     ['malformed operation id', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, operationId: 'operation' })], 'commit receipt operationId must be a normalized UUID'],
     ['malformed commit', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, commit: 'HEAD' })], 'commit receipt commit must be a lowercase forty-character Git object id'],
+    ['malformed commit time', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, committedAt: -1 })], 'commit receipt committedAt must be a non-negative safe integer'],
+    ['commit kind', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed({ ...commitReceipt, kind: 'apply' })], 'commit receipt kind must be commit'],
     ['duplicate commit', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), committed(commitReceipt, 5)], 'commit receipt already exists'],
+    ['commit after discard', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded(discardReceipt, 4), committed(commitReceipt, 5)], 'commit cannot follow discard'],
+    ['review after commit', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), reviewed('changes-requested', 5)], 'review decision cannot change after delivery'],
+    ['apply kind', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied({ ...applyReceipt, kind: 'commit' })], 'apply receipt kind must be apply'],
     ['apply commit mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied({ ...applyReceipt, commit: '3'.repeat(40) })], 'apply receipt commit does not match'],
     ['apply revision mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied({ ...applyReceipt, reviewRevision: TaskReviewRevision('d'.repeat(64)) })], 'apply receipt reviewRevision does not match'],
     ['apply changed HEAD', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied({ ...applyReceipt, sourceHeadAfter: '3'.repeat(40) })], 'apply receipt must not change source HEAD'],
+    ['duplicate apply', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), applied(), applied(applyReceipt, 6)], 'apply receipt already exists'],
+    ['apply after discard', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), discarded(discardReceipt, 5), applied(applyReceipt, 6)], 'apply cannot follow discard'],
     ['discard without readiness', [worktreeAssigned(assignment), discarded(discardReceipt, 1)], 'discard requires a ready decision or recorded delivery'],
+    ['discard not a record', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded(null, 4)], 'discard receipt must be a record'],
+    ['discard kind', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded({ ...discardReceipt, kind: 'apply' }, 4)], 'discard receipt kind must be discard'],
+    ['discard branch preservation', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded({ ...discardReceipt, branchPreserved: false }, 4)], 'discard receipt must confirm branch preservation'],
     ['discard missing removed flag', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded({ ...discardReceipt, worktreeRemoved: false }, 4)], 'discard receipt must confirm worktree removal'],
+    ['discard loss flag', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded({ ...discardReceipt, uncommittedChangesDiscarded: 'yes' }, 4)], 'discard receipt uncommittedChangesDiscarded must be boolean'],
+    ['duplicate discard', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded(discardReceipt, 4), discarded(discardReceipt, 5)], 'discard receipt already exists'],
+    ['discard branch mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded({ ...discardReceipt, branch: 'wrong' }, 4)], 'discard receipt branch does not match'],
     ['discard revision mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), discarded({ ...discardReceipt, reviewRevision: TaskReviewRevision('d'.repeat(64)) }, 5)], 'discard receipt reviewRevision does not match'],
+    ['discard recovery mismatch', [worktreeAssigned(assignment), ...readyDeliveryPrefix(), committed(), discarded({ ...discardReceipt, recoverableCommit: '3'.repeat(40) }, 5)], 'discard receipt recoverableCommit does not match'],
   ])('rejects forged delivery state: %s', (_label, events, message) => {
     expect(() => foldTask(events)).toThrow(message)
+  })
+
+  it('records a ready worktree discard without a recoverable commit', () => {
+    const receipt = structuredClone(discardReceipt)
+    delete receipt.recoverableCommit
+    const state = foldTask([worktreeAssigned(assignment), ...readyDeliveryPrefix(), discarded(receipt, 4)])
+    expect(state.discardReceipt).toEqual(receipt)
+    expect(state.commitReceipt).toBeUndefined()
   })
 
   it('rejects a satisfied criterion becoming waived', () => {
