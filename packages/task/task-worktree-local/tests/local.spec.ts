@@ -3,13 +3,13 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
-import LocalTaskWorktrees from '@deepseek-ai/dsh-task-worktree-local'
+import LocalTaskWorktrees, { resolveConfig } from '@deepseek-ai/dsh-task-worktree-local'
 import { removeFixtureSafely } from '../../../../scripts/test-fixture-cleanup.ts'
 
 const fixtures: string[] = []
@@ -56,6 +56,23 @@ afterEach(async () => {
 })
 
 describe('local Task worktrees', () => {
+  it('resolves explicit and omitted Git limits and rejects an invalid executable', () => {
+    const defaults = resolveConfig({})
+    expect(defaults.gitCommand).toBe('git')
+    expect(defaults.minFreeBytes).toBeGreaterThan(0)
+    expect(defaults.commandTimeoutMs).toBeGreaterThan(0)
+    expect(defaults.terminateGraceMs).toBeGreaterThan(0)
+    expect(defaults.maxOutputBytes).toBeGreaterThan(0)
+    expect(resolveConfig({
+      gitCommand: 'git-custom', minFreeBytes: 0, commandTimeoutMs: 10,
+      terminateGraceMs: 20, maxOutputBytes: 30,
+    })).toMatchObject({
+      gitCommand: 'git-custom', minFreeBytes: 0, commandTimeoutMs: 10,
+      terminateGraceMs: 20, maxOutputBytes: 30,
+    })
+    expect(() => resolveConfig({ gitCommand: ' git ' })).toThrow('gitCommand must be non-empty and normalized')
+  })
+
   it('creates an isolated branch without changing the source checkout', async () => {
     const fixture = repository()
     const test = await mount(fixture.home)
@@ -82,6 +99,9 @@ describe('local Task worktrees', () => {
     expect(existsSync(join(fixture.source, 'isolated.txt'))).toBe(false)
     expect(git(fixture.source, ['status', '--porcelain=v1'])).toBe('')
     expect(await ctx.taskWorktrees.inspect(assignment)).toBe('available')
+    expect(await ctx.taskWorktrees.inspect({ ...assignment, baseCommit: '0'.repeat(40) })).toBe('diverged')
+    await expect(ctx.taskWorktrees.inspect({ ...assignment, sourcePath: fixture.home }))
+      .rejects.toMatchObject({ code: 'WORKTREE_GIT_FAILED' } satisfies Partial<TaskWorktreeError>)
     await test.dispose()
   })
 
@@ -128,6 +148,10 @@ describe('local Task worktrees', () => {
     const fixture = repository()
     const plain = join(fixture.root, 'plain')
     mkdirSync(plain)
+    const file = join(fixture.root, 'not-a-directory')
+    writeFileSync(file, 'plain')
+    const childDirectory = join(fixture.source, 'child-directory')
+    mkdirSync(childDirectory)
     const unborn = join(fixture.root, 'unborn')
     mkdirSync(unborn)
     git(unborn, ['init'])
@@ -139,8 +163,17 @@ describe('local Task worktrees', () => {
     writeFileSync(join(nested, 'nested.txt'), 'nested\n')
     git(nested, ['add', 'nested.txt'])
     git(nested, ['commit', '-m', 'nested'])
+    const submoduleOrigin = repository()
+    git(fixture.source, ['-c', 'protocol.file.allow=always', 'submodule', 'add', submoduleOrigin.source, 'module'])
+    const submodule = join(fixture.source, 'module')
     const test = await mount(fixture.home)
     const { ctx } = test
+
+    for (const workspacePath of [join(fixture.root, 'missing'), file, childDirectory]) {
+      await expect(ctx.taskWorktrees.create({
+        taskId: SessionId(`invalid-${workspacePath}`), workspaceId: WorkspaceId('workspace'), workspacePath,
+      })).rejects.toMatchObject({ code: 'WORKTREE_NOT_GIT' } satisfies Partial<TaskWorktreeError>)
+    }
 
     await expect(ctx.taskWorktrees.create({
       taskId: SessionId('plain'), workspaceId: WorkspaceId('workspace'), workspacePath: plain,
@@ -150,6 +183,9 @@ describe('local Task worktrees', () => {
     })).rejects.toMatchObject({ code: 'WORKTREE_UNBORN_HEAD' } satisfies Partial<TaskWorktreeError>)
     await expect(ctx.taskWorktrees.create({
       taskId: SessionId('nested'), workspaceId: WorkspaceId('workspace'), workspacePath: nested,
+    })).rejects.toMatchObject({ code: 'WORKTREE_NESTED_REPOSITORY' } satisfies Partial<TaskWorktreeError>)
+    await expect(ctx.taskWorktrees.create({
+      taskId: SessionId('submodule'), workspaceId: WorkspaceId('workspace'), workspacePath: submodule,
     })).rejects.toMatchObject({ code: 'WORKTREE_NESTED_REPOSITORY' } satisfies Partial<TaskWorktreeError>)
 
     const constrained = new Context()
@@ -167,6 +203,20 @@ describe('local Task worktrees', () => {
     await constrainedSubprocess.dispose()
   })
 
+  it('reports an unavailable Git executable and can retry its resolution', async () => {
+    const fixture = repository()
+    const test = await mount(fixture.home, { gitCommand: 'missing-deepseek-test-git' })
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(test.ctx.taskWorktrees.create({
+          taskId: SessionId('no-git'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+        })).rejects.toMatchObject({ code: 'WORKTREE_UNAVAILABLE' } satisfies Partial<TaskWorktreeError>)
+      }
+    } finally {
+      await test.dispose()
+    }
+  })
+
   it('preserves an occupied deterministic target and reports later divergence', async () => {
     const fixture = repository()
     const test = await mount(fixture.home)
@@ -179,9 +229,11 @@ describe('local Task worktrees', () => {
       code: 'WORKTREE_TARGET_OCCUPIED',
     } satisfies Partial<TaskWorktreeError>)
     expect(readFileSync(join(assignment.path, 'tracked.txt'), 'utf8').replaceAll('\r\n', '\n')).toBe('base\n')
+    expect(await ctx.taskWorktrees.inspect({ ...assignment, sourcePath: join(fixture.root, 'missing') })).toBe('diverged')
 
     git(fixture.source, ['worktree', 'remove', '--force', assignment.path])
     expect(await ctx.taskWorktrees.inspect(assignment)).toBe('missing')
+    expect(await ctx.taskWorktrees.inspect({ ...assignment, path: join(fixture.source, 'tracked.txt') })).toBe('diverged')
     await expect(ctx.taskWorktrees.create(request)).rejects.toMatchObject({
       code: 'WORKTREE_BRANCH_OCCUPIED',
     } satisfies Partial<TaskWorktreeError>)
@@ -216,5 +268,30 @@ describe('local Task worktrees', () => {
     expect(createdPath).toBeDefined()
     expect(existsSync(createdPath!)).toBe(true)
     await test.dispose()
+  })
+
+  it('retains a generic failure when the Git add subprocess terminates', async () => {
+    const fixture = repository()
+    const test = await mount(fixture.home)
+    const spawn = test.ctx.subprocess.spawn.bind(test.ctx.subprocess)
+    const intercepted = vi.spyOn(test.ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      if (spec.argv.includes('worktree') && spec.argv.includes('add')) {
+        return {
+          done: Promise.resolve({ exitCode: null, signal: 'SIGTERM' }),
+          collected: {},
+        } as ReturnType<typeof test.ctx.subprocess.spawn>
+      }
+      return spawn(spec)
+    })
+    try {
+      const failure = test.ctx.taskWorktrees.create({
+        taskId: SessionId('terminated-add'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+      })
+      await expect(failure).rejects.toMatchObject({ code: 'WORKTREE_GIT_FAILED' } satisfies Partial<TaskWorktreeError>)
+      await expect(failure).rejects.toThrow('Git could not create the worktree. Any partial directory or branch was preserved for recovery.')
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
   })
 })

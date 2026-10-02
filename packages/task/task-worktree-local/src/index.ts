@@ -164,27 +164,25 @@ export class LocalTaskWorktrees extends TaskWorktreeService {
       if (topLevel !== sourcePath) {
         throw failure('The selected Workspace must be the Git repository root.', 'WORKTREE_NOT_GIT')
       }
-      const parent = dirname(sourcePath)
-      if (parent !== sourcePath) {
-        const parentProbe = await this.command(
-          executable,
-          parent,
-          ['rev-parse', '--show-toplevel'],
-          signal,
-          [0, 128],
-        )
-        if (parentProbe.exitCode === 0 && await realpath(parentProbe.stdout.trim()) !== sourcePath) {
-          throw failure(
-            'A Git repository nested inside another checkout is not supported for isolated tasks.',
-            'WORKTREE_NESTED_REPOSITORY',
-          )
-        }
-      }
       const superproject = await this.command(
         executable, sourcePath, ['rev-parse', '--show-superproject-working-tree'], signal,
       )
       if (superproject.stdout.trim().length > 0) {
         throw failure('Git submodule workspaces are not supported for isolated tasks.', 'WORKTREE_NESTED_REPOSITORY')
+      }
+      const parent = dirname(sourcePath)
+      const parentProbe = await this.command(
+        executable,
+        parent,
+        ['rev-parse', '--show-toplevel'],
+        signal,
+        [0, 128],
+      )
+      if (parentProbe.exitCode === 0 && await realpath(parentProbe.stdout.trim()) !== sourcePath) {
+        throw failure(
+          'A Git repository nested inside another checkout is not supported for isolated tasks.',
+          'WORKTREE_NESTED_REPOSITORY',
+        )
       }
       let sourceHead: string
       try {
