@@ -24,6 +24,8 @@ export type OverviewInjected = {
   openReview(id: SessionId): Promise<void>
   startTask(workspaceId: WorkspaceId | undefined, isolation: 'direct' | 'worktree'): Promise<void>
   refresh(): Promise<void>
+  archiveTask(id: SessionId): Promise<void>
+  restoreTask(id: SessionId): Promise<void>
   hooks: {
     hostDescription: HostDescriptionSource
     desktopNavigationFailure: ObservableSnapshot<string | undefined>
@@ -99,6 +101,25 @@ export function apply(ctx: ClientContext): void {
       await Promise.all([
         ctx.sessions.refresh(), ctx.workspaces.refresh(), ...(tasks === undefined ? [] : [tasks.refresh()]),
       ])
+    },
+    archiveTask: async (id) => {
+      if (!ready() || tasks === undefined) throw new Error('Task data is unavailable')
+      const list = tasks.list.getSnapshot()
+      const workspaces = ctx.workspaces.list.getSnapshot()
+      const task = list.byId[id]
+      if (list.phase !== 'ready' || list.freshness !== 'fresh' || workspaces.phase !== 'ready'
+        || task?.status !== 'settled' || task.freshness !== 'live' || task.attention.length > 0
+        || ctx.sessions.list.getSnapshot().byId[id]?.running === true
+        || task.descendantSessionIds.some(child => ctx.sessions.list.getSnapshot().byId[child]?.running === true)) {
+        throw new Error('Only settled tasks without running agents or pending attention can be archived')
+      }
+      await ctx.workspaces.archiveSession(id)
+    },
+    restoreTask: async (id) => {
+      if (!ready() || !ctx.workspaces.list.getSnapshot().archivedSessionIds.includes(id)) {
+        throw new Error('Archived task is unavailable')
+      }
+      await ctx.workspaces.unarchiveSession(id)
     },
     hooks: {
       hostDescription: connection.hostDescription,

@@ -40,6 +40,8 @@ describe('selectTasks', () => {
     expect(selected.map(row => row.task.taskId)).toEqual(['visible'])
     expect(list.ids).toEqual([id('visible'), id('archived')])
     expect(list.byId[id('archived')]?.taskId).toBe(id('archived'))
+    expect(selectTasks(list, sessionList([summary('visible')]), workspaces([], [id('archived')]), 'archived')
+      .map(row => row.task.taskId)).toEqual(['archived'])
   })
 
   it('projects all statuses, durable outcome facts, active descendants, workspace, and every attention owner', () => {

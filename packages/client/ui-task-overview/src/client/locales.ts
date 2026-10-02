@@ -3,7 +3,7 @@ export const zh = {
   tasks: '任务', newTask: '新建任务', startingTask: '正在创建…', workspace: '新任务的工作区', defaultWorkspace: '当前工作区或选择目录',
   'group.needs-you': '需要你处理', 'group.running': '进行中', 'group.other': '其他',
   'empty.needs-you': '暂无需要处理的任务。', 'empty.running': '暂无进行中的任务。', 'empty.other': '暂无其他任务。',
-  empty: '暂无任务。', unassigned: '未分配工作区', idle: '空闲', running: '运行中', unread: '有未读动态',
+  empty: '暂无任务。', emptyActive: '暂无活动任务；可在已归档任务中恢复。', unassigned: '未分配工作区', idle: '空闲', running: '运行中', unread: '有未读动态',
   approval: '审批', 'plan-review': '计划审阅', question: '问题', subagents: '{n} 个已知子 Agent 运行中',
   'status.needs-attention': '需要处理', 'status.failed': '失败', 'status.running': '运行中',
   'status.reviewing': '评审中', 'status.ready': '可以交付', 'status.settled': '已结束',
@@ -18,6 +18,8 @@ export const zh = {
   notice: '新任务默认在独立的 Git 工作树中运行，不会改动当前项目目录。',
   worktree: '工作树', isolationFailed: '无法创建隔离的工作树', retryIsolation: '重试隔离', useDirect: '直接使用项目',
   reviewChanges: '审查变更',
+  archiveTask: '归档任务', restoreTask: '恢复任务', archivedTasks: '已归档任务',
+  'empty.archived': '暂无已归档任务。', showArchived: '查看已归档任务', hideArchived: '收起已归档任务',
   useDirectWarning: '直接模式允许 Agent 修改所选项目目录中的文件，请仅在你接受该风险时使用。',
 } satisfies Record<string, string>
 
@@ -29,7 +31,7 @@ export const en = {
   tasks: 'Tasks', newTask: 'New Task', startingTask: 'Creating…', workspace: 'Workspace for new task', defaultWorkspace: 'Current workspace or choose a directory',
   'group.needs-you': 'Needs You', 'group.running': 'Running', 'group.other': 'Other',
   'empty.needs-you': 'No tasks need your attention.', 'empty.running': 'No tasks are running.', 'empty.other': 'No other tasks.',
-  empty: 'No tasks yet.', unassigned: 'Unassigned', idle: 'Idle', running: 'Running', unread: 'Unread activity',
+  empty: 'No tasks yet.', emptyActive: 'No active tasks; restore one from Archived tasks.', unassigned: 'Unassigned', idle: 'Idle', running: 'Running', unread: 'Unread activity',
   approval: 'Approval', 'plan-review': 'Plan review', question: 'Question', subagents: '{n} known running subagent(s)',
   'status.needs-attention': 'Needs attention', 'status.failed': 'Failed', 'status.running': 'Running',
   'status.reviewing': 'Reviewing', 'status.ready': 'Ready', 'status.settled': 'Settled',
@@ -45,5 +47,7 @@ export const en = {
   notice: 'New tasks run in isolated Git worktrees by default and leave the project directory unchanged.',
   worktree: 'Worktree', isolationFailed: 'Could not create an isolated worktree', retryIsolation: 'Retry isolation', useDirect: 'Use project directly',
   reviewChanges: 'Review changes',
+  archiveTask: 'Archive task', restoreTask: 'Restore task', archivedTasks: 'Archived tasks',
+  'empty.archived': 'No archived tasks.', showArchived: 'Show archived tasks', hideArchived: 'Hide archived tasks',
   useDirectWarning: 'Direct mode lets the Agent modify files in the selected project directory. Use it only if you accept that risk.',
 } satisfies Record<TaskOverviewKey, string>

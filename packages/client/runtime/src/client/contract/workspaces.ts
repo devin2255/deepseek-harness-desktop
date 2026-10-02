@@ -98,4 +98,10 @@ export interface IWorkspaces {
    * @param sessionId - session to archive.
    */
   archiveSession(sessionId: SessionId): Promise<void>
+
+  /**
+   * Restore an archived session to its retained grouping position.
+   * @param sessionId - archived session to restore.
+   */
+  unarchiveSession(sessionId: SessionId): Promise<void>
 }

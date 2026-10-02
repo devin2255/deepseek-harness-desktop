@@ -241,7 +241,7 @@ describe('desktop Electron acceptance', () => {
     }
     const newTask = overview.getByRole('button', { name: /^(New Task|新建任务)$/u })
     await expect.poll(() => newTask.isEnabled(), { timeout: 10_000 }).toBe(true)
-    expect(await overview.getByRole('heading').count()).toBe(4)
+    expect(await overview.getByRole('heading').count()).toBe(5)
     expect(await overview.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
     const screenshots = join(DESKTOP_ROOT, '..', '..', '.artifacts', 'desktop')
     await mkdir(screenshots, { recursive: true })

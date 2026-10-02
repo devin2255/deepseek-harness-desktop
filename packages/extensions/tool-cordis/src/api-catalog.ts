@@ -2291,6 +2291,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'resolution after durability.',
       },
       {
+        signature: 'unarchiveSession(sessionId: SessionId): Promise<void>',
+        description: 'Restore one archived session to its retained workspace position. A session absent from the archive set is an idempotent no-op.',
+        parameters: [{ name: 'sessionId', description: 'The archived session to restore.' }],
+        returns: 'resolution after durability.',
+      },
+      {
         signature: 'async resolveByPath(path: string): Promise<Workspace | undefined>',
         description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; an existing unowned directory returns `undefined`.',
         parameters: [{ name: 'path', description: 'Existing directory path in any spelling.' }],

@@ -52,7 +52,7 @@ function attentionOwnerTitle(entry: TaskRow['attention'][number], attention: Tas
 /** Overview page with task groups and metadata health. */
 export function TaskOverview({
   useSessions, useWorkspaces, useTasks, useHostDescription, useDesktopNavigationFailure,
-  openTask, openReview, startTask, refresh, t,
+  openTask, openReview, startTask, refresh, archiveTask, restoreTask, t,
 }: TaskOverviewProps) {
   const sessions = useSessions(value => value)
   const workspaces = useWorkspaces(value => value)
@@ -64,6 +64,10 @@ export function TaskOverview({
     () => tasks === undefined ? undefined : selectTasks(tasks, sessions, workspaces),
     [sessions, tasks, workspaces],
   )
+  const archivedRows = useMemo(
+    () => tasks === undefined ? [] : selectTasks(tasks, sessions, workspaces, 'archived'),
+    [sessions, tasks, workspaces],
+  )
   const activityRows = useMemo(
     () => tasks === undefined ? selectSessionActivity(sessions, workspaces) : undefined,
     [sessions, tasks, workspaces],
@@ -72,6 +76,8 @@ export function TaskOverview({
   const [failure, setFailure] = useState<string>()
   const [recovery, setRecovery] = useState<{ workspaceId: WorkspaceId; message: string }>()
   const [starting, setStarting] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
+  const [changingArchive, setChangingArchive] = useState<SessionId>()
   const startTrigger = useRef<HTMLButtonElement>(null)
   const recoveryPanel = useRef<HTMLDivElement>(null)
   const restoreStartFocus = useRef(false)
@@ -93,6 +99,12 @@ export function TaskOverview({
     })
   }
   const open = (id: SessionId): void => { run(() => openTask(id)) }
+  const changeArchive = (id: SessionId, action: (id: SessionId) => Promise<void>): void => {
+    setChangingArchive(id)
+    run(async () => {
+      try { await action(id) } finally { setChangingArchive(undefined) }
+    })
+  }
   const start = (target: WorkspaceId | undefined, isolation: 'direct' | 'worktree'): void => {
     const current = ++startAttempt.current
     setFailure(undefined)
@@ -169,7 +181,7 @@ export function TaskOverview({
           <div role="alert" className={css.error}>
             {[failure, desktopNavigationFailure, ...requestErrors].filter(Boolean).join('\n')}
           </div>}
-        {synchronized && rowCount === 0 && <p className={css.empty}>{t('empty')}</p>}
+        {synchronized && rowCount === 0 && <p className={css.empty}>{t(archivedRows.length > 0 ? 'emptyActive' : 'empty')}</p>}
         {(['needs-you', 'running', 'other'] as const).map((group) => {
           const groupedTasks = taskRows?.filter(row => row.group === group) ?? []
           const groupedActivity = activityRows?.filter(row => row.group === group) ?? []
@@ -187,6 +199,12 @@ export function TaskOverview({
                       && ['reviewing', 'ready', 'settled'].includes(row.task.status)
                       && <button type="button" className={css.reviewAction}
                         onClick={() => { run(() => openReview(row.task.taskId)) }}>{t('reviewChanges')}</button>}
+                    {row.task.status === 'settled' && row.task.freshness === 'live'
+                      && row.attention.length === 0 && row.activeDescendants === 0
+                      && row.root?.running !== true &&
+                      <button type="button" className={css.reviewAction}
+                        disabled={!synchronized || tasks?.freshness !== 'fresh' || changingArchive !== undefined}
+                        onClick={() => { changeArchive(row.task.taskId, archiveTask) }}>{t('archiveTask')}</button>}
                     <div className={css.metadata}>
                       <span>{row.workspace?.title ?? t('unassigned')}</span>
                       {row.task.executionWorkspace !== undefined &&
@@ -234,6 +252,27 @@ export function TaskOverview({
             </section>
           )
         })}
+        {tasks !== undefined && <section className={css.section} aria-labelledby="tasks-archived">
+          <h2 id="tasks-archived">{t('archivedTasks')} ({archivedRows.length})</h2>
+          <button type="button" className={css.action} aria-expanded={showArchived}
+            onClick={() => { setShowArchived(value => !value) }}>
+            {t(showArchived ? 'hideArchived' : 'showArchived')}
+          </button>
+          {showArchived && (archivedRows.length === 0
+            ? <p className={css.empty}>{t('empty.archived')}</p>
+            : <ul className={css.list}>
+              {archivedRows.map(row => <li key={row.task.taskId} className={css.task}>
+                <strong>{row.goal}</strong>
+                <div className={css.metadata}>
+                  <span>{row.workspace?.title ?? t('unassigned')}</span>
+                  <span>{t(`status.${row.task.status}`)}</span>
+                </div>
+                <button type="button" className={css.action}
+                  disabled={!synchronized || changingArchive !== undefined}
+                  onClick={() => { changeArchive(row.task.taskId, restoreTask) }}>{t('restoreTask')}</button>
+              </li>)}
+            </ul>)}
+        </section>}
       </div>
     </main>
   )

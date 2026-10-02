@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -69,7 +70,7 @@ describe('local Task worktrees', () => {
       kind: 'git-worktree',
       taskId: 'task-one',
       workspaceId: 'workspace-one',
-      sourcePath: fixture.source,
+      sourcePath: await realpath(fixture.source),
       sourceDirty: false,
     })
     expect(assignment.baseCommit).toMatch(/^[0-9a-f]{40}$/u)

@@ -14,7 +14,11 @@
   {
     "group": "Other",
     "tasks": [
-      "fixturefixtureSettled0 known running subagent(s)Criteria 0/00 unresolved risk(s)Live"
+      "fixtureArchive taskfixtureSettled0 known running subagent(s)Criteria 0/00 unresolved risk(s)Live"
     ]
+  },
+  {
+    "group": "Archived tasks (0)",
+    "tasks": []
   }
 ]

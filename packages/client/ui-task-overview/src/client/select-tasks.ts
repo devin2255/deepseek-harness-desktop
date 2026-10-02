@@ -32,17 +32,19 @@ export interface TaskRow {
  * @param list - durable Task projection.
  * @param sessions - current Session summaries used for titles and live descendant counts.
  * @param workspaces - current Workspace registry.
+ * @param visibility - active or archived root tasks to project.
  * @returns Host-ordered Task rows.
  */
 export function selectTasks(
   list: TaskListState,
   sessions: SessionListState,
   workspaces: WorkspaceListState,
+  visibility: 'active' | 'archived' = 'active',
 ): TaskRow[] {
   const archived = new Set(workspaces.archivedSessionIds)
   return [...new Set(list.ids)].flatMap((id) => {
     const task = list.byId[id]
-    if (task === undefined || archived.has(id)) return []
+    if (task === undefined || archived.has(id) !== (visibility === 'archived')) return []
     const root = sessions.byId[id]
     const criteria = task.definition?.criteria ?? []
     return [{

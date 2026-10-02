@@ -13,7 +13,7 @@ it('keeps a root draft while routing known descendant attention through the desk
   const overview = await screen.findByRole('main', { name: 'Tasks' }, { timeout: 10_000 })
   await within(overview).findByRole('button', { name: 'Fixture 历史会话' })
   const childAttention = await within(overview).findByRole('button', { name: /^fixture — Question:/ })
-  expect(within(overview).getAllByRole('heading').map(node => node.textContent)).toEqual(['Tasks', 'Needs You', 'Running', 'Other'])
+  expect(within(overview).getAllByRole('heading').map(node => node.textContent)).toEqual(['Tasks', 'Needs You', 'Running', 'Other', 'Archived tasks (0)'])
   expect(overview.textContent).toContain('New tasks run in isolated Git worktrees by default')
   const projection = [...overview.querySelectorAll('section')].map(section => ({
     group: section.querySelector('h2')?.textContent,
@@ -66,6 +66,9 @@ it('hides a root Task after archiving its Session through the assembled sidebar'
   await waitFor(() => {
     expect(within(overview).queryByRole('button', { name: 'Fixture 历史会话' })).toBeNull()
   })
+  fireEvent.click(within(overview).getByRole('button', { name: 'Show archived tasks' }))
+  expect(within(overview).getByRole('heading', { name: 'Archived tasks (1)' })).toBeTruthy()
+  expect(within(overview).getByText('Fixture 历史会话')).toBeTruthy()
   const projection = [...overview.querySelectorAll('section')].map(section => ({
     group: section.querySelector('h2')?.textContent,
     tasks: [...section.querySelectorAll(':scope > ul > li')].map(row => row.textContent),
@@ -77,6 +80,8 @@ it('hides a root Task after archiving its Session through the assembled sidebar'
     writeFileSync(golden, output)
   }
   expect(output).toBe(readFileSync(golden, 'utf8'))
+  fireEvent.click(within(overview).getByRole('button', { name: 'Restore task' }))
+  await within(overview).findByRole('button', { name: 'Fixture 历史会话' })
 })
 
 it('creates an isolated task through the assembled desktop roster', async () => {

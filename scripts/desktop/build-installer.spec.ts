@@ -671,7 +671,9 @@ describe('installer build boundary', () => {
     expect(authenticodePowerShellPath({ SystemRoot: 'C:\\Windows' })).toBe(
       'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
     )
-    expect(authenticodeSpawnOptions('C:\\release\\setup.exe', process.env)).toMatchObject({
+    expect(authenticodeSpawnOptions('C:\\release\\setup.exe', {
+      SystemRoot: 'C:\\Windows', ProgramFiles: 'C:\\Program Files',
+    })).toMatchObject({
       timeout: 60_000, maxBuffer: 64 * 1024,
     })
   })

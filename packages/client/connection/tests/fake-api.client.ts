@@ -171,6 +171,9 @@ export class FakeApiClient implements IApiClient {
     archiveSession: (payload: unknown) => this.record('workspace.archiveSession', payload, Promise.resolve(ok({
       archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId],
     }))),
+    unarchiveSession: (payload: unknown) => this.record('workspace.unarchiveSession', payload, Promise.resolve(ok({
+      archivedSessionIds: [],
+    }))),
   }
 
   readonly tasks: IApiClient['tasks'] = {

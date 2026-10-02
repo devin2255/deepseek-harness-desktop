@@ -750,6 +750,18 @@ describe('Host Workspace increments', () => {
       ok: false,
       error: { code: 'session-not-found', details: { sessionId: 'session-ghost' } },
     })
+    expect(expectOk(await api.workspace.unarchiveSession(request({ sessionId }))).archivedSessionIds).toEqual([])
+    let restored = false
+    for (let index = 0; index < 3 && !restored; index += 1) {
+      const frame = await nextHostFrame(stream)
+      if (frame.payload.type === 'host/archived-sessions-changed') {
+        expect(frame.payload.archivedSessionIds).toEqual([])
+        restored = true
+      }
+    }
+    expect(restored).toBe(true)
+    expect(expectOk(await api.workspace.list(request({}))).items[0]?.sessionIds).toContain(sessionId)
+    expect(expectOk(await api.workspace.unarchiveSession(request({ sessionId }))).archivedSessionIds).toEqual([])
     abort.abort()
   })
 })

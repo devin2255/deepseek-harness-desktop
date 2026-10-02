@@ -52,11 +52,67 @@ function props(): TaskOverviewProps {
     useHostDescription: selector => selector({} as never),
     useDesktopNavigationFailure: selector => selector(undefined),
     openTask: vi.fn(async () => {}), openReview: vi.fn(async () => {}),
-    startTask: vi.fn(async () => {}), refresh: vi.fn(async () => {}), t,
+    startTask: vi.fn(async () => {}), refresh: vi.fn(async () => {}),
+    archiveTask: vi.fn(async () => {}), restoreTask: vi.fn(async () => {}), t,
   }
 }
 
 describe('TaskOverview', () => {
+  it('shows the empty archive and reports a rejected restore without hiding its entry', async () => {
+    const p = props()
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Show archived tasks' }))
+    expect(view.getByText('No archived tasks.')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Hide archived tasks' }))
+
+    const workspaces = p.useWorkspaces(value => value)
+    p.useWorkspaces = selector => selector({ ...workspaces, items: [], archivedSessionIds: ['root' as SessionId] })
+    p.restoreTask = vi.fn(async () => { throw new Error('Restore denied') })
+    view.rerender(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Show archived tasks' }))
+    expect(view.getByText('Unassigned')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Restore task' }))
+    expect((await view.findByRole('alert')).textContent).toContain('Restore denied')
+    expect(view.getByText('Ship desktop')).toBeTruthy()
+    expect((view.getByRole('button', { name: 'Restore task' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('archives only settled live tasks and restores archived tasks without opening them', async () => {
+    const p = props()
+    const useTasks = p.useTasks!
+    const state = useTasks(value => value)!
+    const task = state.byId['root' as SessionId]!
+    p.useTasks = selector => selector({ ...state, byId: { [task.taskId]: {
+      ...task, status: 'settled', attention: [], descendantSessionIds: [],
+    } } })
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Archive task' }))
+    await waitFor(() => { expect(p.archiveTask).toHaveBeenCalledWith('root') })
+    const workspaces = p.useWorkspaces(value => value)
+    p.useWorkspaces = selector => selector({ ...workspaces, archivedSessionIds: ['root' as SessionId] })
+    view.rerender(<TaskOverview {...p} />)
+    expect(view.queryByRole('button', { name: 'Ship desktop' })).toBeNull()
+    expect(view.getByText('No active tasks; restore one from Archived tasks.')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Show archived tasks' }))
+    expect(view.getByText('Ship desktop')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Restore task' }))
+    await waitFor(() => { expect(p.restoreTask).toHaveBeenCalledWith('root') })
+    expect(p.openTask).not.toHaveBeenCalled()
+  })
+
+  it('withholds archive when task needs attention or the projection is stale', () => {
+    const p = props()
+    const view = render(<TaskOverview {...p} />)
+    expect(view.queryByRole('button', { name: 'Archive task' })).toBeNull()
+    const state = p.useTasks!(value => value)!
+    const task = state.byId['root' as SessionId]!
+    p.useTasks = selector => selector({ ...state, freshness: 'stale', byId: {
+      [task.taskId]: { ...task, status: 'settled', attention: [], descendantSessionIds: [] },
+    } })
+    view.rerender(<TaskOverview {...p} />)
+    expect((view.getByRole('button', { name: 'Archive task' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('renders a desktop notification navigation failure in the overview alert', () => {
     const p = props()
     p.useDesktopNavigationFailure = selector => selector('Notification target is unavailable')

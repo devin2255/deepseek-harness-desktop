@@ -5,13 +5,14 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply, inject, type OverviewInjected } from '../src/client/index.ts'
 
-async function bench() {
+async function bench(includeTasks = true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
   const sessions = { refresh: vi.fn(async () => {}), open: vi.fn(), list: { getSnapshot: () => ({ state: 'idle', phase: 'ready', byId: { root: { id: 'root' }, child: { id: 'child', origin: 'subagent', parentId: 'root' } }, subagentsByParent: {} }), subscribe: vi.fn(() => () => {}) }, subagentAddress: vi.fn(), refreshSubagents: vi.fn(async () => {}), openSubagent: vi.fn() }
   const workspaces = {
     refresh: vi.fn(async () => {}), startSession: vi.fn(), connectWorkspace: vi.fn(async () => 'isolated'),
+    archiveSession: vi.fn(async () => {}), unarchiveSession: vi.fn(async () => {}),
     list: { getSnapshot: () => ({ state: 'idle' }) },
   }
   const tasks = { refresh: vi.fn(async () => {}), openReview: vi.fn(async () => {}), list: { getSnapshot: () => ({ state: 'idle' }) } }
@@ -20,7 +21,7 @@ async function bench() {
   const locale = new LocaleRuntime(ctx)
   ctx.provide('sessions', sessions as never)
   ctx.provide('workspaces', workspaces as never)
-  ctx.provide('tasks', tasks as never)
+  if (includeTasks) ctx.provide('tasks', tasks as never)
   ctx.provide('layout', layout as never)
   ctx.provide('connection', { hostDescription } as never)
   ctx.provide('locale', locale)
@@ -44,6 +45,97 @@ function installDesktopBridge(
 }
 
 describe('overview composition', () => {
+  it('ignores interactions while loading and rejects archive changes without Task projection', async () => {
+    const b = await bench(false)
+    b.declare()
+    const fiber = b.ctx.plugin({ inject, apply })
+    await fiber.await()
+    const face = b.face()
+    await face.openReview('root' as never)
+    await expect(face.archiveTask('root' as never)).rejects.toThrow('Task data is unavailable')
+    await face.refresh()
+    expect(b.sessions.refresh).toHaveBeenCalledOnce()
+    expect(b.workspaces.refresh).toHaveBeenCalledOnce()
+
+    vi.spyOn(b.sessions.list, 'getSnapshot').mockReturnValue({ state: 'loading' } as never)
+    await face.openReview('root' as never)
+    await face.startTask('ws' as never, 'worktree')
+    await face.refresh()
+    await expect(face.archiveTask('root' as never)).rejects.toThrow('Task data is unavailable')
+    await expect(face.restoreTask('root' as never)).rejects.toThrow('Archived task is unavailable')
+    expect(b.workspaces.connectWorkspace).not.toHaveBeenCalled()
+    expect(b.sessions.refresh).toHaveBeenCalledOnce()
+    await fiber.dispose()
+  })
+
+  it('does not reveal a page after review or workspace connection finishes beyond disposal', async () => {
+    const b = await bench()
+    b.declare()
+    const fiber = b.ctx.plugin({ inject, apply })
+    await fiber.await()
+    let finishReview!: () => void
+    let finishConnect!: (id: string) => void
+    b.tasks.openReview.mockImplementation(() => new Promise<void>((resolve) => { finishReview = resolve }))
+    b.workspaces.connectWorkspace.mockImplementation(() => new Promise<string>((resolve) => { finishConnect = resolve }))
+    const face = b.face()
+    const review = face.openReview('root' as never)
+    const connecting = face.startTask('ws' as never, 'worktree')
+    await fiber.dispose()
+    finishReview()
+    finishConnect('isolated')
+    await Promise.all([review, connecting])
+    expect(b.layout.showReview).not.toHaveBeenCalled()
+    expect(b.layout.showConversation).not.toHaveBeenCalled()
+    expect(b.sessions.open).not.toHaveBeenCalled()
+  })
+
+  it('archives only a fresh settled task without active agents or attention and restores archived tasks', async () => {
+    const b = await bench()
+    b.declare()
+    const fiber = b.ctx.plugin({ inject, apply })
+    await fiber.await()
+    const task: { taskId: string; status: string; freshness: string; attention: { id: string }[]; descendantSessionIds: string[] } = {
+      taskId: 'root', status: 'settled', freshness: 'live', attention: [], descendantSessionIds: ['child'],
+    }
+    let taskList = { phase: 'ready', freshness: 'fresh', state: 'idle', byId: { root: task } }
+    let workspaceList = { phase: 'ready', state: 'idle', archivedSessionIds: ['root'] }
+    let sessionList = {
+      state: 'idle', phase: 'ready', byId: { root: { id: 'root', running: false }, child: { id: 'child', running: false } },
+      subagentsByParent: {},
+    }
+    vi.spyOn(b.tasks.list, 'getSnapshot').mockImplementation(() => taskList)
+    vi.spyOn(b.workspaces.list, 'getSnapshot').mockImplementation(() => workspaceList)
+    vi.spyOn(b.sessions.list, 'getSnapshot').mockImplementation(() => sessionList as never)
+
+    await b.face().archiveTask('root' as never)
+    expect(b.workspaces.archiveSession).toHaveBeenCalledExactlyOnceWith('root')
+    await b.face().restoreTask('root' as never)
+    expect(b.workspaces.unarchiveSession).toHaveBeenCalledExactlyOnceWith('root')
+
+    for (const denied of [
+      { ...task, status: 'running' },
+      { ...task, freshness: 'stale' },
+      { ...task, attention: [{ id: 'pending' }] },
+    ]) {
+      taskList = { ...taskList, byId: { root: denied } }
+      await expect(b.face().archiveTask('root' as never)).rejects.toThrow('Only settled tasks')
+    }
+    taskList = { ...taskList, byId: { root: task } }
+    sessionList = { ...sessionList, byId: { ...sessionList.byId, child: { id: 'child', running: true } } }
+    await expect(b.face().archiveTask('root' as never)).rejects.toThrow('Only settled tasks')
+    sessionList = { ...sessionList, byId: { root: { id: 'root', running: true }, child: { id: 'child', running: false } } }
+    await expect(b.face().archiveTask('root' as never)).rejects.toThrow('Only settled tasks')
+    sessionList = { ...sessionList, byId: { root: { id: 'root', running: false }, child: { id: 'child', running: false } } }
+    taskList = { ...taskList, freshness: 'stale' }
+    await expect(b.face().archiveTask('root' as never)).rejects.toThrow('Only settled tasks')
+    taskList = { ...taskList, freshness: 'fresh' }
+    workspaceList = { ...workspaceList, archivedSessionIds: [] }
+    await expect(b.face().restoreTask('root' as never)).rejects.toThrow('Archived task is unavailable')
+    expect(b.workspaces.archiveSession).toHaveBeenCalledTimes(1)
+    expect(b.workspaces.unarchiveSession).toHaveBeenCalledTimes(1)
+    await fiber.dispose()
+  })
+
   it('consumes an early desktop target, presents failure on Home, and disposes the bridge listener', async () => {
     let listener: ((sessionId: never) => void) | undefined
     const release = vi.fn(() => { listener = undefined })
