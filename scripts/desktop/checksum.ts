@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import { lstat, open, readFile, realpath, rename, stat } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path'
 
 export interface SignatureMetadata {
   readonly signed: boolean
@@ -100,8 +100,8 @@ export function authenticodeEnvironment(path: string, environment: NodeJS.Proces
     ProgramFiles: programFiles,
     DSH_SIGNATURE_ARTIFACT: path,
     PSModulePath: [
-      join(systemRoot, 'system32/WindowsPowerShell/v1.0/Modules'),
-      join(programFiles, 'WindowsPowerShell/Modules'),
+      win32.join(systemRoot, 'system32/WindowsPowerShell/v1.0/Modules'),
+      win32.join(programFiles, 'WindowsPowerShell/Modules'),
     ].join(';'),
   }
 }
@@ -110,7 +110,7 @@ export function authenticodeEnvironment(path: string, environment: NodeJS.Proces
 export function authenticodePowerShellPath(environment: NodeJS.ProcessEnv): string {
   const systemRoot = environment.SystemRoot
   if (systemRoot === undefined) throw new Error('desktop release: Windows system root is unavailable')
-  return join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe')
+  return win32.join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe')
 }
 
 /** Return bounded spawn options with a credential-free child environment. */
@@ -120,7 +120,7 @@ export function authenticodeSpawnOptions(path: string, environment: NodeJS.Proce
     encoding: 'utf8' as const,
     env: authenticodeEnvironment(path, environment),
     windowsHide: true,
-    timeout: 15_000,
+    timeout: 60_000,
     maxBuffer: 64 * 1024,
   }
 }

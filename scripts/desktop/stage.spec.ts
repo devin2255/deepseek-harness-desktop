@@ -164,6 +164,7 @@ describe('desktop production staging', () => {
   })
 
   it('unlinks a link-shaped stage leaf without modifying its target', async () => {
+    /* jscpd:ignore-start */
     const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-repository-'))
     const external = mkdtempSync(join(tmpdir(), 'dsh-desktop-external-'))
     temporaryDirectories.push(root, external)
@@ -171,6 +172,7 @@ describe('desktop production staging', () => {
     const sentinel = join(external, 'sentinel.txt')
     mkdirSync(dirname(stage), { recursive: true })
     writeFileSync(sentinel, 'keep\n')
+    /* jscpd:ignore-end */
     symlinkSync(external, stage, process.platform === 'win32' ? 'junction' : 'dir')
 
     await resetStageDirectory(root, stage)

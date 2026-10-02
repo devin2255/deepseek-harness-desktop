@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -34,7 +34,7 @@ function repository(): { root: string; source: string; home: string } {
   writeFileSync(join(source, 'tracked.txt'), 'base\n')
   git(source, ['add', 'tracked.txt'])
   git(source, ['commit', '-m', 'base'])
-  return { root, source: resolve(source), home: resolve(home) }
+  return { root, source: realpathSync(source), home: realpathSync(home) }
 }
 
 async function mount(home: string, config: Record<string, unknown> = {}) {

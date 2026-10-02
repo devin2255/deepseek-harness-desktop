@@ -29,7 +29,10 @@ export function renderInstallerPowerShellCommands(sources: InstallerPowerShellSo
   const definitions = COMMAND_NAMES.map((name) => {
     const source = canonicalPowerShellSource(sources[name])
     if (name === 'INSPECT_SHORTCUT') {
-      const compressed = gzipSync(Buffer.from(source, 'utf8')).toString('base64')
+      const gzip = gzipSync(Buffer.from(source, 'utf8'))
+      // The gzip OS header byte varies by build host; normalize it for the checked-in include.
+      gzip[9] = 255
+      const compressed = gzip.toString('base64')
       if (compressed.length > 7_000) throw new Error('desktop packaging: shortcut command exceeds NSIS string limit')
       return `!define DSH_POWERSHELL_INSPECT_SHORTCUT_GZIP "${compressed}"`
     }
@@ -81,6 +84,7 @@ async function main(): Promise<void> {
   await writeFile(OUTPUT, renderInstallerPowerShellCommands(await readInstallerPowerShellSources()), 'utf8')
 }
 
+/* jscpd:ignore-start -- each package script retains its directly executable entry point */
 const invokedPath = process.argv[1]
 if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === import.meta.url) {
   try { await main() } catch (error: unknown) {
@@ -88,3 +92,4 @@ if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === im
     process.exitCode = 1
   }
 }
+/* jscpd:ignore-end */

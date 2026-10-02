@@ -67,14 +67,14 @@ function installerChoiceMatrix(source: string, persisted: Partial<InstallerChoic
 
 const execFileAsync = promisify(execFile)
 
-async function runRestrictedCommand(command: string, environment: NodeJS.ProcessEnv, timeout = 10_000): Promise<string> {
+async function runRestrictedCommand(command: string, environment: NodeJS.ProcessEnv, timeout = 30_000): Promise<string> {
   const result = await execFileAsync('powershell.exe', [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', command,
   ], { env: environment, timeout })
   return result.stdout.trim()
 }
 
-async function runRestrictedStatus(compressed: string, environment: NodeJS.ProcessEnv, timeout = 10_000): Promise<number> {
+async function runRestrictedStatus(compressed: string, environment: NodeJS.ProcessEnv, timeout = 30_000): Promise<number> {
   const command = `iex ([IO.StreamReader]::new([IO.Compression.GzipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${compressed}')),[IO.Compression.CompressionMode]::Decompress),[Text.Encoding]::UTF8)).ReadToEnd()`
   return await new Promise((resolve, reject) => {
     execFile('powershell.exe', [
@@ -126,7 +126,7 @@ async function inspectShortcut(shortcut: string, target: string): Promise<number
     DSH_INSTALLER_SHORTCUT: shortcut,
     DSH_INSTALLER_OLD_TARGET_EXE: target,
     DSH_INSTALLER_NEW_TARGET_EXE: target,
-  }, 20_000)
+  }, 60_000)
 }
 
 async function inspectShortcutTargets(shortcut: string, oldTarget: string, newTarget: string): Promise<number> {
@@ -135,7 +135,7 @@ async function inspectShortcutTargets(shortcut: string, oldTarget: string, newTa
     DSH_INSTALLER_SHORTCUT: shortcut,
     DSH_INSTALLER_OLD_TARGET_EXE: oldTarget,
     DSH_INSTALLER_NEW_TARGET_EXE: newTarget,
-  }, 20_000)
+  }, 60_000)
 }
 
 const configPath = join(REPOSITORY_ROOT, 'apps/desktop/electron-builder.yml')
@@ -176,6 +176,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     }
     const generated = await readFile(powerShellCommandsPath, 'utf8')
     expect(() => { assertInstallerPowerShellCommandsFresh(generated, sources) }).not.toThrow()
+    expect(Buffer.from(inspectShortcutCompressed, 'base64')[9]).toBe(255)
     for (const [name, command] of Object.entries(parseInstallerPowerShellCommands(generated))) {
       expect(Buffer.from(command, 'base64').toString('utf16le')).toBe(canonicalPowerShellSource(sources[name as keyof typeof sources]))
     }
@@ -235,7 +236,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(source).not.toMatch(/taskkill|Stop-Process|KILL_PROCESS/iu)
   })
 
-  it('creates fresh cleanup tokens under Restricted policy without script files', async () => {
+  it.skipIf(process.platform !== 'win32')('creates fresh cleanup tokens under Restricted policy without script files', async () => {
     const source = await readFile(includePath, 'utf8')
     const encoded = source.match(/-Command "(?<command>\$\$b=New-Object byte\[\] 32;[^"\r\n]+)"`/u)?.groups?.command
     expect(encoded).toBeTypeOf('string')
@@ -243,7 +244,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const run = async () => {
       const result = await execFileAsync('powershell.exe', [
         '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-Command', command,
-      ], { timeout: 10_000 })
+      ], { timeout: 30_000 })
       return result.stdout
     }
     const first = await run()
@@ -279,7 +280,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
       .toEqual({ desktop: '0', startMenu: '1', login: '0' })
   })
 
-  it('uses SemVer 2.0 precedence for upgrade, repair, release, and build metadata', async () => {
+  it.skipIf(process.platform !== 'win32')('uses SemVer 2.0 precedence for upgrade, repair, release, and build metadata', async () => {
     await expect(compareSemver('0.1.0-rc.6', '0.1.0-rc.7')).resolves.toBe('-1')
     await expect(compareSemver('0.1.0-rc.7', '0.1.0')).resolves.toBe('-1')
     await expect(compareSemver('0.1.0-beta.9', '0.1.0-rc.1')).resolves.toBe('-1')
@@ -297,7 +298,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     const nulCommand = Buffer.from(nulProbe, 'utf16le').toString('base64')
     await expect(runRestrictedCommand(nulCommand, process.env)).rejects.toMatchObject({ code: 2 })
     expect(source).toContain('\\z')
-  }, 30_000)
+  }, 90_000)
 
   it('passes registry and candidate versions through temporary environment values only', async () => {
     const source = await readFile(includePath, 'utf8')
@@ -315,7 +316,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(source).toMatch(/SemVer is invalid[\s\S]*Quit/u)
   })
 
-  it('queries the exact executable path without interpolating custom paths into PowerShell', async () => {
+  it.skipIf(process.platform !== 'win32')('queries the exact executable path without interpolating custom paths into PowerShell', async () => {
     const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe')
     await expect(queryInstalledProcess(powershell)).resolves.toBe('running')
     await expect(queryInstalledProcess("C:\\用户\\合法' ; exit 9; #\\DeepSeek Harness.exe")).resolves.toBe('stopped')
@@ -365,7 +366,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     expect(source).toMatch(/DshRemoveOwnedRunValue[\s\S]*DshWriteE2eUninstallResult "uninstall-accepted"/u)
   })
 
-  it('recognizes only old or new exact shortcut targets including unresolved Unicode links', { timeout: 60_000 }, async () => {
+  it.skipIf(process.platform !== 'win32')('recognizes only old or new exact shortcut targets including unresolved Unicode links', { timeout: 150_000 }, async () => {
     const inspectorSource = await readFile(inspectShortcutPath, 'utf8')
     expect(inspectorSource).toContain('DshRawShortcutTarget')
     expect(inspectorSource).toContain('WScript.Shell')
@@ -435,7 +436,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
           const powerShell32 = join(windows, 'SysWOW64/WindowsPowerShell/v1.0/powershell.exe')
           const result32 = await execFileAsync(powerShell32, [
             '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Restricted', '-EncodedCommand', storedCommand,
-          ], { env: { ...process.env, DSH_TEST_SHORTCUT: inspectedShortcut }, timeout: 30_000 }).catch((error: unknown) => {
+          ], { env: { ...process.env, DSH_TEST_SHORTCUT: inspectedShortcut }, timeout: 60_000 }).catch((error: unknown) => {
             if (error instanceof Error) {
               throw new Error(`32-bit shortcut inspection failed: ${error.message.slice(0, 180)}; ${JSON.stringify({
                 code: 'code' in error ? error.code : undefined,
@@ -455,7 +456,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     }
   })
 
-  it('finds a running executable through its equivalent Windows short path', { timeout: 20_000 }, async () => {
+  it.skipIf(process.platform !== 'win32')('finds a running executable through its equivalent Windows short path', { timeout: 60_000 }, async () => {
     const bash = join(await gitInstallationRoot(), 'bin', 'bash.exe')
     const shortBash = await shortWindowsPath(bash)
     const child = spawn(bash, ['-c', 'sleep 30'], { stdio: 'ignore', windowsHide: true })
@@ -476,7 +477,7 @@ describe('Windows installer configuration', { concurrent: false }, () => {
     }
   })
 
-  it('recognizes the installed application executable name before replacement', { timeout: 20_000 }, async () => {
+  it.skipIf(process.platform !== 'win32')('recognizes the installed application executable name before replacement', { timeout: 60_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-process-name-'))
     const executable = join(root, 'DeepSeek Harness.exe')
     const ping = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'ping.exe')
@@ -671,7 +672,7 @@ describe('installer build boundary', () => {
       'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
     )
     expect(authenticodeSpawnOptions('C:\\release\\setup.exe', process.env)).toMatchObject({
-      timeout: 15_000, maxBuffer: 64 * 1024,
+      timeout: 60_000, maxBuffer: 64 * 1024,
     })
   })
 

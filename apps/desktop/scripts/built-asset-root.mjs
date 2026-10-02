@@ -1,5 +1,5 @@
 import { lstat, unlink } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const generatedAssets = [
@@ -69,7 +69,7 @@ async function resolveGuardedAssetRoot(desktopRoot, allowMissingLib) {
   ) {
     throw new Error('Desktop build root must be a local file URL')
   }
-  const desktop = fileURLToPath(desktopRoot)
+  const desktop = resolve(fileURLToPath(desktopRoot))
   const paths = { desktop, lib: join(desktop, 'lib') }
   await assertOrdinaryDirectory(paths.desktop, 'desktop package root')
   try {

@@ -336,8 +336,10 @@ function assertContainedProductRoot(appData: string, productRoot: string): void 
 
 async function assertOrdinaryDirectoryChain(directory: string): Promise<void> {
   const root = parse(directory).root
+  // Node 24 cannot lstat a namespaced drive root, although it accepts its descendants.
+  const rootForMetadata = /^\\\\\?\\[A-Za-z]:\\$/u.test(root) ? root.slice(4) : root
   let current = root
-  assertOrdinaryDirectory(current, await lstat(current))
+  assertOrdinaryDirectory(rootForMetadata, await lstat(rootForMetadata))
   for (const component of relative(root, directory).split(sep).filter(Boolean)) {
     current = join(current, component)
     assertOrdinaryDirectory(current, await lstat(current))

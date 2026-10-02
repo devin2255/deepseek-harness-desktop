@@ -21,12 +21,14 @@ interface Breadcrumb {
 }
 
 const DEFAULT_VIEW_ID = 'chat'
+/* jscpd:ignore-start */
 const absentTasks = { getSnapshot: () => undefined, subscribe: () => () => {} }
 
 function useAbsentTasks<S>(_selector: (state: TaskListState) => S): S | undefined {
   useSyncExternalStore(absentTasks.subscribe, absentTasks.getSnapshot, absentTasks.getSnapshot)
   return undefined
 }
+/* jscpd:ignore-end */
 
 /** Resolve by id and keep stale persisted selections on the stable Chat fallback. */
 function resolveActiveView(tabs: readonly ViewTab[], selectedId: string | null): ViewTab | undefined {

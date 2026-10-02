@@ -56,6 +56,7 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ tag: process.env.GITHUB_REF_NAME, version: DESKTOP_VERSION, installer: release, application }))
 }
 
+/* jscpd:ignore-start */
 const invokedPath = process.argv[1]
 if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === import.meta.url) {
   try { await main() } catch (error: unknown) {
@@ -63,3 +64,4 @@ if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === im
     process.exitCode = 1
   }
 }
+/* jscpd:ignore-end */

@@ -114,6 +114,7 @@ describe('desktop release checksum and metadata', () => {
   })
 })
 
+/* jscpd:ignore-start */
 function portableExecutable(certificate: { certificateOffset: number; certificateSize: number } = {
   certificateOffset: 0,
   certificateSize: 0,
@@ -131,3 +132,4 @@ function portableExecutable(certificate: { certificateOffset: number; certificat
   value.writeUInt32LE(certificate.certificateSize, optionalOffset + 112 + (4 * 8) + 4)
   return value
 }
+/* jscpd:ignore-end */

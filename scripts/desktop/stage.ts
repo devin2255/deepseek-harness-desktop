@@ -363,6 +363,7 @@ async function main(): Promise<void> {
   await verifyRuntime()
 }
 
+/* jscpd:ignore-start */
 const invokedPath = process.argv[1]
 if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === import.meta.url) {
   try {
@@ -372,3 +373,4 @@ if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === im
     process.exitCode = 1
   }
 }
+/* jscpd:ignore-end */

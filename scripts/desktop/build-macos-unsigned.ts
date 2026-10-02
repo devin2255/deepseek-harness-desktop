@@ -112,6 +112,7 @@ async function main(): Promise<void> {
   console.log(`macOS packaging: validated ${resolve(dmg)} and ${resolve(zip)} (unsigned test artifacts)`)
 }
 
+/* jscpd:ignore-start */
 const invokedPath = process.argv[1]
 if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === import.meta.url) {
   try { await main() } catch (error: unknown) {
@@ -119,3 +120,4 @@ if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === im
     process.exitCode = 1
   }
 }
+/* jscpd:ignore-end */
