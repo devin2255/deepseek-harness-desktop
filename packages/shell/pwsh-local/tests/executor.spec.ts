@@ -9,7 +9,8 @@
  * writes CRLF on Windows, so exact text assertions normalize line endings.
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -320,15 +321,22 @@ describe.skipIf(!hasPwsh)('PwshLocalExecutor.run', () => {
 describe.skipIf(!hasPwsh)('PwshLocalExecutor.start (background process handles)', () => {
   it('start returns immediately with a running handle that settles as completed', async () => {
     const { bash } = await setup()
-    const before = Date.now()
-    // The sleep outlasts any realistic spawn latency, so returning while the
-    // child still sleeps proves start() does not wait for completion.
-    const proc = bash.start(bash.resolve({ command: 'Start-Sleep -Milliseconds 2000; Write-Output done' }))
-    expect(Date.now() - before).toBeLessThan(1000)
-    expect(proc.status).toBe('running')
-    await proc.done
-    expect(proc.status).toBe('completed')
-    expect(proc.exitCode).toBe(0)
+    const completionMarker = join(spillDir, `background-${randomUUID()}.done`)
+    const markerLiteral = completionMarker.replaceAll("'", "''")
+    const proc = bash.start(bash.resolve({
+      command: `Start-Sleep -Milliseconds 2000; [IO.File]::WriteAllText('${markerLiteral}', 'done'); Write-Output done`,
+    }))
+    try {
+      expect(proc.status).toBe('running')
+      expect(existsSync(completionMarker)).toBe(false)
+      await proc.done
+      expect(proc.status).toBe('completed')
+      expect(proc.exitCode).toBe(0)
+      expect(existsSync(completionMarker)).toBe(true)
+    } finally {
+      await proc.done
+      rmSync(completionMarker, { force: true })
+    }
   })
 
   it('threads stdin and extra env into a background process', async () => {
