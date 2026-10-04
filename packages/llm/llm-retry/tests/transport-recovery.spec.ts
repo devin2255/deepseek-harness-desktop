@@ -74,6 +74,11 @@ function finalAssistantText(agent: Agent): string | undefined {
     .join('')
 }
 
+function expectRequestCount(server: MockLlmServer | undefined, agent: Agent, count: number): void {
+  const lastEvent = agent.session.events.at(-1)
+  expect(server?.requests, `last session event: ${JSON.stringify(lastEvent)}`).toHaveLength(count)
+}
+
 async function unusedPort(): Promise<number> {
   const server = createServer()
   await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
@@ -100,7 +105,7 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
     const server = await recoveryServer
 
     expect(server).toBeDefined()
-    expect(server?.requests).toHaveLength(1)
+    expectRequestCount(server, agent, 1)
     expect(agent.session.events.filter(event => event.type === 'step/start')
       .map(event => [event.data.turn, event.data.step]))
       .toEqual([[1, 1]])
@@ -128,7 +133,7 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
 
     await sendAndWait(context, agent)
 
-    expect(server.requests).toHaveLength(2)
+    expectRequestCount(server, agent, 2)
     expect(server.requests[0]?.body).toEqual(server.requests[1]?.body)
     const retryEvent = agent.session.events.find(event => event.type === 'llm/retry')
     expect(agent.session.events.filter(event =>
@@ -157,7 +162,7 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
 
     await sendAndWait(context, agent)
 
-    expect(server.requests).toHaveLength(2)
+    expectRequestCount(server, agent, 2)
     expect(server.requests[0]?.body).toEqual(server.requests[1]?.body)
     expect(agent.session.events.filter(event => event.type === 'llm/retry').map(event => event.data.failure.code))
       .toEqual(['EMPTY_RESPONSE'])
@@ -185,7 +190,7 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
 
     await sendAndWait(context, agent)
 
-    expect(server.requests).toHaveLength(1)
+    expectRequestCount(server, agent, 1)
     expect(agent.session.events.filter(event =>
       event.type === 'assistant/chunk' && event.data.turn === 1,
     )).toHaveLength(3)
@@ -230,7 +235,7 @@ describe('bounded retry through the real DeepSeek HTTP/SSE adapter', () => {
 
     await sendAndWait(context, agent)
 
-    expect(server.requests).toHaveLength(3)
+    expectRequestCount(server, agent, 3)
     expect(agent.session.events.filter(event => event.type === 'step/start')).toHaveLength(1)
     expect(agent.session.events.filter(event => event.type === 'llm/retry')).toHaveLength(2)
     const end = agent.session.events.at(-1)
