@@ -47,7 +47,21 @@ function assertCompleteCordisLifecycle(events: readonly SessionEvent[]): void {
     (event): event is Extract<SessionEvent, { type: 'turn/end' }> => event.type === 'turn/end',
   )
   const reason = turnEnd?.data.reason
-  expect(reason).toEqual({ kind: 'completed' })
+  const timeline = events.flatMap((event): string[] => {
+    switch (event.type) {
+      case 'user/message':
+        return [`${event.seq} user/message`]
+      case 'step/start':
+        return [`${event.seq} step/start ${event.data.turn}/${event.data.step}`]
+      case 'tool/call':
+        return [`${event.seq} tool/call ${event.data.name}`]
+      case 'turn/end':
+        return [`${event.seq} turn/end ${event.data.turn} ${JSON.stringify(event.data.reason)}`]
+      default:
+        return []
+    }
+  })
+  expect(reason, `Cordis replay timeline: ${JSON.stringify(timeline)}`).toEqual({ kind: 'completed' })
 
   const calls = events.filter(
     (event): event is Extract<SessionEvent, { type: 'tool/call' }> => event.type === 'tool/call',

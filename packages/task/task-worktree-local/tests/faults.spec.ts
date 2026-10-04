@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -39,7 +39,12 @@ function fixture() {
   const home = join(root, 'home')
   const owned = join(root, 'owned')
   for (const path of [source, home, owned]) mkdirSync(path)
-  return { root, source, home, owned }
+  return {
+    root,
+    source: realpathSync(source),
+    home: realpathSync(home),
+    owned: realpathSync(owned),
+  }
 }
 
 async function mount(home: string, source: string, head = 'a'.repeat(40), worktreeList = '') {

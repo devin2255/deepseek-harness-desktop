@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -45,7 +45,7 @@ export function repository(): ReviewRepositoryFixture {
   writeFileSync(join(source, 'delete-me.txt'), 'delete\n')
   git(source, ['add', '.'])
   git(source, ['commit', '-m', 'base'])
-  return { root, source: resolve(source), home: resolve(home) }
+  return { root, source: realpathSync(source), home: realpathSync(home) }
 }
 
 /** Mount managed subprocess, Task worktree, and local review Providers. */

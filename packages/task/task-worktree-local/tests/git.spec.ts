@@ -34,7 +34,7 @@ describe('managed worktree Git utilities', () => {
       stdio: {
         stdin: { data: 'input' }, stdout: { maxBytes: 4_096 }, stderr: { maxBytes: 4_096 },
       },
-      graceMs: 100, env: { GIT_CONFIG_NOSYSTEM: '1' }, signal: expect.any(AbortSignal),
+      graceMs: 100, env: { GIT_CONFIG_NOSYSTEM: '1' },
     }))
   })
 
@@ -92,7 +92,11 @@ describe('managed worktree Git utilities', () => {
 
     const timed = {
       spawn: vi.fn(({ signal }: { signal: AbortSignal }) => ({
-        done: new Promise(resolve => signal.addEventListener('abort', () => resolve({ exitCode: null, signal: 'SIGTERM' }), { once: true })),
+        done: new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            resolve({ exitCode: null, signal: 'SIGTERM' })
+          }, { once: true })
+        }),
         collected: {},
       })),
     } as unknown as SubprocessRuntime
