@@ -1,6 +1,7 @@
 import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -49,12 +50,13 @@ function fixture() {
 
 async function mount(home: string, source: string, head = 'a'.repeat(40), worktreeList = '') {
   const ctx = new Context()
+  const canonicalSource = await realpath(source)
   const spawn = vi.fn(({ cwd, argv }: { cwd: string; argv: readonly string[] }) => {
     const args = argv.slice(3)
     let stdout = ''
     let exitCode = 0
     if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
-      if (cwd === source) stdout = `${source}\n`
+      if (cwd === canonicalSource) stdout = `${canonicalSource}\n`
       else exitCode = 128
     } else if (args[0] === 'rev-parse' && args[1] === '--verify') {
       stdout = `${head}\n`
@@ -88,7 +90,8 @@ function assignment(sourcePath: string, path: string): TaskWorktreeAssignment {
 describe('local Task worktree filesystem and Git faults', () => {
   it('rejects a malformed Git HEAD before trying to create a branch', async () => {
     const paths = fixture()
-    const test = await mount(paths.home, paths.source, 'invalid-head')
+    const sourceAlias = `${paths.source}${sep}..${sep}source`
+    const test = await mount(paths.home, sourceAlias, 'invalid-head')
     try {
       await expect(test.ctx.taskWorktrees.create({
         taskId: SessionId('root'), workspaceId: WorkspaceId('workspace'), workspacePath: paths.source,

@@ -5,6 +5,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { basename, join, sep } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TaskReviewError } from '@deepseek-ai/dsh-task-review'
@@ -163,7 +164,7 @@ describe('local Task review snapshots', () => {
         await expect(ctx.taskReview.summarize({ assignment: altered }))
           .rejects.toMatchObject({ code: 'REVIEW_WORKTREE_DIVERGED' } satisfies Partial<TaskReviewError>)
       }
-      await expect(ctx.taskReview.summarize({ assignment: { ...assignment, sourcePath: fixture.home } }))
+      await expect(ctx.taskReview.summarize({ assignment: { ...assignment, sourcePath: await realpath(fixture.home) } }))
         .rejects.toMatchObject({ code: 'REVIEW_GIT_FAILED' } satisfies Partial<TaskReviewError>)
     } finally {
       await test.dispose()

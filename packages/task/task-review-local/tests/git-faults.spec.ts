@@ -20,7 +20,7 @@ describe('Task review Git identity faults', () => {
       }
       if (spec.argv.includes('rev-parse') && spec.argv.includes('--verify')) {
         if (mode === 'worktree-head' && spec.cwd === assignment.path) stdout = 'not-a-commit\n'
-        if (mode === 'source-head' && spec.cwd === fixture.source) stdout = 'not-a-commit\n'
+        if (mode === 'source-head' && spec.cwd === assignment.sourcePath) stdout = 'not-a-commit\n'
       }
       if (mode === 'ancestry' && spec.argv.includes('merge-base')) {
         stdout = ''
