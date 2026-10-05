@@ -22,6 +22,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export type OverviewInjected = {
   openTask(id: SessionId): Promise<void>
   openReview(id: SessionId): Promise<void>
+  openStudio(id: SessionId): void
   startTask(workspaceId: WorkspaceId | undefined, isolation: 'direct' | 'worktree'): Promise<void>
   refresh(): Promise<void>
   archiveTask(id: SessionId): Promise<void>
@@ -29,6 +30,7 @@ export type OverviewInjected = {
   hooks: {
     hostDescription: HostDescriptionSource
     desktopNavigationFailure: ObservableSnapshot<string | undefined>
+    studioAvailable: ObservableSnapshot<boolean>
   }
 }
 
@@ -82,6 +84,14 @@ export function apply(ctx: ClientContext): void {
       if (lifetime.signal.aborted) return
       ctx.layout.showReview()
     },
+    openStudio: (id) => {
+      if (!ready() || ctx.slots.entries('shell.studio').length === 0
+        || ctx.sessions.list.getSnapshot().byId[id] === undefined) return
+      desktopNavigation.supersede()
+      navigation.cancel()
+      ctx.sessions.open(id)
+      ctx.layout.showStudio()
+    },
     startTask: async (workspaceId, isolation) => {
       if (!ready()) return
       desktopNavigation.supersede()
@@ -124,6 +134,10 @@ export function apply(ctx: ClientContext): void {
     hooks: {
       hostDescription: connection.hostDescription,
       desktopNavigationFailure: desktopNavigation.failure,
+      studioAvailable: {
+        getSnapshot: () => ctx.slots.entries('shell.studio').length > 0,
+        subscribe: listener => ctx.slots.subscribe('shell.studio', listener),
+      },
     },
   })
   ctx.slots.inject('shell.home', () => ctx.slots.register({

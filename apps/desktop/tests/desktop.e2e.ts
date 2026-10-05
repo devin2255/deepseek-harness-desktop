@@ -309,6 +309,28 @@ describe('desktop Electron acceptance', () => {
     ].sort((left, right) => left.taskId.localeCompare(right.taskId)))
     await expectBothWorkspacesRunning(overview)
 
+    const firstTaskRow = overview.getByRole('heading', { name: /^(Running|进行中)$/u }).locator('..')
+      .getByRole('listitem').filter({ hasText: 'workspace-a' })
+    await firstTaskRow.getByRole('button', { name: /^(Inspect runtime|查看运行时)$/u }).click()
+    const studio = page.getByRole('main', { name: 'Harness Studio' })
+    await studio.waitFor({ state: 'visible' })
+    expect(await studio.getByRole('heading', { name: /(?:Tools sent to the model|发送给模型的工具)/u }).count()).toBe(1)
+    expect(await studio.getByText(/(?:current Loader inventory|当前 Loader 清单)/u).count()).toBe(1)
+    expect(await studio.locator('section > h2').evaluateAll(headings => headings.map(heading => heading.id))).toMatchInlineSnapshot(`
+      [
+        "studio-recorded",
+        "studio-tools",
+        "studio-system",
+        "studio-events",
+        "studio-host",
+        "studio-unrecorded",
+      ]
+    `)
+    await studio.getByRole('button', { name: /^(Back to task|返回任务)$/u }).click()
+    await studio.waitFor({ state: 'hidden' })
+    await page.getByRole('button', { name: /^(Tasks|任务)$/u }).click()
+    await overview.waitFor({ state: 'visible' })
+
     await expect.poll(async () => (await nativeAcceptanceSnapshot(application!)).trayToolTip, { timeout: 15_000 })
       .toMatch(/2 (?:tasks running|个任务运行中)/u)
     await page.close()

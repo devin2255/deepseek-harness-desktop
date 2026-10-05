@@ -27,6 +27,8 @@ export interface ILayout {
   showConversation(): void
   /** Reveal the separate Task Review workspace. */
   showReview(): void
+  /** Reveal the selected task's read-only runtime inspection workspace. */
+  showStudio(): void
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void
   /** Open the details panel (no-op when already open). */
@@ -40,7 +42,7 @@ export class LayoutController implements ILayout {
   #panels: PanelActions | undefined
 
   /** @param navigate - publish explicit center navigation, including repeated destinations. */
-  constructor(private readonly navigate: (page: 'home' | 'conversation' | 'review') => void) {}
+  constructor(private readonly navigate: (page: 'home' | 'conversation' | 'review' | 'studio') => void) {}
 
   showHome(): void {
     this.#require().showHome()
@@ -55,6 +57,11 @@ export class LayoutController implements ILayout {
   showReview(): void {
     this.#require().showReview()
     this.navigate('review')
+  }
+
+  showStudio(): void {
+    this.#require().showStudio()
+    this.navigate('studio')
   }
 
   /**

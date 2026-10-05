@@ -115,6 +115,7 @@
     "packages/bundle/desktop-app": {
       "ignoreDependencies": [
         "@deepseek-ai/dsh-client-ui-directory-picker-browse",
+        "@deepseek-ai/dsh-client-ui-harness-studio",
         "@deepseek-ai/dsh-client-ui-task-overview",
         "@deepseek-ai/dsh-host-directory-picker-browse",
         "@deepseek-ai/dsh-task",

@@ -20,9 +20,13 @@ import css from './AppFrame.module.css'
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'shell.home' | 'shell.review'>
+  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'shell.home' | 'shell.review' | 'shell.studio'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
-  & InjectFace<{ hooks: { homeAvailable: HostObservable<boolean>; reviewAvailable: HostObservable<boolean> } }>
+  & InjectFace<{ hooks: {
+    homeAvailable: HostObservable<boolean>
+    reviewAvailable: HostObservable<boolean>
+    studioAvailable: HostObservable<boolean>
+  } }>
 
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode; hidden?: boolean }) {
@@ -90,14 +94,17 @@ export function AppFrame({
   useSessions,
   useHomeAvailable,
   useReviewAvailable,
+  useStudioAvailable,
   actions,
   renderSlot,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   const homeAvailable = useHomeAvailable(s => s)
   const reviewAvailable = useReviewAvailable(s => s)
+  const studioAvailable = useStudioAvailable(s => s)
   const home = panels.centerPage === 'home' && homeAvailable
   const review = panels.centerPage === 'review' && reviewAvailable
+  const studio = panels.centerPage === 'studio' && studioAvailable
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
@@ -146,7 +153,7 @@ export function AppFrame({
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
-  const cols = computeColumns(viewport, sidebarPreference, home || review || detailsSession === undefined ? 0 : panels.details)
+  const cols = computeColumns(viewport, sidebarPreference, home || review || studio || detailsSession === undefined ? 0 : panels.details)
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -194,10 +201,11 @@ export function AppFrame({
             the shell's own pending rendering. The conversation
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
-        <CenterColumn hidden={home || review}>{renderSlot('conversation', {})}</CenterColumn>
-        <DetailsColumn hidden={home || review}>{renderSlot('details', {})}</DetailsColumn>
+        <CenterColumn hidden={home || review || studio}>{renderSlot('conversation', {})}</CenterColumn>
+        <DetailsColumn hidden={home || review || studio}>{renderSlot('details', {})}</DetailsColumn>
         <CenterColumn hidden={!home}>{renderSlot('shell.home', {})}</CenterColumn>
         <CenterColumn hidden={!review}>{renderSlot('shell.review', {})}</CenterColumn>
+        <CenterColumn hidden={!studio}>{renderSlot('shell.studio', { active: studio })}</CenterColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}

@@ -87,6 +87,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/client/ui-trajectory': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-workspace': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-task-overview': { kind: 'none', reason: 'Client metadata presentation and session navigation; registers no model input or interaction responses.' },
+  'packages/client/ui-harness-studio': { kind: 'none', reason: 'Read-only browser inspection of logged request facts and current Host inventory; registers no model input.' },
   'packages/client/ui-task-review': { kind: 'none', reason: 'Browser-side Task review and delivery surface; registers no model input or interaction responses.' },
   'packages/task/task': { kind: 'none', reason: 'Durable task facts are log-only and register no model input.' },
   'packages/task/task-worktree': { kind: 'none', reason: 'The Host-only worktree seam registers no model input.' },

@@ -17,7 +17,7 @@ async function bench(includeTasks = true) {
     list: { getSnapshot: () => ({ state: 'idle' }) },
   }
   const tasks = { refresh: vi.fn(async () => {}), openReview: vi.fn(async () => {}), list: { getSnapshot: () => ({ state: 'idle' }) } }
-  const layout = { showHome: vi.fn(), showConversation: vi.fn(), showReview: vi.fn() }
+  const layout = { showHome: vi.fn(), showConversation: vi.fn(), showReview: vi.fn(), showStudio: vi.fn() }
   const hostDescription = { getSnapshot: () => ({}), subscribe: vi.fn(() => () => {}) }
   const locale = new LocaleRuntime(ctx)
   ctx.provide('sessions', sessions as never)
@@ -26,7 +26,13 @@ async function bench(includeTasks = true) {
   ctx.provide('layout', layout as never)
   ctx.provide('connection', { hostDescription } as never)
   ctx.provide('locale', locale)
-  const declare = () => slots.register({ name: 'root', children: { 'shell.home': { kind: 'single', scope: 'root' }, 'sidebar.footer.action': { kind: 'list', scope: 'root' } } }, ({ renderSlot }: PropsRenderSlots<'shell.home' | 'sidebar.footer.action'>) => [renderSlot('shell.home', {}), renderSlot('sidebar.footer.action', { wide: true })])
+  const declare = () => slots.register({ name: 'root', children: {
+    'shell.home': { kind: 'single', scope: 'root' },
+    'shell.studio': { kind: 'single', scope: 'session-maybe' },
+    'sidebar.footer.action': { kind: 'list', scope: 'root' },
+  } }, ({ renderSlot }: PropsRenderSlots<'shell.home' | 'sidebar.footer.action'>) => [
+    renderSlot('shell.home', {}), renderSlot('sidebar.footer.action', { wide: true }),
+  ])
   const face = () => (slots.entries('shell.home')[0]!.inject as () => OverviewInjected)()
   return { ctx, slots, sessions, workspaces, tasks, layout, hostDescription, locale, declare, face }
 }
@@ -48,6 +54,29 @@ function installDesktopBridge(
 describe('overview composition', () => {
   it('has no host-side effects', () => {
     expect(applyHost).not.toThrow()
+  })
+
+  it('opens a catalog task in Studio without changing its recorded session', async () => {
+    const b = await bench()
+    b.declare()
+    const fiber = b.ctx.plugin({ inject, apply })
+    await fiber.await()
+    expect(b.face().hooks.studioAvailable.getSnapshot()).toBe(false)
+    const onStudioChange = vi.fn()
+    const unsubscribeStudio = b.face().hooks.studioAvailable.subscribe(onStudioChange)
+    b.face().openStudio('root' as never)
+    expect(b.layout.showStudio).not.toHaveBeenCalled()
+    const stopStudio = b.slots.register({ name: 'shell.studio' }, () => null)
+    expect(b.face().hooks.studioAvailable.getSnapshot()).toBe(true)
+    await vi.waitFor(() => { expect(onStudioChange).toHaveBeenCalled() })
+    b.face().openStudio('root' as never)
+    expect(b.sessions.open).toHaveBeenCalledExactlyOnceWith('root')
+    expect(b.layout.showStudio).toHaveBeenCalledOnce()
+    b.face().openStudio('missing' as never)
+    expect(b.layout.showStudio).toHaveBeenCalledOnce()
+    stopStudio()
+    unsubscribeStudio()
+    await fiber.dispose()
   })
 
   it('ignores interactions while loading and rejects archive changes without Task projection', async () => {

@@ -27,6 +27,8 @@ describe('createLayoutStore', () => {
     expect(instance.getSnapshot()).toMatchObject({ centerPage: 'home', details: DETAILS_DEFAULT })
     instance.actions.showReview()
     expect(instance.getSnapshot()).toMatchObject({ centerPage: 'review', details: DETAILS_DEFAULT })
+    instance.actions.showStudio()
+    expect(instance.getSnapshot()).toMatchObject({ centerPage: 'studio', details: DETAILS_DEFAULT })
   })
   it('initializes the sidebar at its default width, details closed, wide viewport assumed', () => {
     const { store } = createLayoutStore().create()

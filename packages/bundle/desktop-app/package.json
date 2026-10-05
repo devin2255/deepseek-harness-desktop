@@ -34,6 +34,7 @@
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/dsh-client-ui-directory-picker-browse": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-harness-studio": "workspace:^",
     "@deepseek-ai/dsh-client-ui-task-overview": "workspace:^",
     "@deepseek-ai/dsh-host-directory-picker-browse": "workspace:^",
     "@deepseek-ai/dsh-task": "workspace:^",

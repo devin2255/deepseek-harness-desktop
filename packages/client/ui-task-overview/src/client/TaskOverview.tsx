@@ -51,8 +51,8 @@ function attentionOwnerTitle(entry: TaskRow['attention'][number], attention: Tas
 
 /** Overview page with task groups and metadata health. */
 export function TaskOverview({
-  useSessions, useWorkspaces, useTasks, useHostDescription, useDesktopNavigationFailure,
-  openTask, openReview, startTask, refresh, archiveTask, restoreTask, t,
+  useSessions, useWorkspaces, useTasks, useHostDescription, useDesktopNavigationFailure, useStudioAvailable,
+  openTask, openReview, openStudio, startTask, refresh, archiveTask, restoreTask, t,
 }: TaskOverviewProps) {
   const sessions = useSessions(value => value)
   const workspaces = useWorkspaces(value => value)
@@ -60,6 +60,7 @@ export function TaskOverview({
   const tasks = useTaskProjection(value => value)
   const connected = useHostDescription(value => value !== undefined)
   const desktopNavigationFailure = useDesktopNavigationFailure(value => value)
+  const studioAvailable = useStudioAvailable(value => value)
   const taskRows = useMemo(
     () => tasks === undefined ? undefined : selectTasks(tasks, sessions, workspaces),
     [sessions, tasks, workspaces],
@@ -195,6 +196,8 @@ export function TaskOverview({
                   <li key={row.task.taskId} className={css.task}>
                     <button type="button" className={css.taskTitle} title={row.goal}
                       onClick={() => { open(row.task.taskId) }}>{row.goal}</button>
+                    {studioAvailable && <button type="button" className={css.reviewAction}
+                      onClick={() => { openStudio(row.task.taskId) }}>{t('inspectRuntime')}</button>}
                     {row.task.executionWorkspace !== undefined
                       && ['reviewing', 'ready', 'settled'].includes(row.task.status)
                       && <button type="button" className={css.reviewAction}
@@ -231,6 +234,8 @@ export function TaskOverview({
                   <li key={row.root.id} className={css.task}>
                     <button type="button" className={css.taskTitle} title={row.root.displayTitle}
                       onClick={() => { open(row.root.id) }}>{row.root.displayTitle}</button>
+                    {studioAvailable && <button type="button" className={css.reviewAction}
+                      onClick={() => { openStudio(row.root.id) }}>{t('inspectRuntime')}</button>}
                     <div className={css.metadata}>
                       <span>{row.workspace?.title ?? t('unassigned')}</span>
                       <span>{row.group === 'needs-you' ? t('group.needs-you') : t(row.group === 'running' ? 'running' : 'idle')}</span>

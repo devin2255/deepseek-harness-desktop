@@ -52,7 +52,7 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
   return function useSelector<S>(sel: (s: T) => S): S { return sel(useSyncExternalStore(inst.subscribe, inst.getSnapshot)) }
 }
 
-function mountFrame(homeAvailable = false, reviewAvailable = false) {
+function mountFrame(homeAvailable = false, reviewAvailable = false, studioAvailable = false) {
   window.innerWidth = frameWidth // first-render viewport source before the observer fires
   const instance = createLayoutStore().create()
   const slotCalls: { key: string; props: unknown }[] = []
@@ -62,6 +62,7 @@ function mountFrame(homeAvailable = false, reviewAvailable = false) {
     if (key === 'conversation') return <input aria-label="Draft" data-testid="center-content" defaultValue="kept draft" />
     if (key === 'shell.home') return <div data-testid="home-content" />
     if (key === 'shell.review') return <div data-testid="review-content" />
+    if (key === 'shell.studio') return <div data-testid="studio-content" />
     if (key === 'details') return <div data-testid="details-content"><button type="button">Details control</button></div>
     if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
@@ -87,6 +88,7 @@ function mountFrame(homeAvailable = false, reviewAvailable = false) {
       useStore={hookOf(instance)}
       useHomeAvailable={selector => selector(homeAvailable)}
       useReviewAvailable={selector => selector(reviewAvailable)}
+      useStudioAvailable={selector => selector(studioAvailable)}
       actions={instance.actions}
       renderSlot={renderSlot}
       useSessions={useSessions}
@@ -179,6 +181,19 @@ describe('AppFrame', () => {
     expect(tracks(b.frame)).toEqual([280, 0])
     act(() => { b.instance.actions.showConversation() })
     expect(draft.value).toBe('retained for review')
+  })
+
+  it('shows Studio without unmounting the conversation draft or exposing details controls', () => {
+    const b = mountFrame(true, true, true)
+    const draft = b.getByTestId('center-content') as HTMLInputElement
+    draft.value = 'retained for studio'
+    act(() => { b.instance.actions.openDetails(); b.instance.actions.showStudio() })
+    expect(b.getByTestId('studio-content').closest('[hidden]')).toBeNull()
+    expect(draft.closest('[hidden]')).not.toBeNull()
+    expect(b.queryByRole('button', { name: 'Details control' })).toBeNull()
+    expect(tracks(b.frame)).toEqual([280, 0])
+    act(() => { b.instance.actions.showConversation() })
+    expect(draft.value).toBe('retained for studio')
   })
 
   it('falls back to conversation without a home occupant and leaves automatic selection on home', () => {

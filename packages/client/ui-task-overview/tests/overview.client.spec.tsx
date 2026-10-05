@@ -51,13 +51,26 @@ function props(): TaskOverviewProps {
     useTasks: selector => selector(tasks),
     useHostDescription: selector => selector({} as never),
     useDesktopNavigationFailure: selector => selector(undefined),
-    openTask: vi.fn(async () => {}), openReview: vi.fn(async () => {}),
+    useStudioAvailable: selector => selector(true),
+    openTask: vi.fn(async () => {}), openReview: vi.fn(async () => {}), openStudio: vi.fn(),
     startTask: vi.fn(async () => {}), refresh: vi.fn(async () => {}),
     archiveTask: vi.fn(async () => {}), restoreTask: vi.fn(async () => {}), t,
   }
 }
 
 describe('TaskOverview', () => {
+  it('opens the selected task runtime from the overview', () => {
+    const p = props()
+    const view = render(<TaskOverview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Inspect runtime' }))
+    expect(p.openStudio).toHaveBeenCalledExactlyOnceWith('root')
+  })
+  it('hides runtime inspection when the optional Studio slot is absent', () => {
+    const p = props()
+    p.useStudioAvailable = selector => selector(false)
+    const view = render(<TaskOverview {...p} />)
+    expect(view.queryByRole('button', { name: 'Inspect runtime' })).toBeNull()
+  })
   it('uses an owner id for attention when its Session summary is unavailable', () => {
     const p = props()
     const sessions = p.useSessions(value => value)
@@ -151,6 +164,8 @@ describe('TaskOverview', () => {
     })
     const view = render(<TaskOverview {...p} />)
     expect(view.getByText('Session activity only')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Inspect runtime' }))
+    expect(p.openStudio).toHaveBeenCalledExactlyOnceWith('root')
     expect(view.getByRole('button', { name: 'Duplicate · child-111 — Question' })).toBeTruthy()
     expect(view.getByRole('button', { name: 'Duplicate · child-112 — Question' })).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: 'Root task' }))

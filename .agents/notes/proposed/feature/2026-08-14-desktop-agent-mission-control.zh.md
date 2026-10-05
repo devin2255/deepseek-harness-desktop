@@ -22,7 +22,7 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 已交付的感知任务后台生命周期会在最后一个窗口关闭后继续运行 Harness，并允许用户从原生托盘或第二次启动重建已授权窗口。Electron Main 轮询经过认证的 Task 与 Session 投影，只保留分离的展示值，并在唯一托盘摘要中报告实时或不可用的活动状态。新增的可操作注意事项、失败和完成状态转换会创建原生通知，其经过验证的 owner Session id 会通过现有客户端导航控制器处理。当活动任务仍在运行或状态不可用时，显式退出会提供继续后台运行、停止并退出或取消选项。[Host 崩溃恢复决策](../../implemented/bug-fix/2026-09-21-desktop-host-crash-recovery.md)会撤销死亡进程权限、要求显式重试，并投影冷态修复后的中断轮次，而不会重放未经确认的工具调用。
 
-安全的桌面基础、持久 Task 总览、应用拥有的根任务 worktree、审查与交付工作区、感知任务的后台驻留，以及 Host 异常恢复已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。[worktree 决策](../../implemented/feature/2026-09-09-application-owned-task-worktrees.md)记录默认隔离创建及其失败保证。子写入者整合、更完整的 Mission Control UI、Harness Studio、签名、更新和 macOS 分发仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
+安全的桌面基础、持久 Task 总览、应用拥有的根任务 worktree、审查与交付工作区、感知任务的后台驻留，以及 Host 异常恢复已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。[worktree 决策](../../implemented/feature/2026-09-09-application-owned-task-worktrees.md)记录默认隔离创建及其失败保证。子写入者整合、更完整的 Mission Control UI、Studio 中不可变的逐任务插件、权限和工作流快照、签名、更新和 macOS 分发仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
 
 ## 产品结构
 
@@ -33,6 +33,8 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 默认任务总览按需要人工介入、正在执行和最近完成分组，而不是按对话时间排序。任务工作区呈现 Agent 依赖图、计划、终端、文件、预览、对话、工件和右侧检查器。审查是独立模式，组合成功条件、Diff、验证证据、未解决风险和 worktree 操作。Harness Studio 渐进展示选中任务的 Preset、插件图、模型路由、工具、权限、工作流和事件流。
 
 第一版支持 Windows x64 和 macOS arm64 本地执行。云端执行、手机接力、SSH 主机、计算机控制、市场分发、团队共享和自动创建 Pull Request 不属于第一版。
+
+首版只读 Studio 从 Task 行进入，显示 Session 已记录的预设 id、最近模型请求、工具目录和已加载事件窗口。它通过只读客户端 service 获取 Trajectory 数据，并单独标示当前 Host 插件清单。这样不会用可变的 Loader 配置编造历史运行时状态；完整的逐任务插件与权限快照仍需要独立的持久事实生产方。
 
 ## 曾考虑的替代方案
 

@@ -285,6 +285,9 @@ describe('desktop launch capability', () => {
     expect(entries.find(entry => entry.id === 'ui-task-overview')).toMatchObject({
       name: '@deepseek-ai/dsh-client-ui-task-overview',
     })
+    expect(entries.find(entry => entry.id === 'ui-harness-studio')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-harness-studio',
+    })
     expect(entries.find(entry => entry.id === 'ui-task-review')).toMatchObject({
       name: '@deepseek-ai/dsh-client-ui-task-review',
     })
@@ -310,6 +313,7 @@ describe('desktop launch capability', () => {
       '@deepseek-ai/dsh-task': 'workspace:^',
       '@deepseek-ai/dsh-task-session': 'workspace:^',
       '@deepseek-ai/dsh-client-ui-task-overview': 'workspace:^',
+      '@deepseek-ai/dsh-client-ui-harness-studio': 'workspace:^',
     })
     expect(webManifest.dependencies).toMatchObject({
       '@deepseek-ai/dsh-client-ui-task-review': 'workspace:^',

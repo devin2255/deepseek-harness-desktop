@@ -10,7 +10,7 @@ import type { PanelActions } from '@deepseek-ai/dsh-client-ui-layout/src/client/
 
 function fakePanels(): PanelActions {
   return {
-    showHome: vi.fn(), showConversation: vi.fn(), showReview: vi.fn(),
+    showHome: vi.fn(), showConversation: vi.fn(), showReview: vi.fn(), showStudio: vi.fn(),
     setSidebar: vi.fn(),
     setDetails: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -29,7 +29,8 @@ describe('LayoutController', () => {
     service.showConversation()
     service.showHome()
     service.showReview()
-    expect(navigate.mock.calls).toEqual([['conversation'], ['conversation'], ['home'], ['review']])
+    service.showStudio()
+    expect(navigate.mock.calls).toEqual([['conversation'], ['conversation'], ['home'], ['review'], ['studio']])
   })
   it('forwards the three panel actions to the attached set', () => {
     const service = new LayoutController(() => {})
@@ -42,6 +43,7 @@ describe('LayoutController', () => {
     service.showHome()
     service.showConversation()
     service.showReview()
+    service.showStudio()
 
     expect(panels.toggleSidebar).toHaveBeenCalledTimes(1)
     expect(panels.openDetails).toHaveBeenCalledTimes(1)
@@ -49,6 +51,7 @@ describe('LayoutController', () => {
     expect(panels.showHome).toHaveBeenCalledOnce()
     expect(panels.showConversation).toHaveBeenCalledOnce()
     expect(panels.showReview).toHaveBeenCalledOnce()
+    expect(panels.showStudio).toHaveBeenCalledOnce()
     expect(panels.setSidebar).not.toHaveBeenCalled()
     expect(panels.setDetails).not.toHaveBeenCalled()
   })
@@ -61,6 +64,7 @@ describe('LayoutController', () => {
     expect(() => { service.showHome() }).toThrow(/panel actions not wired/)
     expect(() => { service.showConversation() }).toThrow(/panel actions not wired/)
     expect(() => { service.showReview() }).toThrow(/panel actions not wired/)
+    expect(() => { service.showStudio() }).toThrow(/panel actions not wired/)
   })
 
   it('re-attach overwrites the stale action set (entry re-register)', () => {
