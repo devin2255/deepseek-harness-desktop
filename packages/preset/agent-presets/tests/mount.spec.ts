@@ -141,6 +141,22 @@ describe('composing an agent from a preset', () => {
     expect(JSON.stringify(recorded)).not.toContain('tool')
   })
 
+  it('retains an equal recorded composition and corrects a stale snapshot', async () => {
+    const agent = await agentOn(ctx, 'sess-composition-replayed', 'standard')
+    const first = agent.session.events.find(event => event.type === 'agent-preset/composed')
+    if (first === undefined) throw new Error('the initial composition was not recorded')
+
+    // A cold resume announces an agent against existing session events.
+    ctx.emit('agent/created', { agent })
+    expect(agent.session.events.filter(event => event.type === 'agent-preset/composed')).toEqual([first])
+
+    agent.session.append('agent-preset/selected', { agentPreset: 'standard', entries: [] })
+    ctx.emit('agent/created', { agent })
+    const records = agent.session.events.filter(event => event.type === 'agent-preset/composed')
+    expect(records).toHaveLength(2)
+    expect(records[1]?.data).toEqual(first.data)
+  })
+
   it('lets two sessions share one preset without colliding', async () => {
     const first = await agentOn(ctx, 'sess-first', 'standard')
     const second = await agentOn(ctx, 'sess-second', 'standard')

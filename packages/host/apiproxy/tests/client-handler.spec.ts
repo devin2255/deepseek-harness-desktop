@@ -269,6 +269,30 @@ describe('unary round trip', () => {
     expect(selected.result).toEqual({ ok: true, value: { agentPreset: 'standard' } })
   })
 
+  it('reads recorded preset plugins through the wire without accepting a malformed session id', async () => {
+    const composition = vi.fn((r: RpcRequest<{ sessionId: SessionId }>) => ok(r, {
+      composition: { agentPreset: 'standard', entries: [
+        { entryId: 'tool', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true },
+      ] },
+      seq: 7,
+    }))
+    const c = client(scriptedApi({ agentPresets: { composition } }))
+
+    const recorded = await c.agentPresets.composition({ sessionId: sid('s1') })
+    expect(recorded.result).toEqual({ ok: true, value: {
+      composition: { agentPreset: 'standard', entries: [
+        { entryId: 'tool', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true },
+      ] },
+      seq: 7,
+    } })
+    expect(composition).toHaveBeenCalledOnce()
+    expect(composition.mock.calls[0]?.[0].payload).toEqual({ sessionId: 's1' })
+
+    const malformed = await c.agentPresets.composition({ sessionId: 42 as never })
+    expect(malformed.result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(composition).toHaveBeenCalledOnce()
+  })
+
   it('passes business errors through as 200 + err result, not a throw', async () => {
     const api = scriptedApi({
       sessions: {
