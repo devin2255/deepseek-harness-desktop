@@ -36,11 +36,14 @@ afterEach(async () => {
   await rm(workspace, { recursive: true, force: true })
 })
 
-async function setupWalled(script: Script): Promise<{ ctx: Context; parent: Agent }> {
+async function setupWalled(
+  script: Script,
+  delegationMode: 'inherit' | 'read-only' = 'inherit',
+): Promise<{ ctx: Context; parent: Agent }> {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
-  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: workspace })
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: workspace, delegationMode })
   await ctx.plugin(SandboxedFileSystem, { cwd: workspace })
   await ctx.plugin(ToolFs)
   await ctx.plugin(ApprovalService)
@@ -79,6 +82,60 @@ function toolResultTexts(agent: Agent): string[] {
 }
 
 describe('in-process policy inheritance', () => {
+  it.each([undefined, 'workspace-write', 'danger-full-access'] as const)(
+    'denies delegated writes under read-only deployment policy with parent mode %s', async (mode) => {
+      const script: Script = []
+      const { ctx, parent } = await setupWalled(script, 'read-only')
+      if (mode !== undefined) setSandboxMode(parent.session, mode)
+      const before = [...parent.session.events]
+      const blocked = join(workspace, 'delegation-blocked.txt')
+      script.push(
+        toolCallResponse('write', 'write', { file_path: blocked, content: 'escaped' }),
+        textResponse('child done'),
+      )
+
+      const run = await startInProcessRun(spawnRequest(parent), {})
+      try {
+        await run.result
+        const child = run.localAgent as Agent
+        await expect(readFile(blocked, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(toolResultTexts(child).join('\n')).toContain(READ_ONLY_DENIAL)
+        expect(child.session.events[0]).toMatchObject({
+          type: 'sandbox/mode', data: { mode: 'read-only', source: 'delegation' },
+        })
+        expect(ctx.sandboxPolicy.resolve({ session: parent.session }).mode).toBe(mode ?? 'workspace-write')
+        expect(parent.session.events).toEqual(before)
+      } finally {
+        await run.dispose()
+      }
+    },
+  )
+
+  it('overrides writable fork history with the deployment-selected read-only policy', async () => {
+    const script: Script = []
+    const { ctx, parent } = await setupWalled(script, 'read-only')
+    setSandboxMode(parent.session, 'danger-full-access')
+    const seed = [...parent.session.events]
+    const blocked = join(workspace, 'fork-delegation-blocked.txt')
+    script.push(
+      toolCallResponse('write', 'write', { file_path: blocked, content: 'escaped' }),
+      textResponse('child done'),
+    )
+    const run = await startInProcessRun(spawnRequest(parent), { seed })
+    try {
+      await run.result
+      const child = run.localAgent as Agent
+      expect(child.session.events.filter(event => event.type === 'sandbox/mode')).toMatchObject([
+        { data: { mode: 'danger-full-access' } },
+        { data: { mode: 'read-only', source: 'delegation' } },
+      ])
+      await expect(readFile(blocked, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(ctx.sandboxPolicy.overrideOf(parent.session)).toBe('danger-full-access')
+    } finally {
+      await run.dispose()
+    }
+  })
+
   it('records the parent sandbox override and the approval pin before publishing a spawn child', async () => {
     const script: Script = []
     const { ctx, parent } = await setupWalled(script)

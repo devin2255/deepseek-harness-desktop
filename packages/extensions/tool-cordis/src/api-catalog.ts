@@ -1015,6 +1015,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'session', description: 'session whose log supplies the override.' }],
         returns: 'the last logged mode, or `undefined` without one.',
       },
+      {
+        signature: 'delegatedModeOf(parent: Session): SandboxMode | undefined',
+        description: 'Resolve the mode to record when creating an in-process delegated child. Read-only delegation does not widen with a parent override. Inherit copies only the explicit parent override, not the deployment default or a grant.',
+        parameters: [{ name: 'parent', description: 'parent session read synchronously at delegation.' }],
+        returns: 'the child override, or `undefined` when inheritance records no mode.',
+      },
     ],
   },
   {

@@ -67,6 +67,8 @@ declare module '@deepseek-ai/cordis' {
 export interface Config {
   /** File-sandbox mode a session starts from (default: `read-only`). */
   mode?: SandboxMode
+  /** In-process child policy: copy the parent's explicit override, or start read-only. Default `inherit`. */
+  delegationMode?: 'inherit' | 'read-only'
   /**
    * Fallback root for agentless calls and sessions without a cwd (default:
    * `process.cwd()`). Normal agent calls use their session cwd instead.
@@ -92,6 +94,7 @@ export class SandboxPolicyService extends Service {
   // Inline schema call: the config catalog walks `static Config` statically.
   static Config: z<Config> = z.object({
     mode: z.union(['read-only', 'workspace-write', 'danger-full-access'] as const).default('read-only'),
+    delegationMode: z.union(['inherit', 'read-only'] as const).default('inherit'),
     // No schema default: process.cwd() is resolved in the constructor so the
     // stored root is always absolute regardless of how it was supplied.
     workspaceRoot: z.string(),
@@ -101,12 +104,14 @@ export class SandboxPolicyService extends Service {
   readonly defaultMode: SandboxMode
   /** The absolute `workspace-write` fallback root for calls without a session cwd. */
   readonly workspaceRoot: string
+  private readonly delegationMode: 'inherit' | 'read-only'
   constructor(ctx: Context, config: Config) {
     super(ctx, 'sandboxPolicy')
-    // schemastery (static Config) already filled `mode`; the cast records that
+    // schemastery (static Config) already filled the modes; the casts record that
     // runtime fact. `workspaceRoot` has NO schema default, so its fallback to
     // the process cwd is real branching, resolved absolute either way.
     this.defaultMode = config.mode as SandboxMode
+    this.delegationMode = config.delegationMode as 'inherit' | 'read-only'
     this.workspaceRoot = resolveWorkspaceRoot(config.workspaceRoot ?? process.cwd())
 
     ctx.inject(['systemPrompt'], (scope: Context) => {
@@ -148,6 +153,17 @@ export class SandboxPolicyService extends Service {
    */
   overrideOf(session: Session): SandboxMode | undefined {
     return effectiveSandboxMode(session.events)
+  }
+
+  /**
+   * Resolve the mode to record when creating an in-process delegated child.
+   * Read-only delegation does not widen with a parent override. Inherit copies
+   * only the explicit parent override, not the deployment default or a grant.
+   * @param parent - parent session read synchronously at delegation.
+   * @returns the child override, or `undefined` when inheritance records no mode.
+   */
+  delegatedModeOf(parent: Session): SandboxMode | undefined {
+    return this.delegationMode === 'read-only' ? 'read-only' : this.overrideOf(parent)
   }
 }
 

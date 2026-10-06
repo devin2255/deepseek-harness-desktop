@@ -8,15 +8,18 @@ At activation, the plugin reads `DSH_DESKTOP_CAPABILITY` and `DSH_DESKTOP_APP_VE
 
 While the API Proxy service is mounted, the plugin registers the exact authenticated `GET /.well-known/deepseek-harness-desktop/readiness` route. Its JSON response identifies `deepseek-harness-desktop`, reports the captured application version, and advertises the `host.describe` and `session.list` operations supplied by that service. Disposal releases the route and guard with the plugin fiber.
 
+The overlay selects `sandbox-policy.delegationMode: read-only` without changing the root mode or workspace fallback. New in-process spawn, fork, and continuable children record that mode before publication; their existing sandbox context states read-only and their existing approval pin rejects escalation. Cold children replay their recorded mode. See the [desktop delegation decision](../../../.agents/notes/implemented/feature/2026-10-06-desktop-read-only-delegation.md).
+
 ## Model Experience
 
-Indirectly, through `dsh-web-app`: this overlay sets `web-runtime.surfaceContext` to `false`, removing its `app:web-surface` prompt section and managed `DSH_WEB_URL` shell context.
+Indirectly, through `dsh-web-app` and `dsh-sandbox-policy`: this overlay removes Web-surface context and selects the read-only mode described by a new child's existing runtime-context snapshot.
 
 #### KV Cache effect
 
-The omitted Web-surface fields leave the request prefix without that stable context; this overlay adds no replacement or turn-to-turn cache invalidation.
+The omitted Web-surface fields leave the request prefix without that stable context. The child's read-only fact uses the existing append-only runtime-context snapshot; root request prefixes are unaffected by the delegation setting.
 
 ## Known Limitations and Deferred Work
 
 - **Installer signing** — desktop installer signing and release provenance remain outside this overlay.
+- **Writing children** — child-writer worktrees and integration are not available; ordinary desktop children cannot modify shared task files.
 - **Task-aware background lifecycle** — background work is not yet coordinated with a desktop window's task lifecycle.

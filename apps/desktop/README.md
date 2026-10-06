@@ -60,6 +60,8 @@ The Electron application adds no model-visible content. The desktop profile's [`
 
 ## Parallel task workspaces
 
+New in-process subagents start read-only in the Desktop profile, including fork and continuable children, while the root task keeps its selected permission mode. The child records its policy before publication and retains it on cold resume; automatic escalation remains rejected. Existing child Sessions replay their recorded policy rather than adopting a new deployment default. Writing subagents require the separate child-worktree and integration capability listed below; they cannot use the shared root checkout as an implicit writable workspace.
+
 The Tasks screen creates a root Session in an application-owned Git worktree by default. The selected Workspace remains the project identity shown in the UI, while the Task projection records the exact source path, execution path, branch, base commit, source HEAD, and source-dirty digest in the Session log. Two tasks created from one repository receive different worktree paths and branches from the same committed base; creating them does not copy uncommitted source changes or modify the source checkout.
 
 Isolation requires an accessible Git repository root with a committed `HEAD`, a supported non-nested layout, Git on `PATH`, and sufficient free space under the Harness home. Preflight and creation failures stop Session creation. The recovery panel offers an isolation retry and an explicit direct-project choice with a write-risk warning; it never changes to direct mode silently. A recorded worktree is verified against Git's live registry before reuse, and a missing or diverged path fails closed.

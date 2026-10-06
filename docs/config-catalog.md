@@ -1510,6 +1510,8 @@ Source: [`packages/sandbox/sandbox-local/src/index.ts:44`](../packages/sandbox/s
 export interface Config {
   /** File-sandbox mode a session starts from (default: `read-only`). */
   mode?: SandboxMode
+  /** In-process child policy: copy the parent's explicit override, or start read-only. Default `inherit`. */
+  delegationMode?: 'inherit' | 'read-only'
   /**
    * Fallback root for agentless calls and sessions without a cwd (default:
    * `process.cwd()`). Normal agent calls use their session cwd instead.

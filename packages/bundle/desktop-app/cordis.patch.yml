@@ -15,6 +15,12 @@
 - id: api-gateway
   inject: [tasks]
 
+- id: sandbox-policy
+  config:
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+    workspaceRoot: !!js process.cwd()
+    delegationMode: read-only
+
 # The in-app browser accepts an exact host path without launching a native
 # dialog worker, including on Windows installations where that worker fails.
 - id: directory-picker

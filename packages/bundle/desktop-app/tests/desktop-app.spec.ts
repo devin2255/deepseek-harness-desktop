@@ -299,6 +299,11 @@ describe('desktop launch capability', () => {
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse',
     })
     expect(entries.find(entry => entry.id === 'api-gateway')?.inject).toContain('tasks')
+    expect(entries.find(entry => entry.id === 'sandbox-policy')?.config).toEqual({
+      mode: { __jsExpr: "process.env.DSH_PERMISSION_MODE ?? 'workspace-write'" },
+      workspaceRoot: { __jsExpr: 'process.cwd()' },
+      delegationMode: 'read-only',
+    })
     expect(entries.findIndex(entry => entry.id === 'task-session'))
       .toBeLessThan(entries.findIndex(entry => entry.id === 'ui-task-overview'))
     expect(entries.findIndex(entry => entry.id === 'task-worktree-local'))

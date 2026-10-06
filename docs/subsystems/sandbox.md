@@ -210,9 +210,18 @@ resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
  * @returns the last logged mode, or `undefined` without one.
  */
 overrideOf(session: Session): SandboxMode | undefined
+
+/**
+ * Resolve the mode to record when creating an in-process delegated child.
+ * Read-only delegation does not widen with a parent override. Inherit copies
+ * only the explicit parent override, not the deployment default or a grant.
+ * @param parent - parent session read synchronously at delegation.
+ * @returns the child override, or `undefined` when inheritance records no mode.
+ */
+delegatedModeOf(parent: Session): SandboxMode | undefined
 ```
 
 Types: [Session](session.md)
 
-Source: [`packages/sandbox/sandbox-policy/src/index.ts:91`](../../packages/sandbox/sandbox-policy/src/index.ts)
+Source: [`packages/sandbox/sandbox-policy/src/index.ts:93`](../../packages/sandbox/sandbox-policy/src/index.ts)
 <!-- END GENERATED cordis-surface -->

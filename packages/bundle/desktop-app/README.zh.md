@@ -8,15 +8,18 @@
 
 API Proxy 服务挂载期间，插件注册精确的已认证 `GET /.well-known/deepseek-harness-desktop/readiness` 路由。其 JSON 响应标识 `deepseek-harness-desktop`，报告已捕获的应用版本，并声明该服务提供的 `host.describe` 和 `session.list` 操作。释放插件 fiber 时会同时释放该路由和 guard。
 
+覆盖层选择 `sandbox-policy.delegationMode: read-only`，不改变根模式或工作区回退值。新的进程内 spawn、fork 与可继续子级会在发布前记录该模式；其既有沙箱上下文说明只读状态，既有审批钉定会拒绝升权。冷态子级重放已记录的模式。参见[桌面委派决策](../../../.agents/notes/implemented/feature/2026-10-06-desktop-read-only-delegation.md)。
+
 ## 模型体验
 
-间接地，通过 `dsh-web-app`：此覆盖层将 `web-runtime.surfaceContext` 设为 `false`，移除其 `app:web-surface` prompt section 和受管理的 `DSH_WEB_URL` shell context。
+间接地，通过 `dsh-web-app` 与 `dsh-sandbox-policy`：此覆盖层移除 Web 表层上下文，并选择由新子级既有运行时上下文快照说明的只读模式。
 
 #### KV Cache 影响
 
-省去的 Web 表层字段使请求前缀不再包含该稳定上下文；此覆盖层不添加替代内容，也不会造成逐轮 cache 失效。
+省去的 Web 表层字段使请求前缀不再包含该稳定上下文。子级的只读事实使用既有的仅追加运行时上下文快照；根请求前缀不受委派设置影响。
 
 ## 已知限制与延后工作
 
 - **安装程序签名** — 桌面安装程序签名和发布来源证明仍在此覆盖层之外。
+- **写入子级** — 子写入者 worktree 与集成尚不可用；普通桌面子级不能修改共享任务文件。
 - **感知任务的后台生命周期** — 后台工作尚未与桌面窗口的任务生命周期协调。
