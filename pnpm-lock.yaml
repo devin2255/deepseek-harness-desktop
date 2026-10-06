@@ -756,6 +756,12 @@ importers:
       '@deepseek-ai/dsh-task-session':
         specifier: workspace:*
         version: link:../packages/task/task-session
+      '@deepseek-ai/dsh-task-worktree':
+        specifier: workspace:*
+        version: link:../packages/task/task-worktree
+      '@deepseek-ai/dsh-task-worktree-local':
+        specifier: workspace:*
+        version: link:../packages/task/task-worktree-local
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:*
         version: link:../packages/terminal/terminal
@@ -852,6 +858,9 @@ importers:
       '@deepseek-ai/dsh-workflow-worker-thread':
         specifier: workspace:*
         version: link:../packages/workflow/workflow-worker-thread
+      '@deepseek-ai/dsh-workspace':
+        specifier: workspace:*
+        version: link:../packages/workspace/workspace
 
   native/landlock-run:
     devDependencies:

@@ -88,6 +88,22 @@ function assignment(sourcePath: string, path: string): TaskWorktreeAssignment {
 }
 
 describe('local Task worktree filesystem and Git faults', () => {
+  it.each([undefined, '', 'invalid-head'])(
+    'rejects a registered Task branch with unusable HEAD %s before ancestry inspection', async (head) => {
+      const paths = fixture()
+      const owned = assignment(paths.source, paths.owned)
+      const field = head === undefined ? '' : `HEAD ${head}\0`
+      const list = `worktree ${paths.owned}\0${field}branch refs/heads/${owned.branch}\0\0`
+      const test = await mount(paths.home, paths.source, 'a'.repeat(40), list)
+      try {
+        expect(await test.ctx.taskWorktrees.inspect(owned)).toBe('diverged')
+        expect(test.spawn.mock.calls.some(([spec]) => spec.argv.includes('merge-base'))).toBe(false)
+      } finally {
+        await test.fiber.dispose()
+      }
+    },
+  )
+
   it('rejects a malformed Git HEAD before trying to create a branch', async () => {
     const paths = fixture()
     const sourceAlias = `${paths.source}${sep}..${sep}source`

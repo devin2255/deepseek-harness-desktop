@@ -8,7 +8,7 @@ Preflight requires a repository-root Workspace, a committed HEAD, no superprojec
 
 The package also exports the bounded `runGit` primitive and NUL-delimited worktree parser used by local Task providers. Batch stdin and explicit child environment additions stay opt-in at each call site; repository policy and failure mapping remain the consuming Provider's responsibility.
 
-`inspect` returns `available` only when Git's registered path, branch, and HEAD still match the recorded assignment. Missing or changed state is reported without repair.
+`inspect` returns `available` only when Git still registers the exact canonical path and branch, and its HEAD is the recorded base or a descendant of it. Normal Task commits preserve the immutable assignment; detached checkouts, missing objects, and unrelated history are rejected. Inspection reports missing or diverged state without repair.
 
 ## Configuration
 

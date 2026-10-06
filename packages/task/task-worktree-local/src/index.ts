@@ -282,9 +282,15 @@ export class LocalTaskWorktrees extends TaskWorktreeService {
         continue
       }
       if (recordPath !== worktreePath) continue
-      return record.head === assignment.baseCommit && record.branch === `refs/heads/${assignment.branch}`
-        ? 'available'
-        : 'diverged'
+      if (record.branch !== `refs/heads/${assignment.branch}`
+        || record.head === undefined || !COMMIT.test(record.head)) return 'diverged'
+      if (record.head === assignment.baseCommit) return 'available'
+      const ancestry = await this.command(
+        executable, sourcePath,
+        ['merge-base', '--is-ancestor', assignment.baseCommit, record.head],
+        signal, [0, 1, 128],
+      )
+      return ancestry.exitCode === 0 ? 'available' : 'diverged'
     }
     return 'diverged'
   }

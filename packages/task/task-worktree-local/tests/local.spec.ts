@@ -125,6 +125,48 @@ describe('local Task worktrees', () => {
     await test.dispose()
   })
 
+  it('keeps a committed Task available without replacing its recorded base', async () => {
+    const fixture = repository()
+    const test = await mount(fixture.home)
+    try {
+      const assignment = await test.ctx.taskWorktrees.create({
+        taskId: SessionId('committed-task'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+      })
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'committed task\n')
+      git(assignment.path, ['add', 'tracked.txt'])
+      git(assignment.path, ['commit', '-m', 'task change'])
+      const committedHead = git(assignment.path, ['rev-parse', 'HEAD']).trim()
+
+      expect(committedHead).not.toBe(assignment.baseCommit)
+      expect(await test.ctx.taskWorktrees.inspect(assignment)).toBe('available')
+      expect(assignment.baseCommit).toBe(git(fixture.source, ['rev-parse', 'HEAD']).trim())
+      expect(readFileSync(join(fixture.source, 'tracked.txt'), 'utf8').replaceAll('\r\n', '\n')).toBe('base\n')
+      expect(git(fixture.source, ['status', '--porcelain=v1'])).toBe('')
+
+      git(assignment.path, ['switch', '--detach'])
+      expect(await test.ctx.taskWorktrees.inspect(assignment)).toBe('diverged')
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects unrelated history even when the registered path and branch are unchanged', async () => {
+    const fixture = repository()
+    const test = await mount(fixture.home)
+    try {
+      const assignment = await test.ctx.taskWorktrees.create({
+        taskId: SessionId('rewritten-task'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+      })
+      // This isolated fixture replaces its first commit; the source branch keeps the recorded base.
+      git(assignment.path, ['commit', '--amend', '-m', 'unrelated task root'])
+      expect(git(assignment.path, ['branch', '--show-current']).trim()).toBe(assignment.branch)
+      expect(await test.ctx.taskWorktrees.inspect(assignment)).toBe('diverged')
+      expect(git(fixture.source, ['rev-parse', 'HEAD']).trim()).toBe(assignment.baseCommit)
+    } finally {
+      await test.dispose()
+    }
+  })
+
   it('records source dirtiness without copying or modifying it', async () => {
     const fixture = repository()
     writeFileSync(join(fixture.source, 'tracked.txt'), 'dirty source\n')

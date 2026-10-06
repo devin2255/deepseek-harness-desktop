@@ -500,6 +500,24 @@ describe('desktop Electron acceptance', () => {
       expectedSeq: deliveryReady.asOfSeq,
     })
     expect(deliveryCommitted.commitReceipt?.commit).toMatch(/^[0-9a-f]{40}$/u)
+    const committedReuse = await pageRpc<{
+      sessionId: string
+      executionWorkspace: NonNullable<TaskIdentitySnapshot['tasks'][number]['executionWorkspace']>
+    }>(page, 'session.create', {
+      sessionId: delivery.sessionId,
+      workspaceId: deliveryWorkspace.workspace.workspaceId,
+      isolation: 'worktree',
+    })
+    expect(committedReuse).toMatchObject({
+      sessionId: delivery.sessionId,
+      executionWorkspace: delivery.executionWorkspace,
+    })
+    const afterReuse = await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})
+    expect(afterReuse.tasks.find(task => task.taskId === delivery.sessionId)).toMatchObject({
+      asOfSeq: deliveryCommitted.asOfSeq,
+      executionWorkspace: delivery.executionWorkspace,
+      commitReceipt: deliveryCommitted.commitReceipt,
+    })
     const deliveryApplied = await pageRpc<TaskIdentitySnapshot['tasks'][number]>(page, 'task.apply', {
       sessionId: delivery.sessionId,
       expectedRevision: deliveryCommitted.commitReceipt?.committedRevision,

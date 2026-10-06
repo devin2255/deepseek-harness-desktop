@@ -1881,7 +1881,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract inspect( assignment: TaskWorktreeAssignment, signal?: AbortSignal, ): Promise<TaskWorktreeAvailability>',
-        description: 'Compare durable assignment facts with the current local Git registration.',
+        description: 'Compare durable assignment facts with the current local Git registration. Commits descended from the recorded base do not change assignment identity.',
         parameters: [{ name: 'assignment', description: 'Previously recorded worktree assignment.' }, { name: 'signal', description: 'Optional cancellation of Git inspection.' }],
         returns: 'Whether the exact worktree remains available, is missing, or has diverged.',
       },

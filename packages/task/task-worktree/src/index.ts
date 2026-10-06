@@ -53,6 +53,7 @@ export abstract class TaskWorktreeService extends Service {
 
   /**
    * Compare durable assignment facts with the current local Git registration.
+   * Commits descended from the recorded base do not change assignment identity.
    * @param assignment - Previously recorded worktree assignment.
    * @param signal - Optional cancellation of Git inspection.
    * @returns Whether the exact worktree remains available, is missing, or has diverged.

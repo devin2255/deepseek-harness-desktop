@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-应用托管 Task 集成 worktree 的服务定义。Provider 为一个根 Task 创建隔离 Git 检出，并返回完整的分配事实，由 Task 消费方将其记录到根 Session 日志。`inspect` 会将这些记录事实与实时 Git 注册信息比较，但不会执行修复或删除。
+应用托管 Task 集成 worktree 的服务定义。Provider 为一个根 Task 创建隔离 Git 检出，并返回完整的分配事实，由 Task 消费方将其记录到根 Session 日志。`inspect` 会将这些记录事实与实时 Git 注册信息比较，但不会执行修复或删除。记录基准的后代提交保留同一分配身份。
 
 创建操作绝不允许隐式回退到直接工作区。消费方 Host 决定是否将直接执行作为明确备选，并通过普通 Session 所有权记录所选执行目录。
 

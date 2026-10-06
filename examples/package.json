@@ -83,6 +83,8 @@
     "@deepseek-ai/dsh-subprocess-local": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-task-session": "workspace:*",
+    "@deepseek-ai/dsh-task-worktree": "workspace:*",
+    "@deepseek-ai/dsh-task-worktree-local": "workspace:*",
     "@deepseek-ai/dsh-jobs-local": "workspace:*",
     "@deepseek-ai/dsh-time-context": "workspace:*",
     "@deepseek-ai/dsh-tool-call-timeout-policy": "workspace:*",
@@ -114,6 +116,7 @@
     "@deepseek-ai/dsh-web": "workspace:*",
     "@deepseek-ai/dsh-web-fetch-http": "workspace:*",
     "@deepseek-ai/dsh-workflow-worker-thread": "workspace:*",
+    "@deepseek-ai/dsh-workspace": "workspace:*",
     "@deepseek-ai/dsh-agent-instructions": "workspace:*"
   }
 }

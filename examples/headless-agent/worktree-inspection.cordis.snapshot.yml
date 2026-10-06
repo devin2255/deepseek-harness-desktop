@@ -1,0 +1,7 @@
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+- id: task-worktrees
+  name: '@deepseek-ai/dsh-task-worktree-local'
+  config:
+    dshHome: './.dsh'
+    minFreeBytes: 0

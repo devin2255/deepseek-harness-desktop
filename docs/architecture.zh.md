@@ -109,7 +109,7 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 
 `dsh-task-worktree` 定义应用拥有的执行目录，`dsh-task-worktree-local` 通过 `ctx.subprocess` 创建并检查 Git worktree，`dsh-host-apiproxy` 只在显式收到带有 `isolation: worktree` 的 `session.create` 请求时消费该服务。Host 先创建 worktree，再创建 Session，使 Agent 从 worktree 路径启动，并通过 Task 服务追加 `task/worktree-assigned`。因此冷态回放可以恢复源 Workspace 身份和确切执行身份，无需从当前文件系统推断。
 
-本地提供方只接受已有 `HEAD` 的仓库根目录，拒绝嵌套仓库和 submodule，检查可用空间，按源仓库串行创建，并使用确定的应用所有路径和分支。它会记录源目录是否有未提交更改，但 worktree 始终基于已提交的 `HEAD`，所以既不会复制也不会修改源更改。Git 失败时保留部分路径或分支用于恢复。只有在路径、提交和分支仍与 Git 实时 worktree 注册表一致时，才会复用已有分配。
+本地提供方只接受已有 `HEAD` 的仓库根目录，拒绝嵌套仓库和 submodule，检查可用空间，按源仓库串行创建，并使用确定的应用所有路径和分支。它会记录源目录是否有未提交更改，但 worktree 始终基于已提交的 `HEAD`，所以既不会复制也不会修改源更改。Git 失败时保留部分路径或分支用于恢复。只有 Git 仍注册确切路径与分支，且当前提交历史包含记录的基准时，才会复用已有分配。
 
 ### Task 审查与交付
 
