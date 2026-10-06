@@ -469,6 +469,15 @@ composeFrom(agentCtx: Context, parentCtx: Context): string | undefined
 composedPreset(agentCtx: Context): string | undefined
 
 /**
+ * Identify the preset generation one live agent joined, without exposing
+ * plugin configuration values. The returned rows were captured when that
+ * generation finished mounting and do not follow later file edits.
+ * @param agentCtx - the joined agent's scope context.
+ * @returns its mounted composition, or undefined when it joined no preset.
+ */
+composition(agentCtx: Context): PresetComposition | undefined
+
+/**
  * Read one preset's composition text.
  * @param id - the preset id.
  * @returns the composition exactly as stored.
@@ -556,7 +565,7 @@ async standingKeyFor(id?: string): Promise<ScopeKey>
 
 Types: [ScopeKey](scope.md)
 
-Source: [`packages/preset/agent-presets/src/index.ts:82`](../../packages/preset/agent-presets/src/index.ts)
+Source: [`packages/preset/agent-presets/src/index.ts:83`](../../packages/preset/agent-presets/src/index.ts)
 
 <a id="ctxagents--agentregistry"></a>
 

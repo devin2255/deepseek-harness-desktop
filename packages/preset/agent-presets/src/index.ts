@@ -32,6 +32,7 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { discoverPresets, USER_PRESET_DIR } from './discovery.ts'
 import { copyComposition, deleteComposition, readComposition } from './authoring.ts'
 import { mountPreset, serviceForAgent, standingMountFor } from './mount.ts'
+import type { PresetComposition } from './session.ts'
 import { PresetExistsError } from './authoring.ts'
 import { PresetMountError, UnknownPresetError, type AgentPreset, type Config, type PresetRoot } from './preset.ts'
 import type {} from './types.ts'
@@ -62,7 +63,7 @@ export {
   copyComposition, deleteComposition, InvalidPresetIdError, PresetExistsError,
   PresetNotWritableError, readComposition, writableRoot,
 } from './authoring.ts'
-export { resolveSessionPreset, type PresetBearingSession } from './session.ts'
+export { resolveSessionPreset, type PresetBearingSession, type PresetComposition, type PresetCompositionEntry } from './session.ts'
 export { PresetMountError, UnknownPresetError } from './preset.ts'
 export type { AgentPreset, Config, PresetRoot, PresetTrust } from './preset.ts'
 
@@ -164,8 +165,16 @@ export class AgentPresets extends Service {
     // does that today — the Web surface mounts in `setup` and children join
     // through `composeFrom` before publication.
     ctx.on('agent/created', ({ agent }) => {
+      const composition = this.composition(agent.ctx)
+      if (composition !== undefined) {
+        const recorded = agent.session.events.findLast(event =>
+          event.type === 'agent-preset/composed' || event.type === 'agent-preset/selected')
+        if (recorded === undefined || JSON.stringify(recorded.data) !== JSON.stringify(composition)) {
+          agent.session.append('agent-preset/composed', composition)
+        }
+        return
+      }
       if (this.resolvedRoots.length === 0) return
-      if (this.composedPreset(agent.ctx) !== undefined) return
       ctx.logger.warn(
         `agent "${agent.id}" was published without joining an agent preset; `
         + 'its tools, prompt sections, and skill catalog resolve against the empty global layer '
@@ -335,6 +344,20 @@ export class AgentPresets extends Service {
    */
   composedPreset(agentCtx: Context): string | undefined {
     return standingMountFor(agentCtx)?.presetId
+  }
+
+  /**
+   * Identify the preset generation one live agent joined, without exposing
+   * plugin configuration values. The returned rows were captured when that
+   * generation finished mounting and do not follow later file edits.
+   * @param agentCtx - the joined agent's scope context.
+   * @returns its mounted composition, or undefined when it joined no preset.
+   */
+  composition(agentCtx: Context): PresetComposition | undefined {
+    const mount = standingMountFor(agentCtx)
+    return mount === undefined
+      ? undefined
+      : { agentPreset: mount.presetId, entries: mount.entries }
   }
 
   /**

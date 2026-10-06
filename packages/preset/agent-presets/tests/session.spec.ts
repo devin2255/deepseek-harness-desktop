@@ -25,7 +25,7 @@ function header(agentPreset?: string): SessionHeader {
 
 /** One logged selection, as `agentPreset.select` appends it. */
 function selected(agentPreset: string, seq: number): SessionEvent {
-  return { type: 'agent-preset/selected', seq, time: seq, data: { agentPreset } }
+  return { type: 'agent-preset/selected', seq, time: seq, data: { agentPreset, entries: [] } }
 }
 
 describe('resolving which preset a session ran', () => {

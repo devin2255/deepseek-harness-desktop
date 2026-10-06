@@ -55,6 +55,9 @@ describe('minimal agent preset', () => {
 
     const requestHeader = agentHandle.agent.session.requestHeader()
     if (requestHeader === undefined) throw new Error('the minimal agent issued no model request')
+    const composition = agentHandle.agent.session.events.find(event => event.type === 'agent-preset/composed')
+    expect(composition?.data.agentPreset).toBe('minimal')
+    expect(composition?.data.entries.length).toBeGreaterThan(0)
     expect(agentHandle.agent.session.events.some(event => event.type === 'user/message'
       && event.data.source.kind === 'plugin'
       && event.data.source.plugin === '@deepseek-ai/dsh-system-prompt')).toBe(false)
@@ -98,6 +101,7 @@ describe('minimal agent preset', () => {
       .trimEnd()
 
     expect({
+      presetPlugins: composition?.data.entries.map(entry => `${entry.entryId.split(':').at(-1)}:${entry.enabled ? 'on' : 'off'}`),
       prompt: requestHeader.system,
       tools: requestHeader.tools?.map(tool => tool.name),
       bash: text(bash),
@@ -108,6 +112,14 @@ describe('minimal agent preset', () => {
         "editor": "Here's the content of {{cwd}}/preset-smoke.txt with line numbers (which has a total of 2 lines):
            1  MINIMAL_EDITOR_OK
            2",
+        "presetPlugins": [
+          "persona:on",
+          "pty:on",
+          "terminal-bash:on",
+          "persistent-bash:on",
+          "fs-local:on",
+          "str-replace-editor:on",
+        ],
         "prompt": "You are a helpful software engineer assistant.",
         "tools": [
           "bash",

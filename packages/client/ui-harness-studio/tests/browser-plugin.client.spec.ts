@@ -20,7 +20,9 @@ async function bench() {
   new RemoteService(ctx)
   const list = vi.fn(async () => ({ ok: true as const, value: { entries: [] } }))
   ctx.provide('remote.pluginInventory', { list })
-  return { ctx, slots: ctx.get('slots') as SlotRegistry, inspect, list, layout }
+  const composition = vi.fn(async () => ({ result: { ok: true as const, value: { composition: null, seq: null } } }))
+  ctx.provide('connection', { api: { agentPresets: { composition } } } as never)
+  return { ctx, slots: ctx.get('slots') as SlotRegistry, inspect, list, composition, layout }
 }
 
 function declare(slots: SlotRegistry): () => void {
@@ -49,6 +51,10 @@ describe('ui-harness-studio registration', () => {
     expect(b.list).toHaveBeenCalledOnce()
     b.list.mockResolvedValueOnce({ ok: false, error: { code: 'unavailable' } } as never)
     await expect(injected.listPlugins()).rejects.toThrow('pluginInventory.list failed: unavailable')
+    await expect(injected.readComposition('s1' as never)).resolves.toEqual({ composition: null, seq: null })
+    expect(b.composition).toHaveBeenCalledOnce()
+    b.composition.mockResolvedValueOnce({ result: { ok: false, error: { code: 'unavailable' } } } as never)
+    await expect(injected.readComposition('s1' as never)).rejects.toThrow('agentPreset.composition failed: unavailable')
     injected.inspect({} as never)
     expect(b.inspect).toHaveBeenCalledOnce()
     injected.back()

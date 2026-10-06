@@ -21,6 +21,7 @@ import { Include } from '@deepseek-ai/cordis-plugin-include'
 import type { EntryTree } from '@deepseek-ai/cordis-plugin-loader'
 import { scopeOf, scopeParentOf, type ScopeKey } from '@deepseek-ai/dsh-scope'
 import { PresetMountError, type AgentPreset } from './preset.ts'
+import type { PresetCompositionEntry } from './session.ts'
 
 /** What one mounted subtree publishes about itself for the audit to read. */
 interface MountedTree {
@@ -119,6 +120,8 @@ export interface PresetMount {
   readonly fiber: Fiber
   /** The standing scope key agents are parented to (undefined only in torn-down records). */
   readonly key: ScopeKey | undefined
+  /** Plugin rows frozen at successful mount, without their configuration values. */
+  readonly entries: readonly PresetCompositionEntry[]
 }
 
 const mounts = new Set<PresetMount>()
@@ -365,7 +368,14 @@ export async function mountPreset(agentCtx: Context, preset: AgentPreset): Promi
         + 'a preset service must sit behind an `isolate` realm or move to the host composition',
       )
     }
-    mounts.add({ presetId: preset.id, fiber, key: scopeOf(agentCtx) })
+    const entries = [...tree.entries()]
+      .filter(entry => !entry.options.group)
+      .map(entry => ({
+        entryId: entry.id,
+        moduleName: entry.options.name,
+        enabled: !entry.disabled,
+      }))
+    mounts.add({ presetId: preset.id, fiber, key: scopeOf(agentCtx), entries })
   } catch (error) {
     try {
       await handle.dispose()

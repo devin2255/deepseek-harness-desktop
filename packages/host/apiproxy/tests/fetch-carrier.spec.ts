@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ApiProxy, HostFrame, MuxFrame } from '../src/api/index.ts'
 import type { ClientResponse, RpcMessage, RpcReceipt, RpcRequest } from '../src/api/rpc.ts'
 import { RpcId } from '../src/api/rpc.ts'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { toFetchHandler } from '../src/fetch/handler.ts'
 import { AbstractApiClient, InProcessApiClient } from '../src/fetch/client.ts'
 
@@ -201,6 +202,9 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
           rpcId: request.rpcId,
           result: { ok: true as const, value: { presets: [], authorable: false, hasDocument: false } },
         })
+      },
+      composition(request: RpcRequest<{ sessionId: SessionId }>) {
+        return Promise.resolve({ rpcId: request.rpcId, result: { ok: true as const, value: { composition: null, seq: null } } })
       },
       select(request: RpcRequest<{ agentPreset: string }>) {
         const value = { agentPreset: request.payload.agentPreset }

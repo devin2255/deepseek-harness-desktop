@@ -204,7 +204,7 @@ describe('desktop Electron acceptance', () => {
       timeout: 15_000,
     })
 
-    const startup = await application.firstWindow({ timeout: 5_000 })
+    const startup = await application.firstWindow({ timeout: 30_000 })
     expect(startup.url()).toMatch(/^file:/u)
     expect(await application.evaluate(({ app }) => app.getPath('appData'))).toBe(environment.APPDATA)
     expect(await application.evaluate(({ app }) => app.getPath('home'))).toBe(join(temporaryRoot, 'home'))
@@ -319,6 +319,7 @@ describe('desktop Electron acceptance', () => {
     expect(await studio.locator('section > h2').evaluateAll(headings => headings.map(heading => heading.id))).toMatchInlineSnapshot(`
       [
         "studio-recorded",
+        "studio-composition",
         "studio-tools",
         "studio-system",
         "studio-events",

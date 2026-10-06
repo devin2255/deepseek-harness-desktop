@@ -7,7 +7,7 @@ import { z } from 'zod'
 import type { RequestPayload, ResponseValue } from './rpc-map.ts'
 import type { Wire } from './rpc.schema.ts'
 import { sessionIdSchema } from './sessions.schema.ts'
-import type { AgentPresetEntry } from './agent-presets.ts'
+import type { AgentPresetCompositionView, AgentPresetEntry } from './agent-presets.ts'
 
 /** AgentPresetEntry row of agentPreset.list. */
 export const agentPresetEntrySchema = z.object({
@@ -29,6 +29,27 @@ export const agentPresetListValueSchema = z.object({
   authorable: z.boolean(),
   hasDocument: z.boolean(),
 }) satisfies z.ZodType<Wire<ResponseValue<'agentPreset.list'>>>
+
+/** agentPreset.composition request payload. */
+export const agentPresetCompositionRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+}) satisfies z.ZodType<Wire<RequestPayload<'agentPreset.composition'>>>
+
+/** Config-free plugin rows from a durable composition event. */
+export const agentPresetCompositionSchema = z.object({
+  agentPreset: z.string(),
+  entries: z.array(z.object({
+    entryId: z.string(),
+    moduleName: z.string(),
+    enabled: z.boolean(),
+  })),
+}) satisfies z.ZodType<Wire<AgentPresetCompositionView>>
+
+/** agentPreset.composition response value. */
+export const agentPresetCompositionValueSchema = z.object({
+  composition: agentPresetCompositionSchema.nullable(),
+  seq: z.number().int().min(0).nullable(),
+}) satisfies z.ZodType<Wire<ResponseValue<'agentPreset.composition'>>>
 
 /** agentPreset.select request payload. */
 export const agentPresetSelectRequestSchema = z.object({

@@ -43,7 +43,7 @@ import {
 } from '../api/workspace.schema.ts'
 import { skillListValueSchema } from '../api/skills.schema.ts'
 import {
-  agentPresetCopyValueSchema, agentPresetListValueSchema, agentPresetOpenDocumentValueSchema,
+  agentPresetCompositionValueSchema, agentPresetCopyValueSchema, agentPresetListValueSchema, agentPresetOpenDocumentValueSchema,
   agentPresetReadValueSchema, agentPresetRemoveValueSchema, agentPresetSelectValueSchema,
 } from '../api/agent-presets.schema.ts'
 import {
@@ -133,6 +133,7 @@ export interface IApiClient {
   }
   agentPresets: {
     list(payload: RequestPayload<'agentPreset.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.list'>>>
+    composition(payload: RequestPayload<'agentPreset.composition'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.composition'>>>
     select(payload: RequestPayload<'agentPreset.select'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.select'>>>
     read(payload: RequestPayload<'agentPreset.read'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.read'>>>
     copy(payload: RequestPayload<'agentPreset.copy'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.copy'>>>
@@ -220,6 +221,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'workspace.unarchiveSession': workspaceUnarchiveSessionValueSchema,
   'skill.list': skillListValueSchema,
   'agentPreset.list': agentPresetListValueSchema,
+  'agentPreset.composition': agentPresetCompositionValueSchema,
   'agentPreset.select': agentPresetSelectValueSchema,
   'agentPreset.read': agentPresetReadValueSchema,
   'agentPreset.copy': agentPresetCopyValueSchema,
@@ -495,6 +497,7 @@ export abstract class AbstractApiClient implements IApiClient {
   // Client program that imports this carrier.
   readonly agentPresets: IApiClient['agentPresets'] = {
     list: (payload, signal) => this.callUnary('agentPreset.list', payload, signal),
+    composition: (payload, signal) => this.callUnary('agentPreset.composition', payload, signal),
     select: (payload, signal) => this.callUnary('agentPreset.select', payload, signal),
     read: (payload, signal) => this.callUnary('agentPreset.read', payload, signal),
     copy: (payload, signal) => this.callUnary('agentPreset.copy', payload, signal),

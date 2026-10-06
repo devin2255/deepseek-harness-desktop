@@ -17,6 +17,7 @@
  * consumer exists.
  */
 export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'agent-preset/composed',
   'agent-preset/selected',
   'agent/inbox/spliced',
   'approval/asked',

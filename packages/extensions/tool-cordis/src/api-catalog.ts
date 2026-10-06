@@ -169,6 +169,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the preset id, or undefined when the agent joined none.',
       },
       {
+        signature: 'composition(agentCtx: Context): PresetComposition | undefined',
+        description: 'Identify the preset generation one live agent joined, without exposing plugin configuration values. The returned rows were captured when that generation finished mounting and do not follow later file edits.',
+        parameters: [{ name: 'agentCtx', description: 'the joined agent\'s scope context.' }],
+        returns: 'its mounted composition, or undefined when it joined no preset.',
+      },
+      {
         signature: 'async read(id: string): Promise<string>',
         description: 'Read one preset\'s composition text.',
         parameters: [{ name: 'id', description: 'the preset id.' }],
@@ -3711,6 +3717,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PrepareSessionOptions',
     declaration: 'export type PrepareSessionOptions = (CreateSessionOptions & {\n    readonly seedSource?: undefined;\n}) | RestoredSessionOptions;',
+  },
+  {
+    name: 'PresetComposition',
+    declaration: 'export interface PresetComposition {\n    readonly agentPreset: string;\n    readonly entries: readonly PresetCompositionEntry[];\n}',
+  },
+  {
+    name: 'PresetCompositionEntry',
+    declaration: 'export interface PresetCompositionEntry {\n    readonly entryId: string;\n    readonly moduleName: string;\n    readonly enabled: boolean;\n}',
   },
   {
     name: 'PresetOption',

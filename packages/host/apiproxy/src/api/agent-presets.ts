@@ -42,6 +42,16 @@ export interface AgentPresetEntry {
   readonly broken?: string
 }
 
+/** Plugin identities recorded for one session's mounted preset generation. */
+export interface AgentPresetCompositionView {
+  readonly agentPreset: string
+  readonly entries: readonly {
+    readonly entryId: string
+    readonly moduleName: string
+    readonly enabled: boolean
+  }[]
+}
+
 /** agent-preset-domain unary methods (the map key agentPreset.* of RpcMethodMap). */
 export interface AgentPresetsApi {
   /**
@@ -59,6 +69,14 @@ export interface AgentPresetsApi {
    */
   list(request: RpcRequest<{}>):
   Promise<RpcResponse<{ presets: readonly AgentPresetEntry[]; authorable: boolean; hasDocument: boolean }>>
+
+  /**
+   * Read the latest mounted composition recorded by one session, including a
+   * cold session without starting its agent. `null` means no composition
+   * event was recorded; current roster files are never used as a substitute.
+   */
+  composition(request: RpcRequest<{ sessionId: SessionId }>):
+  Promise<RpcResponse<{ composition: AgentPresetCompositionView | null; seq: number | null }>>
 
   /**
    * Recompose one session's agent from a different preset.

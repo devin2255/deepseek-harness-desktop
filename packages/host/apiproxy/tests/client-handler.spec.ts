@@ -96,6 +96,7 @@ function scriptedApi(overrides: {
     skills: { list: r => ok(r, { skills: [] }), ...overrides.skills },
     agentPresets: {
       list: r => ok(r, { presets: [], authorable: false, hasDocument: false }),
+      composition: r => ok(r, { composition: null, seq: null }),
       select: r => ok(r, { agentPreset: r.payload.agentPreset }),
       read: r => ok(r, { agentPreset: r.payload.agentPreset, trust: 'user' as const, content: '' }),
       copy: r => ok(r, { agentPreset: r.payload.agentPreset }),

@@ -54,6 +54,7 @@ export interface RpcMethodMap {
   'workspace.unarchiveSession': WorkspaceApi['unarchiveSession']
   'skill.list': SkillsApi['list']
   'agentPreset.list': AgentPresetsApi['list']
+  'agentPreset.composition': AgentPresetsApi['composition']
   'agentPreset.select': AgentPresetsApi['select']
   'agentPreset.read': AgentPresetsApi['read']
   'agentPreset.copy': AgentPresetsApi['copy']

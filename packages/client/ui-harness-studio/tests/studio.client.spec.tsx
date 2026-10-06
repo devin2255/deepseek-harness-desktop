@@ -35,6 +35,13 @@ function props(active = true, selected = true): HarnessStudioProps {
     listPlugins: vi.fn(async () => ({ entries: [
       { entryId: 'plugin-1' as never, moduleName: '@deepseek-ai/dsh-tools', enabled: true, fiberPhase: 'active' as const },
     ] })),
+    readComposition: vi.fn(async () => ({
+      composition: { agentPreset: 'standard', entries: [
+        { entryId: 'preset-1', moduleName: 'preset-tool', enabled: true },
+        { entryId: 'preset-2', moduleName: 'preset-disabled', enabled: false },
+      ] },
+      seq: 0,
+    })),
     back: vi.fn(),
     t: ((key: keyof typeof en) => en[key]) as HarnessStudioProps['t'],
   }
@@ -55,6 +62,8 @@ describe('Harness Studio', () => {
     expect(view.getByText('Be precise.')).toBeTruthy()
     expect(view.getByText('#4')).toBeTruthy()
     await waitFor(() => { expect(view.getByText('@deepseek-ai/dsh-tools')).toBeTruthy() })
+    await waitFor(() => { expect(view.getByText('preset-tool')).toBeTruthy() })
+    expect(view.getByText('preset-disabled')).toBeTruthy()
     expect(view.getByText(/current Loader inventory/)).toBeTruthy()
     fireEvent.click(view.getByRole('button', { name: 'Back to task' }))
     expect(p.back).toHaveBeenCalledOnce()
@@ -64,11 +73,13 @@ describe('Harness Studio', () => {
     const hidden = props(false)
     const first = render(<HarnessStudio {...hidden} />)
     expect(hidden.listPlugins).not.toHaveBeenCalled()
+    expect(hidden.readComposition).not.toHaveBeenCalled()
     first.unmount()
     const empty = props(true, false)
     const second = render(<HarnessStudio {...empty} />)
     expect(second.getByText('Select a task from the overview first.')).toBeTruthy()
     expect(empty.listPlugins).not.toHaveBeenCalled()
+    expect(empty.readComposition).not.toHaveBeenCalled()
   })
 
   it('labels missing recorded facts and an empty current Host inventory', async () => {
@@ -76,6 +87,7 @@ describe('Harness Studio', () => {
     p.useSessions = selector => selector({ byId: {} } as never)
     p.inspect = () => undefined
     p.listPlugins = vi.fn(async () => ({ entries: [] }))
+    p.readComposition = vi.fn(async () => ({ composition: null, seq: null }))
     const view = render(<HarnessStudio {...p} />)
     expect(view.getByText('No preset recorded for this session')).toBeTruthy()
     expect(view.getByText('No model request recorded yet')).toBeTruthy()
@@ -83,6 +95,7 @@ describe('Harness Studio', () => {
     expect(view.getByText('No system prompt in the latest request')).toBeTruthy()
     expect(view.getByText('No events in the loaded window')).toBeTruthy()
     await waitFor(() => { expect(view.getByText('No plugin entries')).toBeTruthy() })
+    expect(view.getByText('No preset plugin snapshot was recorded for this session')).toBeTruthy()
   })
 
   it('distinguishes disabled and unobserved current Host plugin entries', async () => {
@@ -121,5 +134,34 @@ describe('Harness Studio', () => {
     fireEvent.click(view.getByRole('button', { name: 'Retry' }))
     await waitFor(() => { expect(view.getByText('No plugin entries')).toBeTruthy() })
     expect(p.listPlugins).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a failed task composition read and distinguishes an empty recorded preset', async () => {
+    const p = props()
+    p.readComposition = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({
+      composition: { agentPreset: 'standard', entries: [] }, seq: 5,
+    })
+    const view = render(<HarnessStudio {...p} />)
+    await waitFor(() => { expect(view.getByText(/Could not read the task plugin record/)).toBeTruthy() })
+    fireEvent.click(view.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => { expect(view.getByText('This preset mounted no plugin entries')).toBeTruthy() })
+    expect(p.readComposition).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores composition results and errors after the page unmounts', async () => {
+    for (const outcome of ['resolve', 'reject'] as const) {
+      const p = props()
+      let settle!: () => void
+      p.readComposition = vi.fn(() => new Promise<Awaited<ReturnType<HarnessStudioProps['readComposition']>>>((resolve, reject) => {
+        settle = outcome === 'resolve'
+          ? () => { resolve({ composition: null, seq: null }) }
+          : () => { reject(new Error('offline')) }
+      }))
+      const view = render(<HarnessStudio {...p} />)
+      expect(p.readComposition).toHaveBeenCalledOnce()
+      view.unmount()
+      settle()
+      await Promise.resolve()
+    }
   })
 })

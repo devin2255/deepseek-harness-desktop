@@ -22,7 +22,7 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 已交付的感知任务后台生命周期会在最后一个窗口关闭后继续运行 Harness，并允许用户从原生托盘或第二次启动重建已授权窗口。Electron Main 轮询经过认证的 Task 与 Session 投影，只保留分离的展示值，并在唯一托盘摘要中报告实时或不可用的活动状态。新增的可操作注意事项、失败和完成状态转换会创建原生通知，其经过验证的 owner Session id 会通过现有客户端导航控制器处理。当活动任务仍在运行或状态不可用时，显式退出会提供继续后台运行、停止并退出或取消选项。[Host 崩溃恢复决策](../../implemented/bug-fix/2026-09-21-desktop-host-crash-recovery.md)会撤销死亡进程权限、要求显式重试，并投影冷态修复后的中断轮次，而不会重放未经确认的工具调用。
 
-安全的桌面基础、持久 Task 总览、应用拥有的根任务 worktree、审查与交付工作区、感知任务的后台驻留，以及 Host 异常恢复已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。[worktree 决策](../../implemented/feature/2026-09-09-application-owned-task-worktrees.md)记录默认隔离创建及其失败保证。子写入者整合、更完整的 Mission Control UI、Studio 中不可变的逐任务插件、权限和工作流快照、签名、更新和 macOS 分发仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
+安全的桌面基础、持久 Task 总览、应用拥有的根任务 worktree、审查与交付工作区、感知任务的后台驻留，以及 Host 异常恢复已经实现。基础提供受监管的 Harness 进程、启动范围的回环授权、沙箱 Renderer、有界生命周期，以及[桌面基础决策](../../implemented/architecture/2026-08-14-electron-desktop-foundation.md)中记录的已构建真实 Electron 验收路径。Task 服务定义负责品牌化的验收、风险和注意事项标识，全值 Session 事件，严格回放，比较并设置请求值，以及分离的列表投影。基于 Session 的 Provider 可重建冷态和实时根任务、保留连续的 subagent 祖先关系、聚合持久及按代次划分的注意事项、验证同一任务树中的证据，并串行执行比较并设置写入。Host 将 Agent 注册表和待回答问题注册表发布为同一份完整实时事实代次，通过 Host RPC 与两种 SDK 提供 Task 读取和变更，并把完整行变化传入可安全重连的客户端存储。[worktree 决策](../../implemented/feature/2026-09-09-application-owned-task-worktrees.md)记录默认隔离创建及其失败保证。Studio 记录逐任务 preset 插件身份；子写入者整合、更完整的 Mission Control UI、完整的权限与工作流快照、签名、更新和 macOS 分发仍是后续切片。产品领域状态继续留在 Electron Main 和 preload 之外。
 
 ## 产品结构
 
@@ -34,7 +34,7 @@ DeepSeek Harness 已提供持久 Session、Workspace、子 Agent、工作流、�
 
 第一版支持 Windows x64 和 macOS arm64 本地执行。云端执行、手机接力、SSH 主机、计算机控制、市场分发、团队共享和自动创建 Pull Request 不属于第一版。
 
-首版只读 Studio 从 Task 行进入，显示 Session 已记录的预设 id、最近模型请求、工具目录和已加载事件窗口。它通过只读客户端 service 获取 Trajectory 数据，并单独标示当前 Host 插件清单。这样不会用可变的 Loader 配置编造历史运行时状态；完整的逐任务插件与权限快照仍需要独立的持久事实生产方。
+只读 Studio 从 Task 行进入，显示 Session 已记录的预设 id、最近模型请求、工具目录、已加载事件窗口，以及从 agent 实际加入的常驻挂载捕获的插件身份。它通过只读客户端 service 获取 Trajectory 数据，通过可冷读的 Host 接口取得最近的组成事件；当前 Host 插件清单仍单独标示。这样不会用可变的 Loader 配置编造历史运行时状态。插件配置、依赖边、权限决策和工作流定义尚未构成完整的逐任务运行时记录。
 
 ## 曾考虑的替代方案
 

@@ -121,6 +121,17 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ### `agent-preset/*`
 
+<a id="agent-presetcomposed--log-only"></a>
+
+#### `agent-preset/composed` — log-only
+
+```ts persistence-catalog
+/** The preset generation joined when an agent was published. */
+'agent-preset/composed': PresetComposition
+```
+
+来源：[`packages/preset/agent-presets/src/session.ts:34`](../packages/preset/agent-presets/src/session.ts)
+
 <a id="agent-presetselected--log-only"></a>
 
 #### `agent-preset/selected` — log-only
@@ -132,10 +143,10 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
  * under, so a resumed or forked session rebuilds the same one instead of
  * the header's creation-time value.
  */
-'agent-preset/selected': { agentPreset: string }
+'agent-preset/selected': PresetComposition
 ```
 
-来源：[`packages/preset/agent-presets/src/session.ts:26`](../packages/preset/agent-presets/src/session.ts)
+来源：[`packages/preset/agent-presets/src/session.ts:41`](../packages/preset/agent-presets/src/session.ts)
 
 ### `approval/*`
 

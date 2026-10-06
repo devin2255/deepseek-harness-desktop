@@ -2841,6 +2841,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         authorable: true,
         hasDocument: true,
       }),
+      composition: request => ok(request, { composition: null, seq: null }),
       select: (request) => {
         fixtureDefaultPreset = request.payload.agentPreset
         return ok(request, { agentPreset: request.payload.agentPreset })
@@ -3350,6 +3351,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'workspace.unarchiveSession': return this.api.workspace.unarchiveSession(request)
       case 'skill.list': return this.api.skills.list(request)
       case 'agentPreset.list': return this.api.agentPresets.list(request)
+      case 'agentPreset.composition': return this.api.agentPresets.composition(request)
       case 'agentPreset.select': return this.api.agentPresets.select(request)
       case 'agentPreset.read': return this.api.agentPresets.read(request)
       case 'agentPreset.copy': return this.api.agentPresets.copy(request)

@@ -3490,6 +3490,28 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         })
       },
 
+      async composition(request) {
+        const { sessionId } = request.payload
+        try {
+          const source = await historySourceFor(sessionId)
+          const recorded = sourceSession(source).events.findLast(event =>
+            event.type === 'agent-preset/composed' || event.type === 'agent-preset/selected')
+          return ok(request, {
+            composition: recorded?.data ?? null,
+            seq: recorded?.seq ?? null,
+          })
+        } catch (error: unknown) {
+          if (error instanceof SessionNotFound) {
+            return err(request, { code: 'session-not-found', message: error.message, details: { sessionId } })
+          }
+          return err(request, {
+            code: 'internal',
+            message: `composition unavailable for session "${sessionId}": ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
       // Recomposing is limited to a blank session because a started
       // conversation's history was produced under its preset's tools; the
       // agent and the session survive, only the composition is swapped.
@@ -3520,7 +3542,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             const preset = await presets.recompose(agent.ctx, agentPreset)
             // Recorded only after the swap committed: the log states what the
             // agent runs, and a rejected mount leaves the previous composition.
-            agent.session.append('agent-preset/selected', { agentPreset: preset.id })
+            const composition = presets.composition(agent.ctx)
+            if (composition === undefined) throw new Error(`preset "${preset.id}" was not joined after recomposition`)
+            agent.session.append('agent-preset/selected', composition)
             return ok(request, { agentPreset: preset.id })
           } catch (error: unknown) {
             const refused = presetFailure(request, error)

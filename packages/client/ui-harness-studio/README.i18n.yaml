@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-harness-studio/README.md
-README.md: 066b53f4277903fdabca4ca4125103af80dd5d35
-README.zh.md: 98f2eabdcf16a2bae45afa1598eca5fd00c2b8e3
+README.md: 207bf4f55c5f0b4fa32c6905ad272fa8b748c892
+README.zh.md: 31e595809e3ac70975ae433bba298771f57a0cd5
