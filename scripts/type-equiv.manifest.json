@@ -2,6 +2,26 @@
   "comment": "Maps each primary ` ```ts type-equiv ` or ` ```ts public-api ` block (by doc + declared symbol + projection) to the source declaration and original JSDoc it must match. Paired `.zh.md` blocks are byte-identical derivatives checked through their unsuffixed sibling and have no duplicate entry. Omit projection for the complete declaration; use public-api with a ` ```ts public-api ` block for a body-stripped public class declaration. verify-type-equiv.ts enforces a 1:1 correspondence between primary blocks and entries. Add an entry when you add a primary source-equivalence block; remove it when you remove the block.",
   "entries": [
     {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "SubagentWorktreeData",
+      "source": "packages/subagent/subagent-spawn-in-process/src/worktree.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "InProcessRunOptions",
+      "source": "packages/subagent/subagent-in-process-driver/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "PreparedInProcessChild",
+      "source": "packages/subagent/subagent-in-process-driver/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "CreateTaskWorktreeRequest",
+      "source": "packages/task/task-worktree/src/types.ts"
+    },
+    {
       "doc": "docs/subsystems/core.md",
       "symbol": "Branded",
       "source": "packages/util/brand/src/index.ts"

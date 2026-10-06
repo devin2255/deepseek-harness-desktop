@@ -753,6 +753,9 @@ importers:
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:*
         version: link:../packages/core/system-prompt
+      '@deepseek-ai/dsh-task-review-local':
+        specifier: workspace:*
+        version: link:../packages/task/task-review-local
       '@deepseek-ai/dsh-task-session':
         specifier: workspace:*
         version: link:../packages/task/task-session
@@ -7623,6 +7626,9 @@ importers:
       '@deepseek-ai/dsh-bash-local':
         specifier: workspace:^
         version: link:../../shell/bash-local
+      '@deepseek-ai/dsh-fs-sandbox':
+        specifier: workspace:^
+        version: link:../../fs/fs-sandbox
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
@@ -7632,9 +7638,15 @@ importers:
       '@deepseek-ai/dsh-llm-deepseek':
         specifier: workspace:^
         version: link:../../llm/llm-deepseek
+      '@deepseek-ai/dsh-sandbox-policy':
+        specifier: workspace:^
+        version: link:../../sandbox/sandbox-policy
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: workspace:^
+        version: link:../../session/session-persistence-jsonl
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:^
         version: link:../subagent
@@ -7644,12 +7656,39 @@ importers:
       '@deepseek-ai/dsh-subprocess-local':
         specifier: workspace:^
         version: link:../../subprocess/subprocess-local
+      '@deepseek-ai/dsh-task':
+        specifier: workspace:^
+        version: link:../../task/task
+      '@deepseek-ai/dsh-task-review':
+        specifier: workspace:^
+        version: link:../../task/task-review
+      '@deepseek-ai/dsh-task-review-local':
+        specifier: workspace:^
+        version: link:../../task/task-review-local
+      '@deepseek-ai/dsh-task-session':
+        specifier: workspace:^
+        version: link:../../task/task-session
+      '@deepseek-ai/dsh-task-worktree':
+        specifier: workspace:^
+        version: link:../../task/task-worktree
+      '@deepseek-ai/dsh-task-worktree-local':
+        specifier: workspace:^
+        version: link:../../task/task-worktree-local
       '@deepseek-ai/dsh-tool-bash':
         specifier: workspace:^
         version: link:../../shell/tool-bash
+      '@deepseek-ai/dsh-tool-fs':
+        specifier: workspace:^
+        version: link:../../fs/tool-fs
       '@deepseek-ai/dsh-tool-subagent':
         specifier: workspace:^
         version: link:../tool-subagent
+      '@deepseek-ai/dsh-user-approval':
+        specifier: workspace:^
+        version: link:../../interaction/user-approval
+      '@deepseek-ai/dsh-workspace':
+        specifier: workspace:^
+        version: link:../../workspace/workspace
 
   packages/subagent/tool-subagent:
     dependencies:

@@ -11,7 +11,7 @@
 驱动器按以下顺序运行：
 
 1. 校验父 agent 深度和可选的绝对 `maxDepth`，然后把子 agent 深度推导为父 agent 深度加一，并将其持久化到子 agent 会话 header。
-2. 直接调用 `parent.ctx.agents.create`，把必需的请求信号传入工厂的创建事务。
+2. 捕获父级元数据、路由和策略，等待可选的提供方准备，再调用 `parent.ctx.agents.create` 并传入必需的请求信号。
 3. 在该事务未发布的设置窗口中，安装请求的 persona、工具限制和结构化输出运行时。
 4. 发布子 agent，保留返回的 `AgentHandle`，并通过先调用 `child.followup(prompt)`、再调用 `child.whenIdle()` 来驱动一项任务。
 5. 从完整的自有子运行中读取子 agent 自身的输出——最后一条非空 assistant 消息（记录 usage 的空内容消息会被跳过），若没有这类消息则取其累积的 assistant 文本——以及最终持久化的轮次原因，并排除任何 fork 初始内容。
@@ -20,7 +20,7 @@
 
 该结果边界成立，是因为提供方拥有从发布到完全停稳的隔离子 agent 生命周期。在该生命周期内提交的 steering（中途引导）属于子运行；提供方不会声称输出只归初始 follow-up 所有。
 
-驱动器通过共享的子 agent 辅助函数应用该 seam 的[委派策略](../subagent/README.md#delegated-policy)：它会在创建子 agent 前捕获父级的显式沙箱覆盖项与 `'never'` 审批钉定，并在未发布的设置阶段追加带来源标记的事件，使其位于所有 fork 历史之后、会话发布之前。参见[委派策略决策](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md)。
+驱动器通过共享的子 agent 辅助函数应用该 seam 的[委派策略](../subagent/README.md#delegated-policy)：它在准备前捕获部署选择的委派策略和父级显式覆盖项，然后在未发布的设置阶段追加已捕获或显式准备的带来源标记事件，使其位于所有 fork 历史之后、会话发布之前。参见[委派策略决策](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md)。
 
 ## 取消与所有权
 
@@ -30,7 +30,7 @@
 
 ## spawn 与 fork 输入
 
-`InProcessRunOptions` 的形态为 `{ seed?: SessionEvent[] }`。spawn 省略该值。fork 提供已配平的已完成轮次前缀，并记录其长度，确保结果读取器不会把作为初始内容的父 agent 消息误认为子 agent 输出。
+`InProcessRunOptions` 接受已完成轮次 `seed` 和可选的提供方所有 `prepare(sessionId)` 能力。fork 提供已配平前缀并记录长度，确保结果读取器不会把作为初始内容的父 agent 消息误认为子 agent 输出。隔离 spawn 准备接收预留的子 agent id，返回精确 cwd、已捕获委派策略和未发布设置。元数据、模型路由和普通委派策略都在等待准备之前捕获。准备失败或取消不会发布子 agent；外部恢复数据仍由提供方负责。
 
 深度强制在 `startInProcessRun` 内部完成：它通过 `delegationDepthOf` 读取父 agent 深度（持久化的 `SessionHeader.delegationDepth` 具有权威性；运行时 `AgentOptions.subagentDepth` 可以加深但绝不能降低该值，因此恢复后的子 agent 会保留预算），缺失值按顶层深度零处理，拒绝格式错误的存储值，并报告尝试的子 agent 深度超过 `maxDepth`。超过安全整数范围、无法表示的深度会触发 `RangeError`。子 agent 深度写入子 agent header，因此会在持久化和恢复后保留。
 

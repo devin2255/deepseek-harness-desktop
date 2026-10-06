@@ -8,6 +8,10 @@ The spawn provider creates a fresh child `Agent` in the current process. The chi
 
 `start(request)` delegates to [`startInProcessRun`](../subagent-in-process-driver/README.md) with no seed and awaits publication before returning. The child receives parent working-directory/session lineage and inherits the parent model unless overridden, but starts with an empty conversation.
 
+With `workspaceMode: isolated-worktree`, only a writable root Task executing in its recorded managed worktree may delegate. The provider requires Task, worktree, review, sandbox-policy, and approval services, inspects a clean committed integration baseline, and creates a distinct branch and directory with the child's reserved Session id. A moved HEAD or dirty source rejects creation. The child records its execution assignment before publication, uses that directory as its immutable cwd, and receives `workspace-write` with approval `never`, even when the root has full access. Ordinary shared children retain the deployment's delegation policy.
+
+`subagent/worktree-assigned` is model-hidden execution data; `foldSubagentWorktree` strictly decodes its unique assignment for cold inspection. Creation failures and cancellation preserve any created checkout for explicit recovery rather than deleting it. The holder still owns the published Agent lifecycle, not automatic worktree cleanup.
+
 The shared driver owns depth checking, persona and tool-filter setup, structured output, required-signal cancellation, one-shot execution, result reading, and quiescent disposal. A startup rejection leaves no published child; provider unload after fulfillment does not revoke the holder-owned run.
 
 ## Capabilities
@@ -19,6 +23,7 @@ Spawn advertises `{ outputSchema: true, depthLimit: true, toolFilter: true, pers
 | Key | Meaning |
 |---|---|
 | `providerName` | Registry name on `ctx.subagents` (default `spawn`). |
+| `workspaceMode` | `shared` (default), or `isolated-worktree` for a one-shot writer. |
 
 ## Model Experience
 
@@ -53,3 +58,4 @@ Append-only; newly visible content follows the reusable request prefix and does 
 ## Known Limitations and Deferred Work
 
 - **Fresh means no parent transcript** — the child inherits cwd, lineage, model, and explicitly configured persona/tool restrictions, but none of the parent's conversation; use the fork provider when completed-turn context is required.
+- **Isolated writers are one-shot** — they expose no continuation preparation. Cold assignment inspection is supported; continuable writing, explicit integration, conflict resolution, and orphan recovery are not implemented. This option is not enabled in the desktop's shipped tool roster.

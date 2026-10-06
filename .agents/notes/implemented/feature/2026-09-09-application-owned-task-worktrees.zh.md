@@ -42,4 +42,6 @@ Host 进行幂等重试时，先读取持久 Task 行，验证匹配的 Task 与
 
 ## 验证
 
+独立配置的[隔离写入准备](2026-10-06-isolated-subagent-writer-preparation.md) 消费此 worktree 能力，从捕获的干净集成 HEAD 创建子执行。根任务创建和持久根所有权保留此决策的独立规则。
+
 提供方测试使用一次性真实 Git 仓库，覆盖干净与脏源目录、并行创建、不受支持的布局、空间不足、目标占用、检查发现身份不一致和失败保留。Host 测试覆盖显式隔离、幂等复用、能力缺失、预检失败、Session 失败和持久分配记录。Task、客户端、TypeScript SDK 与 Python SDK 测试覆盖严格回放与字段投影。浏览器组装测试通过生产插件清单创建隔离的 fixture Task。真实 Electron 验收从同一个一次性 Git 仓库创建两个隔离 Session，检查不同路径与分支、确认干净源目录不变，然后重载 Renderer 并比较两份持久分配。

@@ -9,6 +9,7 @@ import type {
 } from './types.ts'
 
 export * from './types.ts'
+export { decodeTaskWorktreeAssignment } from './assignment.ts'
 
 /** Machine-routable Task worktree failure. */
 export class TaskWorktreeError extends Error {
@@ -42,7 +43,7 @@ export abstract class TaskWorktreeService extends Service {
 
   /**
    * Create one application-owned integration worktree without changing the source checkout.
-   * @param request - Task identity and registered source Workspace.
+   * @param request - Session identity, source Workspace, and optional captured-HEAD or cleanliness requirements.
    * @param signal - Optional cancellation of inspection and Git execution.
    * @returns Complete assignment facts suitable for durable Session logging.
    */

@@ -15,20 +15,27 @@ import type {
   SubagentProvider,
 } from '@deepseek-ai/dsh-subagent'
 import { startInProcessRun } from '@deepseek-ai/dsh-subagent-in-process-driver'
+import { isolatedWriterOptions } from './worktree.ts'
+
+export { foldSubagentWorktree } from './worktree.ts'
+export type { SubagentWorktreeData } from './worktree.ts'
 
 export const name = 'subagent-spawn-in-process'
 // `tools` is deliberately not injected: the child factory already provides it during setup,
 // and adding it here would unnecessarily change this provider's apply timing.
 export const inject = ['subagents']
 
-/** Config: the registry name to register the provider under. */
+/** Spawn Provider registry identity and execution-directory choice. */
 export interface Config {
   /** Provider name on `ctx.subagents` (default `spawn`). */
   providerName: string
+  /** Shared parent directory, or a distinct one-shot writer worktree (default `shared`). */
+  workspaceMode?: 'shared' | 'isolated-worktree'
 }
 
 export const Config: z<Config> = z.object({
   providerName: z.string().default('spawn'),
+  workspaceMode: z.union(['shared', 'isolated-worktree']).default('shared'),
 })
 
 /**
@@ -43,22 +50,22 @@ class SpawnInProcessProvider implements SubagentProvider {
   // Context contract: a spawned child starts fresh — it never sees the parent conversation.
   readonly inheritsParentContext = false
 
-  constructor(readonly name: string) {}
+  readonly prepareContinuable?: () => Promise<ContinuableCreateSpec>
+
+  constructor(readonly name: string, private readonly workspaceMode: 'shared' | 'isolated-worktree') {
+    if (workspaceMode === 'shared') this.prepareContinuable = () => Promise.resolve({})
+  }
 
   start(request: ResolvedSubagentStartRequest) {
     // Fresh child: no seed. The shared driver mints ids, stamps cwd/lineage/
     // depth, drives the one-shot (including the structured capture when the
     // request carries an outputSchema), and maps the result.
-    return startInProcessRun(request, {})
-  }
-
-  prepareContinuable(): Promise<ContinuableCreateSpec> {
-    // A spawned child starts fresh, so it contributes no seed; the continuation
-    // manager owns every later operation on it.
-    return Promise.resolve({})
+    return startInProcessRun(request, this.workspaceMode === 'shared'
+      ? {}
+      : isolatedWriterOptions(request.parent, request.signal))
   }
 }
 
 export function apply(ctx: Context, config: Config): void {
-  ctx.subagents.registerProvider(new SpawnInProcessProvider(config.providerName))
+  ctx.subagents.registerProvider(new SpawnInProcessProvider(config.providerName, config.workspaceMode ?? 'shared'))
 }

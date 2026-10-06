@@ -11,7 +11,7 @@ This package is the shared run driver for the two in-process providers. Spawn pa
 The driver follows this sequence:
 
 1. Validate the parent depth and optional absolute `maxDepth`, then derive child depth as parent depth plus one and persist it in the child session header.
-2. Call `parent.ctx.agents.create` directly, passing the required request signal into the factory's creation transaction.
+2. Capture parent metadata, routing, and policies, await optional provider preparation, then call `parent.ctx.agents.create` with the required request signal.
 3. During that transaction's unpublished setup window, install the requested persona, tool restriction, and structured-output runtime.
 4. Publish the child, retain the returned `AgentHandle`, and drive one task with `child.followup(prompt)` followed by `child.whenIdle()`.
 5. Read the child's own output — its last non-empty assistant message (an empty-content message that records usage is skipped), or its accumulated assistant text when no such message exists — and the final durable turn reason from the complete owned child run, excluding any fork seed.
@@ -20,7 +20,7 @@ The child gets the parent's working-directory/session lineage and inherits the p
 
 This result boundary is valid because the provider owns an isolated child lifecycle from publication through quiescence. Steering submitted during that lifecycle belongs to the child run; the provider does not pretend the initial follow-up alone owns its output.
 
-The driver applies the seam's [delegated policy](../subagent/README.md#delegated-policy) through the shared child-agent helpers: it captures the parent's explicit sandbox override and the `'never'` approval pin before child creation and appends the source-tagged events during unpublished setup, after any fork history and before session publication. See the [delegation-policy decision](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md).
+The driver applies the seam's [delegated policy](../subagent/README.md#delegated-policy) through the shared child-agent helpers: it captures the deployment-selected delegation policy and parent's explicit overrides before preparation, then appends the captured or explicitly prepared source-tagged events during unpublished setup, after any fork history and before session publication. See the [delegation-policy decision](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md).
 
 ## Cancellation and ownership
 
@@ -30,7 +30,7 @@ After fulfillment, the caller owns the run. Provider-plugin unload does not revo
 
 ## Spawn and fork inputs
 
-`InProcessRunOptions` is `{ seed?: SessionEvent[] }`. Spawn omits it. Fork supplies a balanced completed-turn prefix and records its length so the result reader never mistakes a seeded parent message for child output.
+`InProcessRunOptions` accepts a completed-turn `seed` and an optional provider-owned `prepare(sessionId)` capability. Fork supplies a balanced prefix and records its length so the result reader never mistakes a seeded parent message for child output. Isolated spawn preparation receives the reserved child id and returns an exact cwd, captured delegated policies, and unpublished setup. Metadata, model route, and ordinary delegation policies are captured before awaiting preparation. A failed or cancelled preparation publishes no child; external recovery data remains the provider's responsibility.
 
 Depth enforcement is internal to `startInProcessRun`: it reads the parent depth via `delegationDepthOf` (the persisted `SessionHeader.delegationDepth` is authoritative; runtime `AgentOptions.subagentDepth` may deepen but never lower it, so a resumed child keeps its budget), treats absence as top-level depth zero, rejects malformed stored values, and reports an attempted child depth above `maxDepth`. An unrepresentable depth above the safe-integer domain is a `RangeError`. The child depth is written to the child header, so it survives persistence and resume.
 

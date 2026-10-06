@@ -8,6 +8,44 @@ Service Definition：[dsh-subagent](../../packages/subagent/subagent)（`ctx.sub
 
 源码：[`packages/subagent/subagent/src/types.ts`](../../packages/subagent/subagent/src/types.ts)、[`packages/subagent/subagent/src/index.ts`](../../packages/subagent/subagent/src/index.ts)和 [`packages/subagent/subagent/src/continuation.ts`](../../packages/subagent/subagent/src/continuation.ts)
 
+<a id="isolated-in-process-execution"></a>
+
+## 隔离的进程内执行
+
+[spawn Provider](../../packages/subagent/subagent-spawn-in-process/README.md) 可以在发布子 agent 前准备独立的单次写入 worktree。`subagent/worktree-assigned` 属于子 agent 自身日志，不包含 fork 初始内容，并记录根集成所有者。`foldSubagentWorktree` 拒绝重复或畸形分配；Provider 不变量在追加或恢复发布前验证实际 Session id、父级、来源和 cwd。
+
+```ts type-equiv
+/** Recorded link from one isolated writer to its root integration worktree. */
+interface SubagentWorktreeData {
+  readonly parentTaskId: SessionId
+  readonly assignment: TaskWorktreeAssignment
+}
+```
+
+[共享驱动器](../../packages/subagent/subagent-in-process-driver/README.md) 在等待可选准备前捕获父级元数据、模型路由和普通委派策略。返回的执行输入仅适用于该未发布子 agent。准备拒绝或取消不会发布子 agent；任何外部恢复数据仍由 Provider 负责。
+
+```ts type-equiv
+/** Extra inputs the spawn and fork providers supply to the shared driver. */
+interface InProcessRunOptions {
+  /** Completed-turn seed for fork, or undefined for a fresh spawn. */
+  readonly seed?: SessionEvent[]
+  /** Prepare an owned execution directory before the child factory is entered. */
+  readonly prepare?: (sessionId: SessionId) => Promise<PreparedInProcessChild>
+}
+```
+
+```ts type-equiv
+/** Provider-owned execution inputs prepared for one unpublished child. */
+interface PreparedInProcessChild {
+  /** Exact execution directory persisted in the child's Session header. */
+  readonly cwd: string
+  /** Policy captured by the provider before preparation starts. */
+  readonly policies: DelegatedPolicyOverrides
+  /** Append the provider's execution facts inside the unpublished creation transaction. */
+  readonly setup: (childCtx: Context) => void
+}
+```
+
 ## 两类能力，两种发现方式
 
 提供方通过一个静态描述符公布其**启动时**功能，服务会在单次 run 存在之前即行检查；如果请求依赖提供方不具备的功能，会被明确拒绝（`SubagentError('UNSUPPORTED_CAPABILITY')`），绝不会被接受后静默忽略。这些 flag 仅描述单次 [`start()`](#the-provider-contract-subagentprovider) 路径，即由提供方组合子 agent 的路径。**可继续**子 agent 由继续执行管理器自行组合，因此它们由唯一一个可选方法把关，方法存在即为能力，并以 TypeScript 的类型收窄作为发现机制：[`SubagentProvider.prepareContinuable`](#the-provider-contract-subagentprovider)。

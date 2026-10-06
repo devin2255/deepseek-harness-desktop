@@ -30,6 +30,8 @@ New desktop spawn, fork, nested, and continuable children can inspect shared tas
 
 Child-writer worktrees, explicit Integration nodes, and conflict attention remain required product work. This decision does not make parallel writing available and must not be used to present the broader mission-control proposal as complete. Out-of-process providers retain their own deployment policy.
 
+The separately configured [isolated writer preparation](2026-10-06-isolated-subagent-writer-preparation.md) provides one-shot execution in child worktrees without changing this shared-child default. Its explicit authority and durable execution record do not replace this delegation decision.
+
 ## Verification
 
 Policy tests pin both delegation choices, parent immutability, omitted defaults, and load-time rejection of unsupported settings. Real filesystem tests deny writes from unswitched, workspace-write, and full-access parents and override writable fork history. Continuation tests retain the recorded policy through persistence and cold resume. The desktop bundle test checks the shipped patch, and keyless Loader snapshots pin both parent-only inheritance and deployment-selected read-only children under a writable root, including an externally verified absent output file.

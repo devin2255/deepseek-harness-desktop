@@ -49,6 +49,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'step/end',
   'step/start',
   'subagent/descriptor',
+  'subagent/worktree-assigned',
   'task/criterion-updated',
   'task/defined',
   'task/review-applied',

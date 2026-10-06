@@ -42,4 +42,6 @@ This slice creates and verifies root-task worktrees only. It does not create sep
 
 ## Verification
 
+The separately configured [isolated writer preparation](2026-10-06-isolated-subagent-writer-preparation.md) consumes this worktree capability for child execution from a captured clean integration HEAD. Root-task creation and durable root ownership retain this decision's independent rules.
+
 Provider tests use disposable real Git repositories to cover clean and dirty sources, parallel creation, unsupported layouts, insufficient space, occupied targets, inspection divergence, and failure preservation. Host tests cover explicit isolation, idempotent reuse, missing capabilities, preflight failures, Session failures, and durable assignment recording. Task, client, TypeScript SDK, and Python SDK tests cover strict replay and field projection. The assembled browser test creates an isolated fixture Task through the production plugin roster. The real Electron acceptance creates two isolated Sessions from one disposable Git repository, checks distinct paths and branches, verifies the unchanged clean source, then reloads the Renderer and compares both durable assignments.

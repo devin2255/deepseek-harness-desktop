@@ -11,6 +11,7 @@
  * - `FAKE_STATUS`: the `session.finished` status (default `ok`).
  * - `FAKE_REASON_KIND`: the `session.finished` reason kind (default `completed`; `none` omits the reason).
  * - `FAKE_SUBAGENT`: also emit a child session (subagent.started + child event + subagent.finished).
+ * - `FAKE_WRITER_ASSIGNMENT`: with `FAKE_SUBAGENT`, emit the JSON file's child execution assignment.
  * - `FAKE_ECHO_CWD`: prefix the assistant text with the process cwd.
  * - `FAKE_ECHO_ENV`: comma-separated env names to echo as `name=value` lines in the assistant text.
  * - `FAKE_MALFORMED`: `initialize` returns `{}` (no serverInfo); `prompt` returns `{}` (no accepted).
@@ -47,7 +48,7 @@
  *   their malformed counterpart.
  */
 
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
 import { createInterface } from 'node:readline'
 
@@ -133,6 +134,9 @@ function runTurn(sessionId: string): void {
   if (env.FAKE_SUBAGENT !== undefined) {
     const childId = `${sessionId}-child`
     notify('subagent.started', { parentSessionId: sessionId, childSessionId: childId })
+    if (env.FAKE_WRITER_ASSIGNMENT !== undefined) {
+      event(childId, 'subagent/worktree-assigned', JSON.parse(readFileSync(env.FAKE_WRITER_ASSIGNMENT, 'utf8')) as object)
+    }
     event(childId, 'assistant/message', {
       turn: 0,
       step: 0,

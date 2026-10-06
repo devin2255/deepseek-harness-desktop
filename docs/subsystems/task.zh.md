@@ -10,6 +10,25 @@ Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个�
 
 证据指向一个确切的 `(sessionId, seq)` 事件。此包校验其序列化字段；Session Provider 在接受变更前校验该事件存在于同一根任务树中。
 
+## 执行 worktree
+
+[`TaskWorktreeService`](../../packages/task/task-worktree/README.md) 将应用所有的 worktree 分配给执行 Session id：根集成 Session 和隔离写入子 agent 使用同一分配格式，但不会把子 agent 变成根 Task。`decodeTaskWorktreeAssignment` 校验并分离记录数据，但不验证实时 Git 注册；复用必须经过 Provider 的 `inspect` 操作。
+
+```ts type-equiv
+/** Inputs required to create one application-owned execution worktree. */
+interface CreateTaskWorktreeRequest {
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly workspacePath: string
+  /** Reject creation if the source HEAD differs from this captured commit. */
+  readonly expectedSourceHead?: string
+  /** Reject creation when the source has staged, unstaged, or untracked changes. */
+  readonly requireCleanSource?: boolean
+}
+```
+
+[本地 Provider](../../packages/task/task-worktree-local/README.md) 在创建分支或目录之前，用 `WORKTREE_SOURCE_MOVED` 拒绝与捕获 HEAD 不符的源，用 `WORKTREE_SOURCE_DIRTY` 拒绝有更改且要求干净的源。省略这些可选要求时，根任务创建仍基于源的已提交 HEAD，不复制未提交内容。
+
 ## 投影值
 
 `TaskSnapshot` 是 Provider、Host 与客户端共享的分离全行值，其中包括根 Session id、可选源 Workspace id、可选完整 `executionWorkspace`、所属后代 id、持久任务事实与交付收据、派生状态、注意事项、实时数据新鲜度、更新时间，以及用于比较并设置变更的根 Session 序号。应用重启后即使瞬态成员关系不可用，持久 Worktree 分配仍决定投影的 Workspace 标识。`TaskListSnapshot` 建立一个运行时 generation 的有序基线；`TaskListChange` 携带同一 generation 的全行更新与移除项。
@@ -191,7 +210,7 @@ Service Definition for Task-specific execution worktrees.
 ```ts cordis-catalog
 /**
  * Create one application-owned integration worktree without changing the source checkout.
- * @param request - Task identity and registered source Workspace.
+ * @param request - Session identity, source Workspace, and optional captured-HEAD or cleanliness requirements.
  * @param signal - Optional cancellation of inspection and Git execution.
  * @returns Complete assignment facts suitable for durable Session logging.
  */
@@ -207,5 +226,5 @@ abstract create( request: CreateTaskWorktreeRequest, signal?: AbortSignal, ): Pr
 abstract inspect( assignment: TaskWorktreeAssignment, signal?: AbortSignal, ): Promise<TaskWorktreeAvailability>
 ```
 
-Source: [`packages/task/task-worktree/src/index.ts:38`](../../packages/task/task-worktree/src/index.ts)
+Source: [`packages/task/task-worktree/src/index.ts:39`](../../packages/task/task-worktree/src/index.ts)
 <!-- END GENERATED cordis-surface -->

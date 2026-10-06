@@ -717,6 +717,17 @@ Source: [`packages/core/session/src/types.ts:254`](../packages/core/session/src/
 
 Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
 
+<a id="subagentworktree-assigned--log-only"></a>
+
+#### `subagent/worktree-assigned` — log-only
+
+```ts persistence-catalog
+/** Model-hidden, immutable execution assignment appended before writer publication. */
+'subagent/worktree-assigned': SubagentWorktreeData
+```
+
+Source: [`packages/subagent/subagent-spawn-in-process/src/worktree.ts:22`](../packages/subagent/subagent-spawn-in-process/src/worktree.ts)
+
 ### `task/*`
 
 <a id="taskcriterion-updated--log-only"></a>

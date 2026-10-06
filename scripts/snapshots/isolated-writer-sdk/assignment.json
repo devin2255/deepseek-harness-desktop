@@ -1,0 +1,16 @@
+{
+  "parentTaskId": "parent-1",
+  "assignment": {
+    "kind": "git-worktree",
+    "taskId": "parent-1-child",
+    "workspaceId": "workspace",
+    "sourcePath": "D:\\harness\\integration",
+    "path": "D:\\harness\\writer",
+    "branch": "dsh/task-0123456789abcdef01234567",
+    "baseCommit": "1111111111111111111111111111111111111111",
+    "sourceHead": "1111111111111111111111111111111111111111",
+    "sourceDirty": false,
+    "sourceStatusDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "createdAt": 1
+  }
+}

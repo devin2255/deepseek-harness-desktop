@@ -1876,7 +1876,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'abstract create( request: CreateTaskWorktreeRequest, signal?: AbortSignal, ): Promise<TaskWorktreeAssignment>',
         description: 'Create one application-owned integration worktree without changing the source checkout.',
-        parameters: [{ name: 'request', description: 'Task identity and registered source Workspace.' }, { name: 'signal', description: 'Optional cancellation of inspection and Git execution.' }],
+        parameters: [{ name: 'request', description: 'Session identity, source Workspace, and optional captured-HEAD or cleanliness requirements.' }, { name: 'signal', description: 'Optional cancellation of inspection and Git execution.' }],
         returns: 'Complete assignment facts suitable for durable Session logging.',
       },
       {
@@ -3110,7 +3110,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreateTaskWorktreeRequest',
-    declaration: 'export interface CreateTaskWorktreeRequest {\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly workspacePath: string;\n}',
+    declaration: 'export interface CreateTaskWorktreeRequest {\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly workspacePath: string;\n    readonly expectedSourceHead?: string;\n    readonly requireCleanSource?: boolean;\n}',
   },
   {
     name: 'CredentialInfo',
@@ -4610,7 +4610,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskWorktreeErrorCode',
-    declaration: 'export type TaskWorktreeErrorCode = \'WORKTREE_NOT_GIT\' | \'WORKTREE_NESTED_REPOSITORY\' | \'WORKTREE_UNBORN_HEAD\' | \'WORKTREE_INSUFFICIENT_SPACE\' | \'WORKTREE_TARGET_OCCUPIED\' | \'WORKTREE_BRANCH_OCCUPIED\' | \'WORKTREE_GIT_FAILED\' | \'WORKTREE_UNAVAILABLE\';',
+    declaration: 'export type TaskWorktreeErrorCode = \'WORKTREE_NOT_GIT\' | \'WORKTREE_NESTED_REPOSITORY\' | \'WORKTREE_UNBORN_HEAD\' | \'WORKTREE_INSUFFICIENT_SPACE\' | \'WORKTREE_TARGET_OCCUPIED\' | \'WORKTREE_BRANCH_OCCUPIED\' | \'WORKTREE_GIT_FAILED\' | \'WORKTREE_UNAVAILABLE\' | \'WORKTREE_SOURCE_MOVED\' | \'WORKTREE_SOURCE_DIRTY\';',
   },
   {
     name: 'TerminalBackend',

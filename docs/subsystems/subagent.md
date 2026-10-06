@@ -8,6 +8,44 @@ Service Definition: [dsh-subagent](../../packages/subagent/subagent) (`ctx.subag
 
 Sources: [`packages/subagent/subagent/src/types.ts`](../../packages/subagent/subagent/src/types.ts), [`packages/subagent/subagent/src/index.ts`](../../packages/subagent/subagent/src/index.ts), and [`packages/subagent/subagent/src/continuation.ts`](../../packages/subagent/subagent/src/continuation.ts)
 
+<a id="isolated-in-process-execution"></a>
+
+## Isolated in-process execution
+
+The [spawn Provider](../../packages/subagent/subagent-spawn-in-process/README.md) can prepare an independent one-shot writer worktree before child publication. `subagent/worktree-assigned` belongs to the child's own log, excludes fork seeds, and identifies its root integration owner. `foldSubagentWorktree` rejects repeated or malformed assignments; the Provider invariant verifies the actual Session id, parent, origin, and cwd before append or restored publication.
+
+```ts type-equiv
+/** Recorded link from one isolated writer to its root integration worktree. */
+interface SubagentWorktreeData {
+  readonly parentTaskId: SessionId
+  readonly assignment: TaskWorktreeAssignment
+}
+```
+
+The [shared driver](../../packages/subagent/subagent-in-process-driver/README.md) captures parent metadata, model routing, and ordinary delegated policies before awaiting optional preparation. The returned execution inputs apply only to that unpublished child. Preparation rejection or cancellation publishes no child; the Provider retains responsibility for any external recovery data.
+
+```ts type-equiv
+/** Extra inputs the spawn and fork providers supply to the shared driver. */
+interface InProcessRunOptions {
+  /** Completed-turn seed for fork, or undefined for a fresh spawn. */
+  readonly seed?: SessionEvent[]
+  /** Prepare an owned execution directory before the child factory is entered. */
+  readonly prepare?: (sessionId: SessionId) => Promise<PreparedInProcessChild>
+}
+```
+
+```ts type-equiv
+/** Provider-owned execution inputs prepared for one unpublished child. */
+interface PreparedInProcessChild {
+  /** Exact execution directory persisted in the child's Session header. */
+  readonly cwd: string
+  /** Policy captured by the provider before preparation starts. */
+  readonly policies: DelegatedPolicyOverrides
+  /** Append the provider's execution facts inside the unpublished creation transaction. */
+  readonly setup: (childCtx: Context) => void
+}
+```
+
 ## Two kinds of capability, discovered two ways
 
 A provider advertises its **start-time** features on a static descriptor the service checks BEFORE a one-shot run exists; a request that needs one the provider lacks is rejected loud (`SubagentError('UNSUPPORTED_CAPABILITY')`), never accepted-then-ignored. Those flags describe only the one-shot [`start()`](#the-provider-contract-subagentprovider) path, where the provider composes the child. **Continuable** children are composed by the continuation manager itself, so they are gated by one optional method whose presence IS the capability, with TS narrowing as the discovery mechanism: [`SubagentProvider.prepareContinuable`](#the-provider-contract-subagentprovider).

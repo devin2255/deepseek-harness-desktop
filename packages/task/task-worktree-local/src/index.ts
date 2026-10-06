@@ -193,9 +193,15 @@ export class LocalTaskWorktrees extends TaskWorktreeService {
       if (!COMMIT.test(sourceHead)) {
         throw failure('Git returned an invalid HEAD commit.', 'WORKTREE_GIT_FAILED')
       }
+      if (request.expectedSourceHead !== undefined && sourceHead !== request.expectedSourceHead) {
+        throw failure('The source HEAD changed before worktree creation. Inspect the source and retry.', 'WORKTREE_SOURCE_MOVED')
+      }
       const status = (await this.command(
         executable, sourcePath, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], signal,
       )).stdout
+      if (request.requireCleanSource === true && status.length > 0) {
+        throw failure('The source has uncommitted changes. Commit or resolve them before starting isolated writers.', 'WORKTREE_SOURCE_DIRTY')
+      }
 
       await mkdir(this.config.home, { recursive: true })
       const filesystem = await statfs(this.config.home)

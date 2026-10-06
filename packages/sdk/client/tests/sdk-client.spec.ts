@@ -58,6 +58,21 @@ async function tempDir(prefix: string): Promise<string> {
 }
 
 describe('DeepSeekHarness', () => {
+  it('preserves an isolated child assignment in tree notifications without adding it to root events', async () => {
+    const fixture = fileURLToPath(new URL('../../../../scripts/snapshots/isolated-writer-sdk/assignment.json', import.meta.url))
+    const expected: unknown = JSON.parse(await readFile(fixture, 'utf8'))
+    const harness = harnessWith({ FAKE_SUBAGENT: '1', FAKE_WRITER_ASSIGNMENT: fixture })
+    const result = await harness.run('delegate', { sessionId: 'parent-1' })
+    const notification = result.notifications.find(entry => entry.method === 'session.event'
+      && entry.params.sessionId === 'parent-1-child'
+      && typeof entry.params.event === 'object' && entry.params.event !== null
+      && 'type' in entry.params.event && entry.params.event.type === 'subagent/worktree-assigned')
+    expect(notification).toMatchObject({ method: 'session.event', params: {
+      sessionId: 'parent-1-child', event: { type: 'subagent/worktree-assigned', data: expected },
+    } })
+    expect(result.events.some(event => event.type === 'subagent/worktree-assigned')).toBe(false)
+  })
+
   it('ignores notifications that precede the submitted message receipt', async () => {
     const notifications = [
       { method: 'session.status', params: { sessionId: 'owned', status: 'running' } },

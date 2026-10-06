@@ -2198,14 +2198,16 @@ export interface Config {
 需要：`subagents`
 
 ```ts config-catalog
-/** Config: the registry name to register the provider under. */
+/** Spawn Provider registry identity and execution-directory choice. */
 export interface Config {
   /** Provider name on `ctx.subagents` (default `spawn`). */
   providerName: string
+  /** Shared parent directory, or a distinct one-shot writer worktree (default `shared`). */
+  workspaceMode?: 'shared' | 'isolated-worktree'
 }
 ```
 
-来源：[`packages/subagent/subagent-spawn-in-process/src/index.ts:25`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
+来源：[`packages/subagent/subagent-spawn-in-process/src/index.ts:29`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
 
 <a id="deepseek-aidsh-subprocess-e2b"></a>
 

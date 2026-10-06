@@ -83,6 +83,7 @@
     "@deepseek-ai/dsh-subprocess-local": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-task-session": "workspace:*",
+    "@deepseek-ai/dsh-task-review-local": "workspace:*",
     "@deepseek-ai/dsh-task-worktree": "workspace:*",
     "@deepseek-ai/dsh-task-worktree-local": "workspace:*",
     "@deepseek-ai/dsh-jobs-local": "workspace:*",

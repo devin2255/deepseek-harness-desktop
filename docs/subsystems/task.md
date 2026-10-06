@@ -10,6 +10,25 @@ Eight whole-value Session events define the persistent record: `task/worktree-as
 
 Evidence identifies one exact `(sessionId, seq)` event. This package validates its serialized fields; the Session Provider validates that the event exists within the same root task tree before accepting a mutation.
 
+## Execution worktrees
+
+[`TaskWorktreeService`](../../packages/task/task-worktree/README.md) assigns application-owned worktrees to execution Session ids: root integration Sessions and isolated writer children use the same assignment format without turning a child into a root Task. `decodeTaskWorktreeAssignment` validates and detaches recorded data but does not verify live Git registration; reuse requires the Provider's `inspect` operation.
+
+```ts type-equiv
+/** Inputs required to create one application-owned execution worktree. */
+interface CreateTaskWorktreeRequest {
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly workspacePath: string
+  /** Reject creation if the source HEAD differs from this captured commit. */
+  readonly expectedSourceHead?: string
+  /** Reject creation when the source has staged, unstaged, or untracked changes. */
+  readonly requireCleanSource?: boolean
+}
+```
+
+The [local Provider](../../packages/task/task-worktree-local/README.md) rejects a captured-HEAD mismatch with `WORKTREE_SOURCE_MOVED` and a required-clean source with changes with `WORKTREE_SOURCE_DIRTY`, before creating the branch or directory. Omitting these optional requirements retains root-task creation from the source's committed HEAD without copying dirty content.
+
 ## Projection values
 
 `TaskSnapshot` is the detached whole-row value shared by providers, hosts, and clients. It includes the root Session id, optional source Workspace id, optional complete `executionWorkspace`, owned descendant ids, durable task facts and delivery receipts, derived status, attention items, live-data freshness, update time, and the root Session sequence used for compare-and-set mutations. A durable worktree assignment owns the projected Workspace identity even if transient membership is unavailable after restart. `TaskListSnapshot` establishes an ordered baseline for one runtime generation. `TaskListChange` carries whole-row upserts and removals for that same generation.
@@ -191,7 +210,7 @@ Service Definition for Task-specific execution worktrees.
 ```ts cordis-catalog
 /**
  * Create one application-owned integration worktree without changing the source checkout.
- * @param request - Task identity and registered source Workspace.
+ * @param request - Session identity, source Workspace, and optional captured-HEAD or cleanliness requirements.
  * @param signal - Optional cancellation of inspection and Git execution.
  * @returns Complete assignment facts suitable for durable Session logging.
  */
@@ -207,5 +226,5 @@ abstract create( request: CreateTaskWorktreeRequest, signal?: AbortSignal, ): Pr
 abstract inspect( assignment: TaskWorktreeAssignment, signal?: AbortSignal, ): Promise<TaskWorktreeAvailability>
 ```
 
-Source: [`packages/task/task-worktree/src/index.ts:38`](../../packages/task/task-worktree/src/index.ts)
+Source: [`packages/task/task-worktree/src/index.ts:39`](../../packages/task/task-worktree/src/index.ts)
 <!-- END GENERATED cordis-surface -->

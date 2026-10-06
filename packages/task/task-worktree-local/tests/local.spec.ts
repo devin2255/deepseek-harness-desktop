@@ -56,6 +56,65 @@ afterEach(async () => {
 })
 
 describe('local Task worktrees', () => {
+  it('creates a child worktree only from its captured clean integration HEAD', async () => {
+    const fixture = repository()
+    const test = await mount(fixture.home)
+    try {
+      const integration = await test.ctx.taskWorktrees.create({
+        taskId: SessionId('integration'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+      })
+      const child = await test.ctx.taskWorktrees.create({
+        taskId: SessionId('writer'), workspaceId: integration.workspaceId, workspacePath: integration.path,
+        expectedSourceHead: integration.baseCommit, requireCleanSource: true,
+      })
+      expect(child.sourcePath).toBe(integration.path)
+      expect(child.baseCommit).toBe(integration.baseCommit)
+      expect(child.path).not.toBe(integration.path)
+      writeFileSync(join(child.path, 'writer.txt'), 'child\n')
+      expect(existsSync(join(integration.path, 'writer.txt'))).toBe(false)
+      expect(existsSync(join(fixture.source, 'writer.txt'))).toBe(false)
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects a moved captured source before creating a branch or checkout', async () => {
+    const fixture = repository()
+    const test = await mount(fixture.home)
+    try {
+      const before = git(fixture.source, ['worktree', 'list', '--porcelain'])
+      await expect(test.ctx.taskWorktrees.create({
+        taskId: SessionId('stale-writer'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+        expectedSourceHead: '0'.repeat(40), requireCleanSource: true,
+      })).rejects.toMatchObject({ code: 'WORKTREE_SOURCE_MOVED' })
+      expect(git(fixture.source, ['worktree', 'list', '--porcelain'])).toBe(before)
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects a dirty writer baseline while ordinary root isolation still accepts it', async () => {
+    const fixture = repository()
+    const test = await mount(fixture.home)
+    try {
+      writeFileSync(join(fixture.source, 'untracked.txt'), 'user content\n')
+      const before = git(fixture.source, ['worktree', 'list', '--porcelain'])
+      await expect(test.ctx.taskWorktrees.create({
+        taskId: SessionId('dirty-writer'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+        requireCleanSource: true,
+      })).rejects.toMatchObject({ code: 'WORKTREE_SOURCE_DIRTY' })
+      expect(git(fixture.source, ['worktree', 'list', '--porcelain'])).toBe(before)
+      const root = await test.ctx.taskWorktrees.create({
+        taskId: SessionId('ordinary-root'), workspaceId: WorkspaceId('workspace'), workspacePath: fixture.source,
+      })
+      expect(root.sourceDirty).toBe(true)
+      expect(existsSync(join(root.path, 'untracked.txt'))).toBe(false)
+      expect(readFileSync(join(fixture.source, 'untracked.txt'), 'utf8')).toBe('user content\n')
+    } finally {
+      await test.dispose()
+    }
+  })
+
   it('resolves explicit and omitted Git limits and rejects an invalid executable', () => {
     const defaults = resolveConfig({})
     expect(defaults.gitCommand).toBe('git')

@@ -2,6 +2,7 @@
 
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
+import { decodeTaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import {
@@ -87,12 +88,6 @@ function normalizedString(value: unknown, subject: string): string {
   return value
 }
 
-function normalizedPath(value: unknown, subject: string): string {
-  const path = normalizedString(value, subject)
-  if (path.includes('\u0000')) throw new Error(`${subject} must not contain a null character`)
-  return path
-}
-
 function gitObjectId(value: unknown, subject: string): string {
   if (typeof value !== 'string' || !/^[0-9a-f]{40}$/.test(value)) {
     throw new Error(`${subject} must be a lowercase forty-character Git object id`)
@@ -120,35 +115,6 @@ function timestamp(value: unknown, subject: string): number {
     throw new Error(`${subject} must be a non-negative safe integer`)
   }
   return value
-}
-
-function decodeWorktreeAssignment(value: unknown): TaskWorktreeAssignment {
-  const record = exactRecord(value, [
-    'baseCommit', 'branch', 'createdAt', 'kind', 'path', 'sourceDirty', 'sourceHead',
-    'sourcePath', 'sourceStatusDigest', 'taskId', 'workspaceId',
-  ], 'worktree assignment')
-  if (record['kind'] !== 'git-worktree') throw new Error('worktree kind must be git-worktree')
-  const taskId = normalizedString(record['taskId'], 'worktree taskId') as SessionId
-  const workspaceId = normalizedString(record['workspaceId'], 'worktree workspaceId') as WorkspaceId
-  const sourcePath = normalizedPath(record['sourcePath'], 'worktree sourcePath')
-  const path = normalizedPath(record['path'], 'worktree path')
-  if (sourcePath === path) throw new Error('worktree path must differ from sourcePath')
-  const branch = normalizedString(record['branch'], 'worktree branch')
-  if (!/^dsh\/task-[0-9a-f]{24}$/.test(branch)) throw new Error('worktree branch is invalid')
-  const baseCommit = gitObjectId(record['baseCommit'], 'worktree baseCommit')
-  const sourceHead = gitObjectId(record['sourceHead'], 'worktree sourceHead')
-  if (baseCommit !== sourceHead) throw new Error('worktree baseCommit must equal sourceHead')
-  if (typeof record['sourceDirty'] !== 'boolean') throw new Error('worktree sourceDirty must be boolean')
-  if (typeof record['sourceStatusDigest'] !== 'string' || !/^[0-9a-f]{64}$/.test(record['sourceStatusDigest'])) {
-    throw new Error('worktree sourceStatusDigest must be a lowercase SHA-256 digest')
-  }
-  if (typeof record['createdAt'] !== 'number' || !Number.isSafeInteger(record['createdAt']) || record['createdAt'] < 0) {
-    throw new Error('worktree createdAt must be a non-negative safe integer')
-  }
-  return {
-    kind: 'git-worktree', taskId, workspaceId, sourcePath, path, branch, baseCommit, sourceHead,
-    sourceDirty: record['sourceDirty'], sourceStatusDigest: record['sourceStatusDigest'], createdAt: record['createdAt'],
-  }
 }
 
 function decodeEvidence(value: unknown): TaskEvidenceRef {
@@ -341,7 +307,7 @@ export function applyTaskEvent(state: TaskFoldState, event: SessionEvent): TaskF
       case 'task/worktree-assigned': {
         const data = exactRecord(event.data, ['assignment'], 'task/worktree-assigned data')
         if (state.assignment !== undefined) throw new Error('worktree assignment already exists')
-        return { ...state, assignment: decodeWorktreeAssignment(data['assignment']), updatedAt: event.time }
+        return { ...state, assignment: decodeTaskWorktreeAssignment(data['assignment']), updatedAt: event.time }
       }
       case 'task/defined': {
         const data = exactRecord(event.data, ['definition'], 'task/defined data')

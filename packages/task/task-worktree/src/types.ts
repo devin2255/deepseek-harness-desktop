@@ -13,6 +13,8 @@ export type TaskWorktreeErrorCode =
   | 'WORKTREE_BRANCH_OCCUPIED'
   | 'WORKTREE_GIT_FAILED'
   | 'WORKTREE_UNAVAILABLE'
+  | 'WORKTREE_SOURCE_MOVED'
+  | 'WORKTREE_SOURCE_DIRTY'
 
 /** Durable facts identifying one application-owned Git worktree. */
 export interface TaskWorktreeAssignment {
@@ -29,11 +31,15 @@ export interface TaskWorktreeAssignment {
   readonly createdAt: number
 }
 
-/** Inputs required to create one Task's integration worktree. */
+/** Inputs required to create one application-owned execution worktree. */
 export interface CreateTaskWorktreeRequest {
   readonly taskId: SessionId
   readonly workspaceId: WorkspaceId
   readonly workspacePath: string
+  /** Reject creation if the source HEAD differs from this captured commit. */
+  readonly expectedSourceHead?: string
+  /** Reject creation when the source has staged, unstaged, or untracked changes. */
+  readonly requireCleanSource?: boolean
 }
 
 /** Live relationship between recorded assignment facts and the local Git repository. */

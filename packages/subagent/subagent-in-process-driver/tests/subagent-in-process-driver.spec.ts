@@ -54,6 +54,54 @@ function text(blocks: readonly { type: string; text?: string }[]): string {
 }
 
 describe('startInProcessRun', () => {
+  it('captures the parent route before preparing a private execution directory', async () => {
+    const { ctx, parent } = await setup([textResponse('prepared child')])
+    const run = await startInProcessRun(request(parent), {
+      async prepare(sessionId) {
+        parent.options.model = 'changed-parent-model'
+        return {
+          cwd: `/owned/${sessionId}`,
+          policies: { sandboxMode: 'workspace-write', approvalPolicy: 'never' },
+          setup(childCtx) {
+            expect((childCtx.agent as Agent).session.header.cwd).toBe(`/owned/${sessionId}`)
+          },
+        }
+      },
+    })
+    try {
+      const child = ctx.agents.get(run.id)!
+      expect(child.options.model).toBe('mock')
+      expect(child.session.header.parentSession).toBe(parent.id)
+      expect(child.session.events.slice(0, 2)).toMatchObject([
+        { type: 'sandbox/mode', data: { mode: 'workspace-write', source: 'delegation' } },
+        { type: 'approval/policy', data: { policy: 'never', source: 'delegation' } },
+      ])
+      await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
+    } finally {
+      await run.dispose()
+    }
+  })
+
+  it('does not publish a child when execution preparation fails', async () => {
+    const { ctx, parent } = await setup([])
+    await expect(startInProcessRun(request(parent), {
+      prepare: () => Promise.reject(new Error('worktree unavailable')),
+    })).rejects.toThrow('worktree unavailable')
+    expect(ctx.agents.list()).toHaveLength(1)
+  })
+
+  it('rejects cancellation after execution preparation without entering the factory', async () => {
+    const { ctx, parent } = await setup([])
+    const controller = new AbortController()
+    await expect(startInProcessRun(request(parent, controller.signal), {
+      async prepare() {
+        controller.abort()
+        return { cwd: '/owned/child', policies: { sandboxMode: 'workspace-write', approvalPolicy: 'never' }, setup() {} }
+      },
+    })).rejects.toThrow('aborted before child publication')
+    expect(ctx.agents.list()).toHaveLength(1)
+  })
+
   it('returns only after publication, drives a fresh child, and disposes it', async () => {
     const { ctx, parent } = await setup([textResponse('driver answer')])
     const run = await startInProcessRun(request(parent), {})

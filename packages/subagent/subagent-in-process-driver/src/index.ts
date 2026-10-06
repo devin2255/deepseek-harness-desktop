@@ -33,6 +33,7 @@ import type {
   SubagentResult,
   SubagentRun,
   SubagentStopReason,
+  DelegatedPolicyOverrides,
 } from '@deepseek-ai/dsh-subagent'
 import {
   attachStructuredRuntime,
@@ -68,11 +69,23 @@ function toStopReason(reason: TurnEndReason | undefined): SubagentStopReason {
 export interface InProcessRunOptions {
   /** Completed-turn seed for fork, or undefined for a fresh spawn. */
   readonly seed?: SessionEvent[]
+  /** Prepare an owned execution directory before the child factory is entered. */
+  readonly prepare?: (sessionId: SessionId) => Promise<PreparedInProcessChild>
 }
 
-/** Error used when cancellation wins before the child publication boundary. */
-function prePublicationAbort(): Error {
-  return new Error('subagent request was aborted before child publication')
+/** Provider-owned execution inputs prepared for one unpublished child. */
+export interface PreparedInProcessChild {
+  /** Exact execution directory persisted in the child's Session header. */
+  readonly cwd: string
+  /** Policy captured by the provider before preparation starts. */
+  readonly policies: DelegatedPolicyOverrides
+  /** Append the provider's execution facts inside the unpublished creation transaction. */
+  readonly setup: (childCtx: Context) => void
+}
+
+/** Reject cancellation before starting or publishing an unpublished child. */
+function assertPublicationAllowed(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('subagent request was aborted before child publication')
 }
 
 /** Append one one-shot descriptor inside the child's initial turn before its first request. */
@@ -96,7 +109,7 @@ function attachDescriptorAppend(childCtx: Context, descriptor: SubagentDescripto
  * publishing a child. Every start appends its resolved descriptor inside the
  * child's initial turn.
  * @param request - the trusted typed start request, including its required signal.
- * @param options - the optional fork seed.
+ * @param options - the optional fork seed and owned execution preparation.
  * @returns a published holder-owned run.
  */
 export async function startInProcessRun(
@@ -104,7 +117,7 @@ export async function startInProcessRun(
   options: InProcessRunOptions,
 ): Promise<SubagentRun> {
   assertSubagentMaxDepth(request.maxDepth)
-  if (request.signal.aborted) throw prePublicationAbort()
+  assertPublicationAllowed(request.signal)
   const parent = request.parent
   const childDepth = resolveChildDepth(parent, request.maxDepth)
 
@@ -115,10 +128,14 @@ export async function startInProcessRun(
   // Capture before the first await: a later parent switch belongs to the
   // parent's future.
   const inherited = captureDelegatedPolicyOverrides(parent)
+  const meta = childSessionMeta(parent, childDepth, activationBoundary)
+  const agentOptions = resolveChildAgentOptions(parent, request.agentOptions, childDepth)
+  const prepared = options.prepare === undefined ? undefined : await options.prepare(childId)
+  assertPublicationAllowed(request.signal)
 
   let structured: StructuredAttachment | undefined
   const setup = (childCtx: Context): void => {
-    appendDelegatedPolicyOverrides((childCtx.agent as Agent).session, inherited)
+    appendDelegatedPolicyOverrides((childCtx.agent as Agent).session, prepared?.policies ?? inherited)
     applyChildComposition(childCtx, parent, {
       persona: request.persona,
       toolFilter: request.toolFilter,
@@ -127,13 +144,14 @@ export async function startInProcessRun(
       structured = attachStructuredRuntime(childCtx, request.outputSchema)
     }
     attachDescriptorAppend(childCtx, request.descriptor)
+    prepared?.setup(childCtx)
   }
 
   const handle = await parent.ctx.agents.create({
     sessionId: childId,
-    meta: childSessionMeta(parent, childDepth, activationBoundary),
+    meta: { ...meta, ...prepared === undefined ? {} : { cwd: prepared.cwd } },
     ...seed !== undefined ? { seed } : {},
-    agentOptions: resolveChildAgentOptions(parent, request.agentOptions, childDepth),
+    agentOptions,
     signal: request.signal,
     setup,
   })
