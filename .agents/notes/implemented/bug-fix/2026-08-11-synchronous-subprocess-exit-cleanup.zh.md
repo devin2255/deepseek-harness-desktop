@@ -32,6 +32,8 @@ Status: implemented
 
 父测试通过仓库 source launcher启动隔离的 TypeScript宿主，等待精确 root与后代进程身份可观察后，再允许宿主进入各条致命路径。直接退出、默认未捕获异常和默认未处理 rejection覆盖忽略 TERM的普通进程树；直接退出还覆盖真实 terminal root与后代。父测试断言原始宿主退出类别，并等待所有已记录进程消失；失败清理只针对已记录身份或已记录的 Windows进程树。
 
+fixture 宿主等待包含完整进程身份的 JSON，而不只等待状态文件存在。受控的部分发布会阻止写入方完成，直到宿主观察到不完整 JSON，随后验证正常 dispose 和 listener 移除。该验证区分异步文件发布与 provider 清理，不增加场景时限，也不削弱对外部进程存活状态的断言。
+
 单元证据固定同步 POSIX进程组与 Windows taskkill投递、PTY root终止前后的 terminal扫描、重复最终清理、逐目标失败包含、正常 TERM到 KILL dispose、dispose等待期间保留存活集合，以及 dispose后移除 listener。
 
 ## Alternatives considered

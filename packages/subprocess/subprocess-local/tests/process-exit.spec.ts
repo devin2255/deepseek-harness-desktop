@@ -86,13 +86,13 @@ function cleanupTree(state: TreeState | undefined, identities: ProcessIdentity[]
   }
 }
 
-async function runScenario(kind: ManagedKind, trigger: ExitTrigger) {
+async function runScenario(kind: ManagedKind, trigger: ExitTrigger, publication?: 'partial') {
   const root = await mkdtemp(join(tmpdir(), `dsh-subprocess-host-exit-${kind}-${trigger}-`))
   const launch = resolveExampleLaunch({
     srcBin: hostScript,
     mode: 'src',
     tsconfigPath: join(repoRoot, 'tsconfig.json'),
-    configArgs: [kind, trigger, root],
+    configArgs: [kind, trigger, root, ...(publication === undefined ? [] : [publication])],
   })
   const child = execa(launch.command, launch.args, {
     cwd: repoRoot,
@@ -106,6 +106,13 @@ async function runScenario(kind: ManagedKind, trigger: ExitTrigger) {
   let settled = false
   let treeGone = false
   try {
+    if (publication === 'partial') {
+      await vi.waitFor(() => readFile(join(root, 'partial-read'), 'utf8'), {
+        interval: 10,
+        timeout: scenarioTimeoutMs,
+      })
+      await writeFile(join(root, 'publish'), 'publish')
+    }
     state = await readTree(join(root, 'tree.json'))
     await vi.waitFor(() => readFile(join(root, 'ready'), 'utf8'), {
       interval: 10,
@@ -139,6 +146,13 @@ async function runScenario(kind: ManagedKind, trigger: ExitTrigger) {
 }
 
 describe('synchronous cleanup on host exit', () => {
+  it('waits for complete process identities before normal disposal', { timeout: 45_000 }, async () => {
+    const { outcome, disposeCounts } = await runScenario('ordinary', 'dispose', 'partial')
+    expect(outcome.exitCode).toBe(0)
+    expect(outcome.stderr).toBe('')
+    expect(disposeCounts?.listenersAfterDispose).toBe(disposeCounts?.listenersBefore)
+  })
+
   it.each([
     { trigger: 'direct' as const, expectedCode: 23, diagnostic: undefined },
     { trigger: 'uncaught-exception' as const, expectedCode: 1, diagnostic: 'host-exit-uncaught-exception' },
