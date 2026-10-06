@@ -48,7 +48,7 @@ describe('local Task review delivery', () => {
     await test.dispose()
   })
 
-  it('rejects empty, stale, unidentified, and failed commits without moving Task HEAD', async () => {
+  it('rejects invalid messages and empty commits without moving Task HEAD', async () => {
     const emptyFixture = repository()
     const empty = await mount(emptyFixture)
     const emptyReview = await empty.ctx.taskReview.summarize({ assignment: empty.assignment })
@@ -67,8 +67,11 @@ describe('local Task review delivery', () => {
       expectedRevision: emptyReview.revision,
       message: 'Nothing',
     })).rejects.toMatchObject({ code: 'REVIEW_EMPTY' } satisfies Partial<TaskReviewError>)
+    expect(git(empty.assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(empty.assignment.baseCommit)
     await empty.dispose()
+  })
 
+  it('rejects a stale commit without moving Task HEAD', async () => {
     const staleFixture = repository()
     const stale = await mount(staleFixture)
     writeFileSync(join(stale.assignment.path, 'tracked.txt'), 'first\n')
@@ -79,8 +82,11 @@ describe('local Task review delivery', () => {
       expectedRevision: staleReview.revision,
       message: 'Stale',
     })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+    expect(git(stale.assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(stale.assignment.baseCommit)
     await stale.dispose()
+  })
 
+  it('rejects a commit without Git author identity without moving Task HEAD', async () => {
     const identityFixture = repository()
     const identity = await mount(identityFixture)
     writeFileSync(join(identity.assignment.path, 'tracked.txt'), 'identity\n')
@@ -94,7 +100,9 @@ describe('local Task review delivery', () => {
     })).rejects.toMatchObject({ code: 'REVIEW_IDENTITY_MISSING' } satisfies Partial<TaskReviewError>)
     expect(git(identity.assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(identity.assignment.baseCommit)
     await identity.dispose()
+  })
 
+  it('rejects a failed pre-commit hook without moving Task HEAD', async () => {
     const hookFixture = repository()
     const hook = await mount(hookFixture)
     const hooks = join(hookFixture.root, 'hooks')
