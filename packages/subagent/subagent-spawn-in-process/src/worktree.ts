@@ -77,9 +77,6 @@ export function prepareIsolatedWriter(parent: Agent, signal: AbortSignal): (sess
   const parentTaskId = parent.id
   return async (sessionId) => {
     const baseline = await review.summarize({ assignment: integration }, signal)
-    if (baseline.dirty) {
-      throw new TaskWorktreeError('Commit the integration worktree before starting isolated writers.', 'WORKTREE_SOURCE_DIRTY')
-    }
     const assignment = await worktrees.create({
       taskId: sessionId,
       workspaceId: integration.workspaceId,

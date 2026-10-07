@@ -44,6 +44,7 @@ export type TaskReviewErrorCode =
   | 'REVIEW_SOURCE_MOVED'
   | 'REVIEW_APPLY_CONFLICT'
   | 'REVIEW_CONFIRMATION_REQUIRED'
+  | 'REVIEW_INVALID_INTEGRATION'
   | 'REVIEW_GIT_FAILED'
 
 /** Git-visible state of one file in a Task review. */
@@ -148,6 +149,59 @@ export interface TaskApplyReceipt {
   readonly sourceHeadAfter: string
   readonly appliedAt: number
 }
+
+/** One exact committed writer result selected for integration. */
+export interface TaskIntegrationInput {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly commit: string
+}
+
+/** Batch of writer commits to merge into their recorded root execution worktree. */
+export interface IntegrateTaskReviewRequest {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly inputs: readonly TaskIntegrationInput[]
+  readonly message: string
+}
+
+/** Exact contributor identities retained by either integration outcome. */
+export interface TaskIntegrationContributor {
+  readonly sessionId: SessionId
+  readonly branch: string
+  readonly commit: string
+  readonly reviewRevision: TaskReviewRevision
+}
+
+/** Successful batch integration; the user's source checkout is not changed. */
+export interface TaskIntegrationReceipt {
+  readonly kind: 'integrated'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly headAfter: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly integratedAt: number
+}
+
+/** Preflight conflict; root and child working trees and branches remain unchanged. */
+export interface TaskIntegrationConflict {
+  readonly kind: 'conflict'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly conflictingSessionId: SessionId
+  readonly paths: readonly string[]
+  readonly detectedAt: number
+}
+
+/** Integration either publishes the complete batch or reports a non-mutating conflict. */
+export type TaskIntegrationResult = TaskIntegrationReceipt | TaskIntegrationConflict
 
 /** Request to release a reviewed worktree with explicit acknowledgement of dirty-data loss. */
 export interface DiscardTaskReviewRequest {

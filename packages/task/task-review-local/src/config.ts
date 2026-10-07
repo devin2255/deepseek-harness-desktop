@@ -12,6 +12,8 @@ export const DEFAULT_MAX_DIFF_BYTES = 2 * 1024 * 1024
 export const DEFAULT_MAX_PATCH_BYTES = 16 * 1024 * 1024
 /** Default number of files returned in one review summary. */
 export const DEFAULT_MAX_FILES = 2_000
+/** Default number of contributor commits accepted in one integration batch. */
+export const DEFAULT_MAX_INTEGRATION_INPUTS = 16
 
 /** Fully resolved local Task review configuration. */
 export interface ResolvedConfig {
@@ -22,4 +24,5 @@ export interface ResolvedConfig {
   readonly maxDiffBytes: number
   readonly maxPatchBytes: number
   readonly maxFiles: number
+  readonly maxIntegrationInputs: number
 }

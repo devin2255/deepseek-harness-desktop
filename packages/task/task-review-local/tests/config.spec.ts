@@ -10,6 +10,11 @@ describe('local Task review configuration', () => {
     expect(defaults.maxOutputBytes).toBeGreaterThanOrEqual(defaults.maxDiffBytes)
     expect(defaults.maxOutputBytes).toBeGreaterThanOrEqual(defaults.maxPatchBytes)
     expect(defaults.maxFiles).toBeGreaterThan(0)
+    expect(defaults.maxIntegrationInputs).toBe(16)
+    expect(resolveConfig({ maxIntegrationInputs: 2 }).maxIntegrationInputs).toBe(2)
+    for (const maxIntegrationInputs of [0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => resolveConfig({ maxIntegrationInputs })).toThrow('maxIntegrationInputs must be a positive safe integer')
+    }
     expect(resolveConfig({
       gitCommand: 'git-custom', commandTimeoutMs: 10, terminateGraceMs: 20,
       maxOutputBytes: 100, maxDiffBytes: 50, maxPatchBytes: 60, maxFiles: 3,

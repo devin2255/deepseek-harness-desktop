@@ -18,11 +18,13 @@ import type {
   CommitTaskReviewRequest,
   DiscardTaskReviewRequest,
   GetTaskFileDiffRequest,
+  IntegrateTaskReviewRequest,
   SummarizeTaskReviewRequest,
   TaskApplyReceipt,
   TaskCommitReceipt,
   TaskDiscardReceipt,
   TaskFileDiff,
+  TaskIntegrationResult,
   TaskReviewErrorCode,
   TaskReviewFile,
   TaskReviewSummary,
@@ -34,12 +36,14 @@ import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_MAX_DIFF_BYTES,
   DEFAULT_MAX_FILES,
+  DEFAULT_MAX_INTEGRATION_INPUTS,
   DEFAULT_MAX_OUTPUT_BYTES,
   DEFAULT_MAX_PATCH_BYTES,
   DEFAULT_TERMINATE_GRACE_MS,
 } from './config.ts'
 import type { ResolvedConfig } from './config.ts'
 import { parseNameStatus, parseNumstat } from './git.ts'
+import { integrateTaskReview } from './integration.ts'
 
 export * from './config.ts'
 export { parseNameStatus, parseNumstat } from './git.ts'
@@ -60,6 +64,8 @@ export interface Config {
   maxPatchBytes?: number
   /** Maximum file rows returned in one summary. */
   maxFiles?: number
+  /** Maximum committed writers accepted in one preflighted integration batch. */
+  maxIntegrationInputs?: number
 }
 
 /** Schemastery declaration used by Cordis configuration loading. */
@@ -71,6 +77,7 @@ export const Config: z<Config> = z.object({
   maxDiffBytes: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_DIFF_BYTES),
   maxPatchBytes: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_PATCH_BYTES),
   maxFiles: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_FILES),
+  maxIntegrationInputs: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_INTEGRATION_INPUTS),
 })
 
 /**
@@ -89,6 +96,10 @@ export function resolveConfig(config: Config): ResolvedConfig {
   if (maxDiffBytes > maxOutputBytes || maxPatchBytes > maxOutputBytes) {
     throw new Error('task-review-local: diff and patch limits must not exceed maxOutputBytes')
   }
+  const maxIntegrationInputs = config.maxIntegrationInputs ?? DEFAULT_MAX_INTEGRATION_INPUTS
+  if (!Number.isSafeInteger(maxIntegrationInputs) || maxIntegrationInputs < 1) {
+    throw new Error('task-review-local: maxIntegrationInputs must be a positive safe integer')
+  }
   return Object.freeze({
     gitCommand,
     commandTimeoutMs: config.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
@@ -97,6 +108,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     maxDiffBytes,
     maxPatchBytes,
     maxFiles: config.maxFiles ?? DEFAULT_MAX_FILES,
+    maxIntegrationInputs,
   })
 }
 
@@ -660,6 +672,17 @@ export class LocalTaskReview extends TaskReviewService {
         sourceHeadAfter,
         appliedAt: Date.now(),
       })
+    })
+  }
+
+  async integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): Promise<TaskIntegrationResult> {
+    return this.serialize(request.assignment.sourcePath, async () => {
+      const executable = await this.git(signal)
+      return integrateTaskReview(request, {
+        maxInputs: this.config.maxIntegrationInputs,
+        summarize: async (assignment, inspectionSignal) => (await this.state(assignment, inspectionSignal)).summary,
+        command: (cwd, args, commandSignal, accepted) => this.command(executable, cwd, args, commandSignal, accepted),
+      }, signal)
     })
   }
 

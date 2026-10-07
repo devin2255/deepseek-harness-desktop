@@ -2275,10 +2275,12 @@ export interface Config {
   maxPatchBytes?: number
   /** Maximum file rows returned in one summary. */
   maxFiles?: number
+  /** Maximum committed writers accepted in one preflighted integration batch. */
+  maxIntegrationInputs?: number
 }
 ```
 
-来源：[`packages/task/task-review-local/src/index.ts:48`](../packages/task/task-review-local/src/index.ts)
+来源：[`packages/task/task-review-local/src/index.ts:52`](../packages/task/task-review-local/src/index.ts)
 
 <a id="deepseek-aidsh-task-worktree-local"></a>
 

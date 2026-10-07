@@ -23,6 +23,8 @@ import TaskReviewService, {
   type CommitTaskReviewRequest,
   type DiscardTaskReviewRequest,
   type GetTaskFileDiffRequest,
+  type IntegrateTaskReviewRequest,
+  type TaskIntegrationResult,
   type SummarizeTaskReviewRequest,
   type TaskApplyReceipt,
   type TaskCommitReceipt,
@@ -91,6 +93,9 @@ const fileDiff: TaskFileDiff = {
 }
 
 class FakeTaskReview extends TaskReviewService {
+  integrate(_request: IntegrateTaskReviewRequest): Promise<TaskIntegrationResult> {
+    throw new Error('This Host fixture does not expose writer integration.')
+  }
   last?: readonly [string, unknown, AbortSignal | undefined]
   nextError?: Error
 

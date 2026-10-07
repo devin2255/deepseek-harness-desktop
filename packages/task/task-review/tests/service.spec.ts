@@ -12,11 +12,13 @@ import type {
   CommitTaskReviewRequest,
   DiscardTaskReviewRequest,
   GetTaskFileDiffRequest,
+  IntegrateTaskReviewRequest,
   SummarizeTaskReviewRequest,
   TaskApplyReceipt,
   TaskCommitReceipt,
   TaskDiscardReceipt,
   TaskFileDiff,
+  TaskIntegrationResult,
   TaskReviewErrorCode,
   TaskReviewFile,
   TaskReviewSummary,
@@ -108,6 +110,11 @@ const discardReceipt: TaskDiscardReceipt = {
 }
 
 class StubTaskReview extends TaskReviewService {
+  async integrate(request: IntegrateTaskReviewRequest): Promise<TaskIntegrationResult> {
+    expect(request.assignment).toBe(assignment)
+    return { kind: 'integrated', operationId, taskId, workspaceId, reviewRevision: revision,
+      headBefore: assignment.baseCommit, headAfter: commitReceipt.commit, contributors: [], integratedAt: 50 }
+  }
   async summarize(request: SummarizeTaskReviewRequest): Promise<TaskReviewSummary> {
     expect(request.assignment).toBe(assignment)
     return summary
@@ -161,6 +168,8 @@ describe('TaskReview Service Definition', () => {
       expectedRevision: revision,
       confirmedUncommittedLoss: true,
     })).resolves.toBe(discardReceipt)
+    await expect(ctx.taskReview.integrate({ assignment, expectedRevision: revision, inputs: [], message: 'Integrate' }))
+      .resolves.toMatchObject({ kind: 'integrated', taskId })
     await expect(ctx.plugin(StubTaskReview)).rejects.toThrow()
     await fiber.dispose()
     expect((ctx as Context & { taskReview?: unknown }).taskReview).toBeUndefined()
@@ -181,6 +190,7 @@ describe('TaskReview Service Definition', () => {
       'REVIEW_SOURCE_MOVED',
       'REVIEW_APPLY_CONFLICT',
       'REVIEW_CONFIRMATION_REQUIRED',
+      'REVIEW_INVALID_INTEGRATION',
       'REVIEW_GIT_FAILED',
     ] as const satisfies readonly TaskReviewErrorCode[]
     const cause = new Error('git failed')

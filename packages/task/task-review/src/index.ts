@@ -6,11 +6,13 @@ import type {
   CommitTaskReviewRequest,
   DiscardTaskReviewRequest,
   GetTaskFileDiffRequest,
+  IntegrateTaskReviewRequest,
   SummarizeTaskReviewRequest,
   TaskApplyReceipt,
   TaskCommitReceipt,
   TaskDiscardReceipt,
   TaskFileDiff,
+  TaskIntegrationResult,
   TaskReviewErrorCode,
   TaskReviewSummary,
 } from './types.ts'
@@ -90,6 +92,16 @@ export abstract class TaskReviewService extends Service {
     request: ApplyTaskReviewRequest,
     signal?: AbortSignal,
   ): Promise<TaskApplyReceipt>
+
+  /**
+   * Preflight all selected writer commits and publish their combined result on the root branch.
+   * Requires exact review revisions, clean working trees, and direct child assignments.
+   * Conflicts change no working tree or branch; Git objects from preflight may remain unreachable.
+   * @param request - root assignment and exact reviewed contributor commits in merge order.
+   * @param signal - cancellation before final publication; publication itself is bounded but not caller-cancellable.
+   * @returns the complete integration receipt or a preflight conflict with exact contributor identities.
+   */
+  abstract integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): Promise<TaskIntegrationResult>
 
   /**
    * Release one Task worktree after exact-state and loss confirmation checks.

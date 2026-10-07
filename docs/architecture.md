@@ -111,9 +111,11 @@ The local Provider accepts only a repository root with a committed `HEAD`, rejec
 
 ### Task review and delivery
 
-`dsh-task-review` defines bounded review reads and revision-authorized Commit, Apply, and Discard operations. `dsh-task-review-local` implements them through `ctx.subprocess` and Git against the durable worktree assignment. `dsh-host-apiproxy` validates root-Task ownership and lifecycle, invokes the Provider, and records successful mutation receipts through the Task service. `dsh-client-ui-task-review` renders the separate Review workspace from typed Client runtime state; Electron and the browser never receive Git authority.
+`dsh-task-review` defines bounded review reads and revision-authorized Commit, Apply, Integrate, and Discard operations. `dsh-task-review-local` implements them through `ctx.subprocess` and Git against the durable worktree assignment. `dsh-host-apiproxy` validates root-Task ownership and lifecycle, invokes the Provider, and records successful delivery receipts through the Task service. `dsh-client-ui-task-review` renders the separate Review workspace from typed Client runtime state; Electron and the browser never receive Git authority.
 
 Review revisions identify the exact Task tree contents the user inspected. Commit creates a Task-branch commit without moving the source checkout. Apply serializes by canonical repository, requires a clean source at the requested `HEAD`, preflights the complete binary patch with a temporary index, revalidates source state, then applies it while preserving source `HEAD`. Discard removes only the verified managed worktree and reports whether uncommitted content was lost and whether a committed branch remains recoverable. `task/review-committed`, `task/review-applied`, and `task/review-discarded` make successful delivery identities durable and strictly replayable.
+
+The opt-in [writer tools](../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) preflight complete contributor batches before publishing into the root worktree. Integration receipts remain ordinary tool results; root delivery to the source checkout stays independent.
 
 ## Where new behavior goes
 

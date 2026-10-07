@@ -32,9 +32,11 @@ Ordinary shared children have no execution-provider record and retain provider-i
 
 ## Consequences
 
+[Batch writer integration](2026-10-07-batch-writer-integration.md) owns stopped-result review and publication without taking over continuation lifecycle. Child-result review UI remains separate from these model-facing tools.
+
 Explicit isolated continuable writers keep their checkout, transcript, and creation authority across residency epochs. Unloading their validator makes later cold activation unavailable rather than silently recovering as shared execution. Existing shared-child continuation and one-shot ownership remain independent. A cancelled or failed creation preserves any prepared checkout as recovery data.
 
-The preparation and generic continuation notes remain active: their clean-baseline and single-inbox ownership rationales still apply, while this note owns execution validation. [Desktop read-only delegation](2026-10-06-desktop-read-only-delegation.md) remains the shipped default. Explicit Integration nodes, conflict attention, child-result review, orphan recovery, and desktop writer-tool composition remain unfinished [mission-control requirements](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md); this does not complete parallel collaboration or the desktop MVP.
+The preparation and generic continuation notes remain active: their clean-baseline and single-inbox ownership rationales still apply, while this note owns execution validation. [Desktop read-only delegation](2026-10-06-desktop-read-only-delegation.md) remains the shipped default. Explicit Integration nodes, conflict attention, child-result review UI, orphan recovery, and desktop writer-tool composition remain unfinished [mission-control requirements](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md); this does not complete parallel collaboration or the desktop MVP.
 
 ## Verification
 

@@ -1,0 +1,47 @@
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+    compression: none
+- id: agent
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents: []
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    goals: false
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: workspace-write
+    workspaceRoot: !!js process.cwd()
+    delegationMode: read-only
+- id: approval
+  name: '@deepseek-ai/dsh-user-approval'
+- id: fs
+  name: '@deepseek-ai/dsh-fs-sandbox'
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+- id: worktrees
+  name: '@deepseek-ai/dsh-task-worktree-local'
+  config:
+    dshHome: './.dsh'
+    minFreeBytes: 0
+- id: review
+  name: '@deepseek-ai/dsh-task-review-local'
+- id: tasks
+  name: '@deepseek-ai/dsh-task-session'
+- id: subagents
+  name: '@deepseek-ai/dsh-subagent'
+- id: writers
+  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+  config:
+    providerName: writer
+    workspaceMode: isolated-worktree
+- id: integrate
+  name: '@deepseek-ai/dsh-tool-subagent-control/integrate'

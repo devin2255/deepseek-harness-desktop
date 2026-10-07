@@ -36,7 +36,7 @@ The Client runtime owns asynchronous review state and typed actions. `dsh-client
 
 ## Consequences
 
-An isolated root Task now has an end-to-end path from concurrent execution through human review to a staged source result. Stale content, dirty or moved sources, conflicts, invalid paths, incomplete output, and missing Git identity fail explicitly. Successful delivery facts survive Renderer reload and cold replay. Apply does not create the user's final source commit; that remains a deliberate project action. Child-writer isolation, automatic reconciliation between concurrent writers, Task archival, and cleanup of partial worktree-creation failures remain separate work.
+An isolated root Task has an end-to-end path from concurrent execution through human review to a staged source result. Stale content, dirty or moved sources, conflicts, invalid paths, incomplete output, and missing Git identity fail explicitly. Successful delivery facts survive Renderer reload and cold replay. Apply does not create the user's final source commit; that remains a deliberate project action. [Child-writer integration](2026-10-07-batch-writer-integration.md) is separate from source delivery. Automatic conflict resolution, Task archival, and cleanup of partial worktree-creation failures remain separate work.
 
 ## Verification
 

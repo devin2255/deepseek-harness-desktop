@@ -10,6 +10,14 @@
 
 `list_agents` 接受一个可选的 `scope` 参数，会从调用它的 agent 推导根 id，并且不使用 cursor，将服务目录投影为可继续 child。默认的 `children` scope 读取 `ctx.subagents.listChildren()`；`descendants` 读取 `ctx.subagents.listDescendants()`，其单份语料的遍历会穿过普通会话与一次性 child，并按稳定 pre-order 以 `parent=<id> depth=<n>` 渲染保留下来的条目。`parent` 注释是持久化直接 parent 会话 id，可能指向输出中省略的普通会话。对于调用本工具的 agent，只有 depth-1 child 条目可作为 `send_message` 候选；更深的 child 条目只能作为 `interrupt_agent` 候选。状态来自在线 Agent 注册表：`running`（driver 活跃）、`idle`（驻留但处于轮次之间，可能在等待它启动的 agent）或 `ready`（仅存于存储，表示可恢复而非终态）。服务结果还包含由会话支撑的一次性 subagent，以供 UI 等消费方使用；但这些条目无法接受 `send_message`，因此会从这个模型工具中排除。diagnostic 仍然可见，并在 descendants scope 中带有位置。持久化身份和模式来自每个子 agent 的描述符，消息送达时的鉴权和 Activation 所有权检查仍归服务负责。
 
+<a id="isolated-writer-results"></a>
+
+## 隔离写入者结果
+
+显式启用的 `./integrate` 插件注册 `review_agent_changes`、`commit_agent_changes` 和 `integrate_agents`。它要求 `tools`、`agents`、`sessions`、`sessionPersistence`、`tasks`、`taskReview` 和 `sandboxPolicy`。只有在可用托管 Task worktree 中的确切已注册根 Agent 能使用这些工具。每个子级必须拥有独立记录的隔离分配，并与其不可变直接父级元数据、Workspace、源 worktree 和执行 cwd 相匹配。活跃或驻留子级会被拒绝；冷检查不会激活子级。变更还在执行器中强制检查根级写入权限。
+
+Review 返回有界文件、可选成员 Diff、子级版本与当前提交，以及独立检查的根版本。Commit 要求子级版本，并返回已提交版本与提交。集成选择这些确切子级版本、提交及根版本。[Provider](../../task/task-review-local/README.md) 预检完整批次；冲突返回结构化结果，绝不部分发布或自动解决。这三个工具均使用通用卡片和经 schema 验证的 JSON 文本。普通持久化工具结果保留回执，不宣称人工批准或根交付。[组装示例](../../../examples/headless-agent/writer-integration.cordis.snapshot.yml) 将此显式选项与桌面默认配置分开。检查不是执行租约：另一调用方或进程可能在检查后恢复写入者；本插件不提供跨进程锁定或冲突解决界面。
+
 ## 模型体验
 
 ### 工具 schema
@@ -67,6 +75,20 @@
 #### KV Cache 影响
 
 仅追加；每个结果都位于可复用请求前缀之后。
+
+### 写入者结果
+
+#### 模型看到的内容
+
+显式启用的工具 schema 描述审查、精确版本提交和批量集成。JSON 结果包含有界文件摘要与可选 Diff、确切提交回执，或带贡献者身份与路径的集成回执或冲突。权限拒绝、陈旧版本、脏工作树与 Git 失败返回出错结果。
+
+#### Token 影响
+
+显式启用后的固定 schema 成本，以及随数据变化的有界审查输出与贡献者身份。
+
+#### KV Cache 影响
+
+结果仅追加；启用工具会改变可复用的 schema 前缀。
 
 ## 已知限制与暂缓事项
 

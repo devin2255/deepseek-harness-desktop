@@ -1784,6 +1784,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Durable apply facts for Session logging.',
       },
       {
+        signature: 'abstract integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): Promise<TaskIntegrationResult>',
+        description: 'Preflight all selected writer commits and publish their combined result on the root branch. Requires exact review revisions, clean working trees, and direct child assignments. Conflicts change no working tree or branch; Git objects from preflight may remain unreachable.',
+        parameters: [{ name: 'request', description: 'root assignment and exact reviewed contributor commits in merge order.' }, { name: 'signal', description: 'cancellation before final publication; publication itself is bounded but not caller-cancellable.' }],
+        returns: 'the complete integration receipt or a preflight conflict with exact contributor identities.',
+      },
+      {
         signature: 'abstract discard( request: DiscardTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskDiscardReceipt>',
         description: 'Release one Task worktree after exact-state and loss confirmation checks.',
         parameters: [{ name: 'request', description: 'Recorded assignment, expected revision, and loss acknowledgement.' }, { name: 'signal', description: 'Optional cancellation before worktree removal.' }],
@@ -3385,6 +3391,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type InboxTarget = \'next-turn\' | \'next-step\';',
   },
   {
+    name: 'IntegrateTaskReviewRequest',
+    declaration: 'export interface IntegrateTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly inputs: readonly TaskIntegrationInput[];\n    readonly message: string;\n}',
+  },
+  {
     name: 'InvariantFailure',
     declaration: 'export type InvariantFailure = (message: string) => never;',
   },
@@ -4563,6 +4573,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TaskFreshness',
     declaration: 'export type TaskFreshness = \'live\' | \'disconnected\' | \'unavailable\';',
+  },
+  {
+    name: 'TaskIntegrationConflict',
+    declaration: 'export interface TaskIntegrationConflict {\n    readonly kind: \'conflict\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly headBefore: string;\n    readonly contributors: readonly TaskIntegrationContributor[];\n    readonly conflictingSessionId: SessionId;\n    readonly paths: readonly string[];\n    readonly detectedAt: number;\n}',
+  },
+  {
+    name: 'TaskIntegrationContributor',
+    declaration: 'export interface TaskIntegrationContributor {\n    readonly sessionId: SessionId;\n    readonly branch: string;\n    readonly commit: string;\n    readonly reviewRevision: TaskReviewRevision;\n}',
+  },
+  {
+    name: 'TaskIntegrationInput',
+    declaration: 'export interface TaskIntegrationInput {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly commit: string;\n}',
+  },
+  {
+    name: 'TaskIntegrationReceipt',
+    declaration: 'export interface TaskIntegrationReceipt {\n    readonly kind: \'integrated\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly headBefore: string;\n    readonly headAfter: string;\n    readonly contributors: readonly TaskIntegrationContributor[];\n    readonly integratedAt: number;\n}',
+  },
+  {
+    name: 'TaskIntegrationResult',
+    declaration: 'export type TaskIntegrationResult = TaskIntegrationReceipt | TaskIntegrationConflict;',
   },
   {
     name: 'TaskListChange',

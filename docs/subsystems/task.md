@@ -29,6 +29,75 @@ interface CreateTaskWorktreeRequest {
 
 The [local Provider](../../packages/task/task-worktree-local/README.md) rejects a captured-HEAD mismatch with `WORKTREE_SOURCE_MOVED` and a required-clean source with changes with `WORKTREE_SOURCE_DIRTY`, before creating the branch or directory. Omitting these optional requirements retains root-task creation from the source's committed HEAD without copying dirty content.
 
+## Writer integration
+
+The optional [writer tools](../../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) consume batch integration independently of root delivery. Exact reviewed commits merge only into the managed root; ordinary durable tool results retain success or non-mutating conflict receipts. These values are not yet Task projection fields or conflict attention events.
+
+```ts type-equiv
+/** One exact committed writer result selected for integration. */
+interface TaskIntegrationInput {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly commit: string
+}
+```
+
+```ts type-equiv
+/** Batch of writer commits to merge into their recorded root execution worktree. */
+interface IntegrateTaskReviewRequest {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly inputs: readonly TaskIntegrationInput[]
+  readonly message: string
+}
+```
+
+```ts type-equiv
+/** Exact contributor identities retained by either integration outcome. */
+interface TaskIntegrationContributor {
+  readonly sessionId: SessionId
+  readonly branch: string
+  readonly commit: string
+  readonly reviewRevision: TaskReviewRevision
+}
+```
+
+```ts type-equiv
+/** Successful batch integration; the user's source checkout is not changed. */
+interface TaskIntegrationReceipt {
+  readonly kind: 'integrated'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly headAfter: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly integratedAt: number
+}
+```
+
+```ts type-equiv
+/** Preflight conflict; root and child working trees and branches remain unchanged. */
+interface TaskIntegrationConflict {
+  readonly kind: 'conflict'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly conflictingSessionId: SessionId
+  readonly paths: readonly string[]
+  readonly detectedAt: number
+}
+```
+
+```ts type-equiv
+/** Integration either publishes the complete batch or reports a non-mutating conflict. */
+type TaskIntegrationResult = TaskIntegrationReceipt | TaskIntegrationConflict
+```
+
 ## Projection values
 
 `TaskSnapshot` is the detached whole-row value shared by providers, hosts, and clients. It includes the root Session id, optional source Workspace id, optional complete `executionWorkspace`, owned descendant ids, durable task facts and delivery receipts, derived status, attention items, live-data freshness, update time, and the root Session sequence used for compare-and-set mutations. A durable worktree assignment owns the projected Workspace identity even if transient membership is unavailable after restart. `TaskListSnapshot` establishes an ordered baseline for one runtime generation. `TaskListChange` carries whole-row upserts and removals for that same generation.
@@ -89,6 +158,16 @@ abstract commit( request: CommitTaskReviewRequest, signal?: AbortSignal, ): Prom
 abstract apply( request: ApplyTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskApplyReceipt>
 
 /**
+ * Preflight all selected writer commits and publish their combined result on the root branch.
+ * Requires exact review revisions, clean working trees, and direct child assignments.
+ * Conflicts change no working tree or branch; Git objects from preflight may remain unreachable.
+ * @param request - root assignment and exact reviewed contributor commits in merge order.
+ * @param signal - cancellation before final publication; publication itself is bounded but not caller-cancellable.
+ * @returns the complete integration receipt or a preflight conflict with exact contributor identities.
+ */
+abstract integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): Promise<TaskIntegrationResult>
+
+/**
  * Release one Task worktree after exact-state and loss confirmation checks.
  * @param request - Recorded assignment, expected revision, and loss acknowledgement.
  * @param signal - Optional cancellation before worktree removal.
@@ -97,7 +176,7 @@ abstract apply( request: ApplyTaskReviewRequest, signal?: AbortSignal, ): Promis
 abstract discard( request: DiscardTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskDiscardReceipt>
 ```
 
-Source: [`packages/task/task-review/src/index.ts:45`](../../packages/task/task-review/src/index.ts)
+Source: [`packages/task/task-review/src/index.ts:47`](../../packages/task/task-review/src/index.ts)
 
 <a id="ctxtasks--taskservice-abstract-seam"></a>
 

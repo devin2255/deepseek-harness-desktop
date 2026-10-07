@@ -29,6 +29,75 @@ interface CreateTaskWorktreeRequest {
 
 [本地 Provider](../../packages/task/task-worktree-local/README.md) 在创建分支或目录之前，用 `WORKTREE_SOURCE_MOVED` 拒绝与捕获 HEAD 不符的源，用 `WORKTREE_SOURCE_DIRTY` 拒绝有更改且要求干净的源。省略这些可选要求时，根任务创建仍基于源的已提交 HEAD，不复制未提交内容。
 
+## 写入者集成
+
+可选[写入者工具](../../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) 独立于根交付消费批量集成。确切的已审查提交只合并到托管根；普通持久化工具结果保留成功或不改变工作树的冲突回执。这些值尚未成为 Task 投影字段或冲突关注事件。
+
+```ts type-equiv
+/** One exact committed writer result selected for integration. */
+interface TaskIntegrationInput {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly commit: string
+}
+```
+
+```ts type-equiv
+/** Batch of writer commits to merge into their recorded root execution worktree. */
+interface IntegrateTaskReviewRequest {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly inputs: readonly TaskIntegrationInput[]
+  readonly message: string
+}
+```
+
+```ts type-equiv
+/** Exact contributor identities retained by either integration outcome. */
+interface TaskIntegrationContributor {
+  readonly sessionId: SessionId
+  readonly branch: string
+  readonly commit: string
+  readonly reviewRevision: TaskReviewRevision
+}
+```
+
+```ts type-equiv
+/** Successful batch integration; the user's source checkout is not changed. */
+interface TaskIntegrationReceipt {
+  readonly kind: 'integrated'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly headAfter: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly integratedAt: number
+}
+```
+
+```ts type-equiv
+/** Preflight conflict; root and child working trees and branches remain unchanged. */
+interface TaskIntegrationConflict {
+  readonly kind: 'conflict'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly conflictingSessionId: SessionId
+  readonly paths: readonly string[]
+  readonly detectedAt: number
+}
+```
+
+```ts type-equiv
+/** Integration either publishes the complete batch or reports a non-mutating conflict. */
+type TaskIntegrationResult = TaskIntegrationReceipt | TaskIntegrationConflict
+```
+
 ## 投影值
 
 `TaskSnapshot` 是 Provider、Host 与客户端共享的分离全行值，其中包括根 Session id、可选源 Workspace id、可选完整 `executionWorkspace`、所属后代 id、持久任务事实与交付收据、派生状态、注意事项、实时数据新鲜度、更新时间，以及用于比较并设置变更的根 Session 序号。应用重启后即使瞬态成员关系不可用，持久 Worktree 分配仍决定投影的 Workspace 标识。`TaskListSnapshot` 建立一个运行时 generation 的有序基线；`TaskListChange` 携带同一 generation 的全行更新与移除项。
@@ -89,6 +158,16 @@ abstract commit( request: CommitTaskReviewRequest, signal?: AbortSignal, ): Prom
 abstract apply( request: ApplyTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskApplyReceipt>
 
 /**
+ * Preflight all selected writer commits and publish their combined result on the root branch.
+ * Requires exact review revisions, clean working trees, and direct child assignments.
+ * Conflicts change no working tree or branch; Git objects from preflight may remain unreachable.
+ * @param request - root assignment and exact reviewed contributor commits in merge order.
+ * @param signal - cancellation before final publication; publication itself is bounded but not caller-cancellable.
+ * @returns the complete integration receipt or a preflight conflict with exact contributor identities.
+ */
+abstract integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): Promise<TaskIntegrationResult>
+
+/**
  * Release one Task worktree after exact-state and loss confirmation checks.
  * @param request - Recorded assignment, expected revision, and loss acknowledgement.
  * @param signal - Optional cancellation before worktree removal.
@@ -97,7 +176,7 @@ abstract apply( request: ApplyTaskReviewRequest, signal?: AbortSignal, ): Promis
 abstract discard( request: DiscardTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskDiscardReceipt>
 ```
 
-Source: [`packages/task/task-review/src/index.ts:45`](../../packages/task/task-review/src/index.ts)
+Source: [`packages/task/task-review/src/index.ts:47`](../../packages/task/task-review/src/index.ts)
 
 <a id="ctxtasks--taskservice-abstract-seam"></a>
 

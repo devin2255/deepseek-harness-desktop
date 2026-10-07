@@ -10,6 +10,8 @@ Commit 会暂存完整、已审查的最终文件树，并在 Task 分支写入�
 
 每条 Git 命令都不经过 shell，而是通过受管子进程服务运行，并遵守已配置的输出、截止时间和终止上限。
 
+批量集成要求 Git 支持 `merge-tree --write-tree`，根与已提交子级的审查版本准确，且工作树干净。它将完整合并历史准备为不可达 Git 对象，重新检查每项选择，再向根执行 worktree 发布一次快进。冲突不改变任何分支、index 或工作树。调用方取消会停止准备，但不会中断最终有界发布或验证。发布失败会报告错误，不进行破坏性 reset；外部 Git 写入者与钩子不受锁定。参见[集成决策](../../../.agents/notes/implemented/feature/2026-10-07-batch-writer-integration.md)。
+
 ## 配置
 
 - `gitCommand`——Git 可执行文件的名称或绝对路径；默认值为 `git`。
@@ -19,14 +21,15 @@ Commit 会暂存完整、已审查的最终文件树，并在 Task 分支写入�
 - `maxDiffBytes`——返回的 UTF-8 patch 上限；默认值为 2 MiB。
 - `maxPatchBytes`——Apply stdin 的完整二进制 patch 上限；默认值为 16 MiB。
 - `maxFiles`——摘要返回的文件数量；默认值为 2,000。
+- `maxIntegrationInputs`——每批集成选中的写入者数量上限；默认值为 16。
 
 ## 模型体验
 
-### 仅供操作者使用的 Git 审查
+### Git 审查能力
 
 #### 模型看到的内容
 
-没有。本 Provider 为 Host 侧 Consumer 实现 `ctx.taskReview`，不提供工具、提示词、Session 事件或请求字段。
+没有直接内容。本 Provider 不提供工具、提示词、Session 事件或请求字段；Consumer 负责展示和记录。可选的 `review_agent_changes`、`commit_agent_changes` 和 `integrate_agents` 工具公开它的有上限 Git 审查数据与操作回执。
 
 #### Token 影响
 
@@ -39,4 +42,4 @@ Commit 会暂存完整、已审查的最终文件树，并在 Task 分支写入�
 ## 已知限制与后续工作
 
 - Apply 会在源检出目录暂存已审查 patch，但不会在源分支创建 commit。
-- 暂不支持 Submodule 与子 writer worktree 集成。
+- 暂不支持 Submodule、自动解决冲突和跨进程执行租约。

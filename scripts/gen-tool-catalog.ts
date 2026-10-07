@@ -7,7 +7,9 @@
  */
 
 import { globSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, join, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
@@ -35,6 +37,11 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentReportDelivery } from '@deepseek-ai/dsh-subagent'
 import * as ToolSubagentControl from '@deepseek-ai/dsh-tool-subagent-control'
 import * as ToolSubagentListAgents from '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+import * as ToolSubagentIntegrate from '@deepseek-ai/dsh-tool-subagent-control/integrate'
+import SessionPersistenceJsonl from '@deepseek-ai/dsh-session-persistence-jsonl'
+import TaskSession from '@deepseek-ai/dsh-task-session'
+import LocalTaskReview from '@deepseek-ai/dsh-task-review-local'
+import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import * as ToolSubagentReport from '@deepseek-ai/dsh-tool-subagent-report'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as SkillFileSystem from '@deepseek-ai/dsh-skill-filesystem'
@@ -454,23 +461,35 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-subagent-control',
     dir: 'tool-subagent-control',
     source: {
+      commit_agent_changes: 'packages/subagent/tool-subagent-control/src/integrate.ts',
+      integrate_agents: 'packages/subagent/tool-subagent-control/src/integrate.ts',
       interrupt_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
       list_agents: 'packages/subagent/tool-subagent-control/src/list-agents.ts',
+      review_agent_changes: 'packages/subagent/tool-subagent-control/src/integrate.ts',
       send_message: 'packages/subagent/tool-subagent-control/src/index.ts',
     },
-    requires: ['ctx.tools', 'ctx.subagents', 'ctx.agents and ctx.sessionProjections (list_agents only)'],
-    writes: ['tool/call', 'tool/result', 'child session events through ctx.subagents'],
+    requires: ['ctx.tools', 'ctx.subagents', 'ctx.agents and ctx.sessionProjections (list_agents only)',
+      'ctx.agents, ctx.sessions, ctx.sessionPersistence, ctx.tasks, ctx.taskReview, ctx.sandboxPolicy (writer tools only)'],
+    writes: ['tool/call', 'tool/result', 'child session events through ctx.subagents', 'reviewed writer commits and root integration'],
     async mount(ctx) {
+      const persistenceRoot = await mkdtemp(join(tmpdir(), 'dsh-tool-catalog-'))
+      ctx.effect(() => () => rm(persistenceRoot, { recursive: true, force: true }))
       await ctx.plugin(SubagentRuntime)
       await ctx.plugin(LocalJobRegistry)
       await ctx.plugin(AgentRegistry)
       await ctx.plugin(SessionStore)
       await ctx.plugin(SessionProjectionRegistry)
+      await ctx.plugin(SessionPersistenceJsonl, { root: persistenceRoot, compression: 'none' })
+      await ctx.plugin(TaskSession)
+      await ctx.plugin(LocalSubprocessRuntime)
+      await ctx.plugin(LocalTaskReview)
+      await ctx.plugin(SandboxPolicy, { mode: 'workspace-write', workspaceRoot: persistenceRoot })
       await ctx.plugin(ToolSubagentControl)
       await ctx.plugin(ToolSubagentListAgents)
+      await ctx.plugin(ToolSubagentIntegrate)
     },
     note:
-      'The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries).',
+      'Provider-bound `tool-subagent` instances register delegation tools; this package registers `send_message` and `interrupt_agent` once. Separate `/list-agents` and `/integrate` plugins expose catalog reads and root-owned isolated writer review, commit, and batch integration. Writer tools are opt-in and are not enabled in desktop defaults.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-subagent-report',

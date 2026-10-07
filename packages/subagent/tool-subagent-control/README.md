@@ -10,6 +10,14 @@ The tool performs no lifecycle routing — residency and cold resume belong to t
 
 `list_agents` takes one optional `scope` argument, derives the root id from the calling agent, and projects the service catalog to continuable children without a cursor. The default `children` scope reads `ctx.subagents.listChildren()`; `descendants` reads `ctx.subagents.listDescendants()`, whose one-corpus walk crosses ordinary sessions and one-shot children and renders surviving rows in stable pre-order with `parent=<id> depth=<n>`. The `parent` annotation is the durable direct-parent session id and may name an ordinary session omitted from the output. For the calling agent, only depth-1 child entries are `send_message` candidates; deeper child entries are `interrupt_agent` candidates only. Status comes from the live Agent registry: `running` (active driver), `idle` (resident between turns, possibly waiting on agents it started), or `ready` (storage only and resumable rather than terminal). The service result also contains one-shot session-backed subagents for consumers such as a UI, but those entries are omitted from this model tool because they cannot accept `send_message`. Diagnostics remain visible, with positions in the descendants scope. Durable identity and mode come from each child's descriptor, while delivery-time authority and Activation ownership checks remain the service's.
 
+<a id="isolated-writer-results"></a>
+
+## Isolated writer results
+
+The opt-in `./integrate` plugin registers `review_agent_changes`, `commit_agent_changes`, and `integrate_agents`. It requires `tools`, `agents`, `sessions`, `sessionPersistence`, `tasks`, `taskReview`, and `sandboxPolicy`. Only the exact registered root Agent in its available managed Task worktree can use them. Each child must have its own recorded isolated assignment matching its immutable direct-parent metadata, Workspace, source worktree, and execution cwd. Active or resident children are rejected; cold inspection does not activate them. Mutations additionally enforce root write authority in the executor.
+
+Review returns bounded files, an optional member diff, the child's revision and current commit, and the independently inspected root revision. Commit requires the child revision and returns its committed revision and commit. Integration selects those exact child revisions and commits plus the root revision. The [Provider](../../task/task-review-local/README.md) preflights the complete batch; conflicts return structured results, never partial publication or automatic resolution. All three tools use generic cards and schema-validated JSON text. Ordinary durable tool results retain the receipts without claiming human approval or root delivery. The [assembled example](../../../examples/headless-agent/writer-integration.cordis.snapshot.yml) keeps this opt-in separate from desktop defaults. Inspection is not an execution lease: another caller or process may resume a writer after inspection, and this plugin provides neither cross-process locking nor conflict-resolution UI.
+
 ## Model Experience
 
 ### Tool schema
@@ -67,6 +75,20 @@ Grows linearly with the listed continuable children — the whole tree under the
 #### KV Cache effect
 
 Append-only; each result follows the reusable request prefix.
+
+### Writer result
+
+#### What the model sees
+
+Opt-in tool schemas describe review, exact-revision commit, and batch integration. JSON results contain bounded file summaries and optional diffs, exact commit receipts, or an integration receipt or conflict with contributor identities and paths. Authority denials, stale revisions, dirty trees, and Git failures return errored results.
+
+#### Token effect
+
+Fixed opt-in schema cost plus data-dependent bounded review output and contributor identities.
+
+#### KV Cache effect
+
+Append-only results; enabling the tools changes the reusable schema prefix.
 
 ## Known Limitations and Deferred Work
 
