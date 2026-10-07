@@ -18,9 +18,11 @@ const barrier = Promise.withResolvers<undefined>()
 class FixtureModel extends LlmAdapter {
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     await barrier.promise
-    const transcript = JSON.stringify(options.messages)
-    const name = transcript.includes('continuable-second') ? 'continuable-second'
-      : transcript.includes('continuable-first') ? 'continuable-first' : transcript.includes('writer-a') ? 'writer-a' : 'writer-b'
+    const input = options.messages.filter(message => message.role === 'user').flatMap(message => message.content)
+      .findLast(block => block.type === 'text'
+        && ['writer-a', 'writer-b', 'continuable-first', 'continuable-second'].includes(block.text))
+    if (input?.type !== 'text') throw new Error('Missing explicit writer task input')
+    const name = input.text
     if (options.messages.some(message => message.content.some(block => block.type === 'tool-result' && block.toolCallId === `${name}-write`))) {
       yield { type: 'block-start', index: 0, blockType: 'text' }
       yield { type: 'text-delta', index: 0, text: `${name} done` }
