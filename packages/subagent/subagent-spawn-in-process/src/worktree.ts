@@ -1,14 +1,15 @@
-/** Isolated one-shot writer preparation and durable execution facts. @module @deepseek-ai/dsh-subagent-spawn-in-process/worktree */
+/** Isolated writer preparation and execution validation. @module @deepseek-ai/dsh-subagent-spawn-in-process/worktree */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { InProcessRunOptions } from '@deepseek-ai/dsh-subagent-in-process-driver'
+import type { ContinuableExecutionRequest, ContinuableExecutionSpec } from '@deepseek-ai/dsh-subagent'
+import { effectiveSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import { effectiveApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 import { decodeTaskWorktreeAssignment, TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 import type {} from '@deepseek-ai/dsh-task'
 import type {} from '@deepseek-ai/dsh-task-review'
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
-import type {} from '@deepseek-ai/dsh-user-approval'
 
 /** Recorded link from one isolated writer to its root integration worktree. */
 export interface SubagentWorktreeData {
@@ -51,10 +52,10 @@ export function foldSubagentWorktree(events: readonly SessionEvent[]): SubagentW
  * Capture root authority and prepare a distinct writer checkout without changing its parent.
  * @param parent - delegating root Agent, already executing in an owned Task worktree.
  * @param signal - cancellation shared with child creation.
- * @returns one-shot creation options with captured workspace-write authority.
+ * @returns preparation for one reserved child with captured workspace-write authority.
  * @throws when authority, root assignment, or required capabilities are absent.
  */
-export function isolatedWriterOptions(parent: Agent, signal: AbortSignal): InProcessRunOptions {
+export function prepareIsolatedWriter(parent: Agent, signal: AbortSignal): (sessionId: SessionId) => Promise<ContinuableExecutionSpec> {
   const policy = parent.ctx.get('sandboxPolicy')
   const approval = parent.ctx.get('approval')
   const tasks = parent.ctx.get('tasks')
@@ -74,27 +75,72 @@ export function isolatedWriterOptions(parent: Agent, signal: AbortSignal): InPro
     throw new Error('only a root Task in its available managed integration worktree can delegate isolated writers')
   }
   const parentTaskId = parent.id
-  return {
-    async prepare(sessionId) {
-      const baseline = await review.summarize({ assignment: integration }, signal)
-      if (baseline.dirty) {
-        throw new TaskWorktreeError('Commit the integration worktree before starting isolated writers.', 'WORKTREE_SOURCE_DIRTY')
-      }
-      const assignment = await worktrees.create({
-        taskId: sessionId,
-        workspaceId: integration.workspaceId,
-        workspacePath: integration.path,
-        expectedSourceHead: baseline.headCommit,
-        requireCleanSource: true,
-      }, signal)
-      return {
-        cwd: assignment.path,
-        policies: { sandboxMode: 'workspace-write', approvalPolicy: 'never' },
-        setup(childCtx) {
-          const child = childCtx.agent as Agent
-          child.session.append('subagent/worktree-assigned', { parentTaskId, assignment })
-        },
-      }
-    },
+  return async (sessionId) => {
+    const baseline = await review.summarize({ assignment: integration }, signal)
+    if (baseline.dirty) {
+      throw new TaskWorktreeError('Commit the integration worktree before starting isolated writers.', 'WORKTREE_SOURCE_DIRTY')
+    }
+    const assignment = await worktrees.create({
+      taskId: sessionId,
+      workspaceId: integration.workspaceId,
+      workspacePath: integration.path,
+      expectedSourceHead: baseline.headCommit,
+      requireCleanSource: true,
+    }, signal)
+    return {
+      cwd: assignment.path,
+      policies: { sandboxMode: 'workspace-write', approvalPolicy: 'never' },
+      facts: [{ type: 'subagent/worktree-assigned', data: { parentTaskId, assignment } }],
+    }
+  }
+}
+
+/**
+ * Adapt detached writer preparation to the one-shot factory's setup capability.
+ * @param parent - delegating root Agent in its managed integration worktree.
+ * @param signal - creation cancellation.
+ * @returns one-shot execution options preserving the same assignment and authority.
+ */
+export function isolatedWriterOptions(parent: Agent, signal: AbortSignal): InProcessRunOptions {
+  const prepare = prepareIsolatedWriter(parent, signal)
+  return { async prepare(sessionId) {
+    const execution = await prepare(sessionId)
+    return {
+      cwd: execution.cwd,
+      policies: execution.policies,
+      setup(childCtx) {
+        const session = (childCtx.agent as Agent).session
+        for (const fact of execution.facts) session.append(fact.type, fact.data)
+      },
+    }
+  } }
+}
+
+/**
+ * Validate the actual unpublished writer and its live registered Git worktree.
+ * @param request - actual session metadata and events, direct parent, and cancellation.
+ * @returns after execution identity and recorded authority have been verified.
+ * @throws when ownership, permissions, required services, or live Git identity are unavailable.
+ */
+export async function validateIsolatedWriter(request: ContinuableExecutionRequest): Promise<void> {
+  const ownEvents = request.events.slice(request.meta.seedLength ?? 0)
+  const recorded = foldSubagentWorktree(ownEvents)
+  const worktrees = request.parent.ctx.get('taskWorktrees')
+  const root = request.parent.ctx.get('tasks')?.snapshot().tasks.find(task => task.taskId === request.parent.id)
+  if (recorded === undefined || worktrees === undefined || root?.executionWorkspace === undefined
+    || root.discardReceipt !== undefined || request.parent.session.header.origin === 'subagent'
+    || recorded.parentTaskId !== request.parent.id || recorded.assignment.taskId !== request.sessionId
+    || request.meta.origin !== 'subagent' || request.meta.parentSession !== request.parent.id
+    || request.meta.cwd !== recorded.assignment.path
+    || recorded.assignment.sourcePath !== root.executionWorkspace.path
+    || request.parent.session.header.cwd !== root.executionWorkspace.path) {
+    throw new Error('isolated writer execution does not match its available root Task, Session, and directory')
+  }
+  const mode = effectiveSandboxMode(ownEvents)
+  if ((mode !== 'workspace-write' && mode !== 'read-only') || effectiveApprovalPolicy(ownEvents) !== 'never') {
+    throw new Error('isolated writer execution requires recorded non-escalating sandbox and approval policies')
+  }
+  if (await worktrees.inspect(recorded.assignment, request.signal) !== 'available') {
+    throw new TaskWorktreeError('The isolated writer worktree is missing or its Git identity changed.', 'WORKTREE_UNAVAILABLE')
   }
 }

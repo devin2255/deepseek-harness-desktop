@@ -20,6 +20,8 @@ it('executes two isolated writers without modifying their integration or source 
     { stage: 'published', bothRunning: true, separateDirectories: true, sameBase: true, parentRecorded: true },
     { stage: 'written', stopReasons: ['completed', 'completed'], independentContents: true, rootUnchanged: true, sourceUnchanged: true },
     { stage: 'cold-inspection', assignmentRetained: true, cwdRetained: true, childGone: true },
+    { stage: 'continued', sameAssignment: true, sameDirectory: true, bothWritesPresent: true, childAuthorityRetained: true, oneExecutionOwner: true },
+    { stage: 'identity-rejected', refused: true, childGone: true, noAcceptedFollowup: true, rootUnchanged: true, sourceUnchanged: true },
   ])
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expectedPath, result.stdout)
   expect(result.stdout).toBe(await readFile(expectedPath, 'utf8'))

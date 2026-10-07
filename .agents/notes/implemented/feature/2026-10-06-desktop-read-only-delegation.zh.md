@@ -30,7 +30,7 @@ Status: implemented
 
 子写入者 worktree、显式 Integration 节点与冲突注意事项仍是必须完成的产品工作。此决策不提供并行写入，不能据此将更广泛的任务控制提案标记为完成。进程外提供方保留自身部署策略。
 
-独立配置的[隔离写入准备](2026-10-06-isolated-subagent-writer-preparation.md) 提供子 worktree 中的单次执行，不改变此共享子 agent 默认值。它的显式权限与持久执行记录不会取代此委派决策。
+独立配置的[隔离写入准备](2026-10-06-isolated-subagent-writer-preparation.md) 与[续行](2026-10-07-isolated-writer-continuation.md) 提供子 worktree 中的执行，不改变此共享子 agent 默认值。其显式权限与持久执行记录不会取代此委派决策。
 
 ## 验证
 

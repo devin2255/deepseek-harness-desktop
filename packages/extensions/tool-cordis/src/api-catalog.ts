@@ -3046,7 +3046,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContinuableCreateSpec',
-    declaration: 'export interface ContinuableCreateSpec {\n    readonly seed?: readonly SessionEvent[];\n}',
+    declaration: 'export interface ContinuableCreateSpec {\n    readonly seed?: readonly SessionEvent[];\n    readonly execution?: ContinuableExecutionSpec;\n}',
+  },
+  {
+    name: 'ContinuableExecutionRequest',
+    declaration: 'export interface ContinuableExecutionRequest {\n    readonly sessionId: SessionId;\n    readonly parent: Agent;\n    readonly meta: SessionHeader;\n    readonly events: readonly SessionEvent[];\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'ContinuableExecutionSpec',
+    declaration: 'export interface ContinuableExecutionSpec {\n    readonly cwd: string;\n    readonly policies: DelegatedPolicyOverrides;\n    readonly facts: readonly SubagentInitializationEvent[];\n}',
   },
   {
     name: 'ContinuableSetupContribution',
@@ -3127,6 +3135,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DefineTaskRequest',
     declaration: 'export interface DefineTaskRequest {\n    readonly goal: string;\n    readonly criteria: readonly DefineTaskCriterion[];\n    readonly expectedSeq: number;\n}',
+  },
+  {
+    name: 'DelegatedPolicyOverrides',
+    declaration: 'export interface DelegatedPolicyOverrides {\n    readonly sandboxMode: SandboxMode | undefined;\n    readonly approvalPolicy: \'never\' | undefined;\n}',
   },
   {
     name: 'DiffCallView',
@@ -4373,12 +4385,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubagentFollowupOptions {\n    readonly source: MessageSource;\n    readonly signal: AbortSignal;\n}',
   },
   {
+    name: 'SubagentInitializationEvent',
+    declaration: 'export type SubagentInitializationEvent = {\n    [K in Exclude<SessionEventType, SurfaceEventType>]: Readonly<Pick<SessionEvent<K>, \'type\' | \'data\'>>;\n}[Exclude<SessionEventType, SurfaceEventType>];',
+  },
+  {
     name: 'SubagentInterruptAuthority',
     declaration: 'export type SubagentInterruptAuthority = {\n    readonly kind: \'user\';\n    readonly parentSessionId: SessionId;\n} | {\n    readonly kind: \'ancestor\';\n    readonly agent: Agent;\n};',
   },
   {
     name: 'SubagentProvider',
-    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
+    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n    validateContinuableExecution?(request: ContinuableExecutionRequest): Promise<void>;\n}',
   },
   {
     name: 'SubagentReportDelivery',

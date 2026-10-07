@@ -12,6 +12,8 @@ With `workspaceMode: isolated-worktree`, only a writable root Task executing in 
 
 `subagent/worktree-assigned` is model-hidden execution data; `foldSubagentWorktree` strictly decodes its unique assignment for cold inspection. Creation failures and cancellation preserve any created checkout for explicit recovery rather than deleting it. The holder still owns the published Agent lifecycle, not automatic worktree cleanup.
 
+`prepareContinuable()` also supports isolated writers. The continuation manager records detached cwd, policies, assignment, and the required `subagent/execution-provider` identity before publication. Initial creation and cold resume validate the actual unpublished Session against its direct root Task, recorded permissions, and live Git worktree identity. Missing or detached worktrees, contradictory metadata, elevated authority, and an absent or incapable validation provider reject before publication or message acceptance. Dirty child files are retained and do not prevent continuation; a changed parent permission does not widen child authority. See [owned-execution continuation](../../../.agents/notes/implemented/feature/2026-10-07-isolated-writer-continuation.md).
+
 The shared driver owns depth checking, persona and tool-filter setup, structured output, required-signal cancellation, one-shot execution, result reading, and quiescent disposal. A startup rejection leaves no published child; provider unload after fulfillment does not revoke the holder-owned run.
 
 ## Capabilities
@@ -23,7 +25,7 @@ Spawn advertises `{ outputSchema: true, depthLimit: true, toolFilter: true, pers
 | Key | Meaning |
 |---|---|
 | `providerName` | Registry name on `ctx.subagents` (default `spawn`). |
-| `workspaceMode` | `shared` (default), or `isolated-worktree` for a one-shot writer. |
+| `workspaceMode` | `shared` (default), or `isolated-worktree` for one-shot or continuable writers. |
 
 ## Model Experience
 
@@ -58,4 +60,4 @@ Append-only; newly visible content follows the reusable request prefix and does 
 ## Known Limitations and Deferred Work
 
 - **Fresh means no parent transcript** — the child inherits cwd, lineage, model, and explicitly configured persona/tool restrictions, but none of the parent's conversation; use the fork provider when completed-turn context is required.
-- **Isolated writers are one-shot** — they expose no continuation preparation. Cold assignment inspection is supported; continuable writing, explicit integration, conflict resolution, and orphan recovery are not implemented. This option is not enabled in the desktop's shipped tool roster.
+- **Execution is not integration** — isolated writers support continuation, but explicit integration, conflict resolution, and orphan recovery are not implemented. This option is not enabled in the desktop's shipped tool roster.

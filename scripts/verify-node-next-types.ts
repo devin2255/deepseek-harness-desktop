@@ -3,7 +3,8 @@
  * TypeScript ESM project using NodeNext resolution.
  *
  * Run after `pnpm run build` has emitted declaration files under package
- * `lib/types` directories.
+ * `lib/types` directories. Package-owned `tests/node-next-types.mts` fixtures
+ * compile separately so unrelated package augmentations cannot mask missing declarations.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -87,6 +88,16 @@ function linkPackage(pkg: WorkspacePackage, nodeModules: string): void {
   symlinkSync(pkg.dir, link, 'dir')
 }
 
+/** Compile one external project without the repository's source path aliases. */
+function typecheck(project: string): void {
+  // Invoke tsc's JS entry directly: Windows cannot spawn the extensionless shim,
+  // and shell-based .cmd argument joining loses escaping for project paths.
+  execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', project, '--pretty', 'false'], {
+    cwd: root,
+    stdio: 'pipe',
+  })
+}
+
 const packages = workspacePackages()
 const badSpecifiers = relativeSpecifiersMissingExtensions()
 if (badSpecifiers.length > 0) {
@@ -121,20 +132,20 @@ try {
   }
 
   writeFileSync(resolve(tmp, 'package.json'), `${JSON.stringify({ type: 'module', private: true }, null, 2)}\n`)
+  const compilerOptions = {
+    target: 'es2024',
+    module: 'NodeNext',
+    moduleResolution: 'NodeNext',
+    strict: true,
+    // Third-party SDK declarations can have their own lib-check noise under a
+    // symlinked temp install. The explicit scan above owns our regression:
+    // relative specifiers without file extensions in built declarations.
+    skipLibCheck: true,
+    noEmit: true,
+    types: ['node'],
+  }
   writeFileSync(resolve(tmp, 'tsconfig.json'), `${JSON.stringify({
-    compilerOptions: {
-      target: 'es2024',
-      module: 'NodeNext',
-      moduleResolution: 'NodeNext',
-      strict: true,
-      // Third-party SDK declarations can have their own lib-check noise under a
-      // symlinked temp install. The explicit scan above owns our regression:
-      // relative specifiers without file extensions in built declarations.
-      skipLibCheck: true,
-      preserveSymlinks: true,
-      noEmit: true,
-      types: ['node'],
-    },
+    compilerOptions,
     include: ['index.ts'],
   }, null, 2)}\n`)
 
@@ -143,15 +154,16 @@ try {
     .join('\n')
   writeFileSync(resolve(tmp, 'index.ts'), `${imports}\n`)
 
-  // tsc's JS entry via the current node, not the .bin shim: the extensionless
-  // shim isn't spawnable on Windows (CVE-2024-27980) and the .cmd variant needs
-  // shell:true, which space-joins args UNESCAPED (DEP0190) — a hazard for the
-  // temp tsconfig path. The JS entry behaves identically on every platform.
-  execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', resolve(tmp, 'tsconfig.json'), '--pretty', 'false'], {
-    cwd: root,
-    stdio: 'pipe',
-  })
-  console.log(`verify-node-next-types: ${packages.length} workspace package declaration API(s) compile under NodeNext.`)
+  typecheck(resolve(tmp, 'tsconfig.json'))
+  const fixtures = packages.map(pkg => resolve(pkg.dir, 'tests/node-next-types.mts')).filter(existsSync)
+  for (const [index, fixture] of fixtures.entries()) {
+    const consumer = `consumer-${index}.mts`
+    const project = resolve(tmp, `consumer-${index}.json`)
+    writeFileSync(resolve(tmp, consumer), readFileSync(fixture))
+    writeFileSync(project, `${JSON.stringify({ compilerOptions, files: [consumer], include: [] }, null, 2)}\n`)
+    typecheck(project)
+  }
+  console.log(`verify-node-next-types: ${packages.length} workspace package declaration API(s) and ${fixtures.length} isolated consumer(s) compile under NodeNext.`)
 } catch (error: unknown) {
   failed = true
   const output = error as { stdout?: Buffer; stderr?: Buffer }

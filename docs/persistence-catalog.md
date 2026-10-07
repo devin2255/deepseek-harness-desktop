@@ -717,6 +717,17 @@ Source: [`packages/core/session/src/types.ts:254`](../packages/core/session/src/
 
 Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
 
+<a id="subagentexecution-provider--log-only"></a>
+
+#### `subagent/execution-provider` — log-only
+
+```ts persistence-catalog
+/** Model-hidden provider whose execution validation is required before every activation publishes. */
+'subagent/execution-provider': { readonly provider: string }
+```
+
+Source: [`packages/subagent/subagent/src/types.ts:23`](../packages/subagent/subagent/src/types.ts)
+
 <a id="subagentworktree-assigned--log-only"></a>
 
 #### `subagent/worktree-assigned` — log-only
@@ -726,7 +737,7 @@ Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent
 'subagent/worktree-assigned': SubagentWorktreeData
 ```
 
-Source: [`packages/subagent/subagent-spawn-in-process/src/worktree.ts:22`](../packages/subagent/subagent-spawn-in-process/src/worktree.ts)
+Source: [`packages/subagent/subagent-spawn-in-process/src/worktree.ts:23`](../packages/subagent/subagent-spawn-in-process/src/worktree.ts)
 
 ### `task/*`
 

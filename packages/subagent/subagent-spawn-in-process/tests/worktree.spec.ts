@@ -8,6 +8,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionJsonl from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Subagents from '@deepseek-ai/dsh-subagent'
@@ -24,6 +25,7 @@ import { textResponse, toolCallResponse } from '../../../core/agent-loop/tests/m
 import { removeFixtureSafely } from '../../../../scripts/test-fixture-cleanup.ts'
 import * as Spawn from '../src/index.ts'
 import * as Companion from '../src/invariant.ts'
+import { validateIsolatedWriter } from '../src/worktree.ts'
 
 const fixtures: { root: string; ctx: Context }[] = []
 
@@ -73,6 +75,8 @@ async function setup(reviewAvailable = true) {
   const assignment = await ctx.taskWorktrees.create({ taskId: SessionId('root'), workspaceId: WorkspaceId('workspace'), workspacePath: source })
   const parent = ctx.agentLoop.create(assignment.taskId, { provider: 'fixture', model: 'fixture' }, { cwd: assignment.path })
   parent.session.append('task/worktree-assigned', { assignment })
+  // Continuation settlement wakes the parent; this model fixture scripts only child writes.
+  ctx.on('agent/pre-step', async ({ agent }, next) => agent === parent ? { kind: 'reject' as const } : next())
   return { ctx, parent, assignment, source: realpathSync(source) }
 }
 
@@ -166,15 +170,101 @@ it('clamps full root authority and rejects further writer delegation from a chil
   }
 }, 30_000)
 
-it('does not advertise unsupported writer continuation or retain the provider after unload', async () => {
+it('advertises writer validation and does not retain a provider after unload', async () => {
   const { ctx, parent } = await setup()
-  expect(ctx.subagents.getProvider('writer')!.prepareContinuable === undefined).toBe(true)
+  expect(typeof ctx.subagents.getProvider('writer')!.prepareContinuable).toBe('function')
+  expect(typeof ctx.subagents.getProvider('writer')!.validateContinuableExecution).toBe('function')
   expect(await ctx.subagents.getProvider('spawn')!.prepareContinuable!({ parent, sessionId: SessionId('shared-child'), signal: new AbortController().signal })).toEqual({})
   const plugin = ctx.plugin(Spawn, { providerName: 'temporary-writer', workspaceMode: 'isolated-worktree' })
   await plugin
   expect(ctx.subagents.getProvider('temporary-writer')).toBeDefined()
   await plugin.dispose()
   expect(ctx.subagents.getProvider('temporary-writer')).toBeUndefined()
+}, 30_000)
+
+class ContinuingWriterAdapter extends LlmAdapter {
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    const transcript = JSON.stringify(options.messages)
+    const name = transcript.includes('second-pass') ? 'second-pass' : 'first-pass'
+    yield* transcript.includes(`${name}-write`)
+      ? textResponse(`${name} done`)
+      : toolCallResponse(`${name}-write`, 'write', { file_path: `${name}.txt`, content: name })
+  }
+}
+
+it('cold-resumes a continuable writer in its recorded checkout without copying parent authority', async () => {
+  const { ctx, parent, assignment, source } = await setup()
+  ctx.llm.registerAdapter(['fixture'], new ContinuingWriterAdapter())
+  const started = await ctx.subagents.startContinuable({
+    provider: 'writer', label: 'writer', request: { parent, prompt: [{ type: 'text', text: 'first-pass' }] },
+    signal: new AbortController().signal,
+  })
+  await expect.poll(() => ctx.agents.get(started.childId), { timeout: 15_000 }).toBeUndefined()
+  const first = await ctx.sessionPersistence.inspect(started.childId)
+  const recorded = Spawn.foldSubagentWorktree(first.events)!
+  expect(readFileSync(join(recorded.assignment.path, 'first-pass.txt'), 'utf8')).toBe('first-pass')
+  parent.session.append('sandbox/mode', { mode: 'danger-full-access' })
+  await ctx.subagents.followup(parent, started.childId, [{ type: 'text', text: 'second-pass' }], {
+    source: { kind: 'user' }, signal: new AbortController().signal,
+  })
+  await expect.poll(() => ctx.agents.get(started.childId), { timeout: 15_000 }).toBeUndefined()
+  const second = await ctx.sessionPersistence.inspect(started.childId)
+  expect(second.meta.cwd).toBe(recorded.assignment.path)
+  expect(Spawn.foldSubagentWorktree(second.events)).toEqual(recorded)
+  expect(second.events.filter(event => event.type === 'subagent/execution-provider')).toHaveLength(1)
+  expect(second.events.filter(event => event.type === 'sandbox/mode')).toMatchObject([{ data: { mode: 'workspace-write' } }])
+  expect(readFileSync(join(recorded.assignment.path, 'second-pass.txt'), 'utf8')).toBe('second-pass')
+  expect(git(assignment.path, ['status', '--porcelain=v1'])).toBe('')
+  expect(git(source, ['status', '--porcelain=v1'])).toBe('')
+}, 30_000)
+
+it('rejects cold publication when a writer checkout loses its registered branch identity', async () => {
+  const { ctx, parent } = await setup()
+  ctx.llm.registerAdapter(['fixture'], new ContinuingWriterAdapter())
+  const started = await ctx.subagents.startContinuable({
+    provider: 'writer', label: 'writer', request: { parent, prompt: [{ type: 'text', text: 'first-pass' }] },
+    signal: new AbortController().signal,
+  })
+  await expect.poll(() => ctx.agents.get(started.childId), { timeout: 15_000 }).toBeUndefined()
+  const before = await ctx.sessionPersistence.inspect(started.childId)
+  const recorded = Spawn.foldSubagentWorktree(before.events)!
+  git(recorded.assignment.path, ['checkout', '--detach'])
+  await expect(ctx.subagents.followup(parent, started.childId, [{ type: 'text', text: 'second-pass' }], {
+    source: { kind: 'user' }, signal: new AbortController().signal,
+  })).rejects.toMatchObject({ code: 'NOT_RESUMABLE', cause: { code: 'WORKTREE_UNAVAILABLE' } })
+  expect(ctx.agents.get(started.childId)).toBeUndefined()
+  expect(existsSync(join(recorded.assignment.path, 'second-pass.txt'))).toBe(false)
+}, 30_000)
+
+it('rejects contradictory durable writer metadata and elevated policies, but permits reduced authority', async () => {
+  const { ctx, parent } = await setup()
+  ctx.llm.registerAdapter(['fixture'], new ContinuingWriterAdapter())
+  const started = await ctx.subagents.startContinuable({
+    provider: 'writer', label: 'writer', request: { parent, prompt: [{ type: 'text', text: 'first-pass' }] },
+    signal: new AbortController().signal,
+  })
+  await expect.poll(() => ctx.agents.get(started.childId), { timeout: 15_000 }).toBeUndefined()
+  const saved = await ctx.sessionPersistence.inspect(started.childId)
+  const request = { sessionId: started.childId, parent, meta: saved.meta, events: saved.events, signal: new AbortController().signal }
+  const { origin, ...ordinaryMeta } = saved.meta
+  expect(origin).toBe('subagent')
+  for (const meta of [
+    { ...saved.meta, cwd: parent.session.header.cwd! },
+    { ...saved.meta, parentSession: SessionId('other') },
+    ordinaryMeta,
+  ]) await expect(validateIsolatedWriter({ ...request, meta })).rejects.toThrow('does not match')
+  await expect(validateIsolatedWriter({ ...request, events: saved.events.filter(event => event.type !== 'subagent/worktree-assigned') }))
+    .rejects.toThrow('does not match')
+  for (const mode of ['danger-full-access', undefined] as const) {
+    const events = saved.events.flatMap<SessionEvent>(event => event.type !== 'sandbox/mode' ? [event]
+      : mode === undefined ? [] : [{ ...event, data: { ...event.data, mode } }])
+    await expect(validateIsolatedWriter({ ...request, events })).rejects.toThrow('non-escalating')
+  }
+  await expect(validateIsolatedWriter({ ...request,
+    events: saved.events.filter(event => event.type !== 'approval/policy'),
+  })).rejects.toThrow('non-escalating')
+  await expect(validateIsolatedWriter({ ...request, events: saved.events.map(event => event.type === 'sandbox/mode'
+    ? { ...event, data: { ...event.data, mode: 'read-only' as const } } : event) })).resolves.toBeUndefined()
 }, 30_000)
 
 it('rejects a missing review capability without creating or publishing a writer', async () => {

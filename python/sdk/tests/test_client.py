@@ -24,6 +24,8 @@ from deepseek_harness import (
 def test_isolated_writer_assignment_stays_in_child_notifications(tmp_path: Path) -> None:
     fixture = Path(__file__).resolve().parents[3] / "scripts/snapshots/isolated-writer-sdk/assignment.json"
     expected = json.loads(fixture.read_text())
+    execution = fixture.with_name("execution.json")
+    owner = json.loads(execution.read_text())
     script = tmp_path / "writer_runtime.py"
     script.write_text(
         """
@@ -32,6 +34,7 @@ import sys
 from pathlib import Path
 
 assignment = json.loads(Path(sys.argv[1]).read_text())
+owner = json.loads(Path(sys.argv[2]).read_text())
 def notify(method, params):
     print(json.dumps({"jsonrpc": "2.0", "method": method, "params": params}), flush=True)
 for line in sys.stdin:
@@ -44,6 +47,7 @@ for line in sys.stdin:
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"messageId": "message-1"}}), flush=True)
         notify("subagent.started", {"parentSessionId": root, "childSessionId": "parent-1-child"})
         notify("session.event", {"sessionId": "parent-1-child", "event": {"type": "subagent/worktree-assigned", "seq": 2, "time": 1, "data": assignment}})
+        notify("session.event", {"sessionId": "parent-1-child", "event": {"type": "subagent/execution-provider", "seq": 3, "time": 1, "data": owner}})
         notify("session.status", {"sessionId": root, "status": "idle"})
     elif msg["method"] == "shutdown":
         print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
@@ -51,7 +55,7 @@ for line in sys.stdin:
 """.strip()
     )
     with DeepSeekHarness(
-        launch_args_override=(sys.executable, str(script), str(fixture)), cwd=str(tmp_path),
+        launch_args_override=(sys.executable, str(script), str(fixture), str(execution)), cwd=str(tmp_path),
     ) as harness:
         result = harness.run("delegate", session_id="parent-1")
     writer = next(notification for notification in result.notifications
@@ -59,6 +63,12 @@ for line in sys.stdin:
                   and notification.payload["sessionId"] == "parent-1-child")
     assert writer.payload["event"]["data"] == expected
     assert all(event["type"] != "subagent/worktree-assigned" for event in result.events)
+    execution_event = next(notification for notification in result.notifications
+                           if notification.method == "session.event"
+                           and notification.payload["event"]["type"] == "subagent/execution-provider")
+    assert execution_event.payload["sessionId"] == "parent-1-child"
+    assert execution_event.payload["event"]["data"] == owner
+    assert all(event["type"] != "subagent/execution-provider" for event in result.events)
 
 
 def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -113,6 +113,20 @@ describe('settleRunResult', () => {
     expect(onAbort).not.toHaveBeenCalled()
   })
 
+  it('keeps local cancellation when a successful transport result arrives afterward', async () => {
+    const { controller, onAbort } = wiring()
+    const result = await settleRunResult({
+      attempt: async () => ({ output: [{ type: 'text', text: 'late' }], stopReason: 'completed' }),
+      collectOutput: () => [{ type: 'text', text: 'partial' }],
+      cancelled: () => true,
+      signal: controller.signal,
+      onAbort,
+    })
+    expect(result).toEqual({ output: [{ type: 'text', text: 'partial' }], stopReason: 'aborted' })
+    controller.abort()
+    expect(onAbort).not.toHaveBeenCalled()
+  })
+
   it('reads an in-flight rejection as aborted when cancellation already settled', async () => {
     const { controller, onAbort } = wiring()
     const result = await settleRunResult({

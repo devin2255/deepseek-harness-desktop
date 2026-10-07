@@ -22,13 +22,13 @@ The immutable, model-hidden `subagent/worktree-assigned` event records the root 
 
 **Let each child choose a directory through tool arguments.** Rejected because a suggested path neither changes its execution cwd nor records trustworthy ownership. The Provider creates and records the worktree before publication.
 
-**Reuse the continuation manager without recorded execution support.** Rejected because cold continuation reconstructs children independently of the establishing Provider. Isolated spawn therefore exposes no continuation preparation until that lifecycle can validate its recorded worktree.
+**Reuse the continuation manager without recorded execution support.** Rejected because ordinary cold continuation reconstructs children independently of the establishing Provider. [Owned-execution continuation](2026-10-07-isolated-writer-continuation.md) supplies the required recorded identity and live validation without transferring child lifecycle ownership.
 
 ## Consequences
 
 Explicitly configured one-shot writers execute in separate branches and directories without copying root changes or modifying the source checkout. The root and children retain separate logs and authority. Generic workspace-write still includes the platform's documented writable temporary areas; worktree separation is not a new kernel sandbox.
 
-The desktop tool roster does not enable this option. Continuable writing, explicit Integration nodes, conflict attention, worktree cleanup, and review UI for child results remain unfinished parts of the [mission-control proposal](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md). This execution slice is not completion of parallel collaboration or the desktop MVP.
+The desktop tool roster does not enable this option. [Continuable writing](2026-10-07-isolated-writer-continuation.md) shares this preparation; explicit Integration nodes, conflict attention, worktree cleanup, and review UI for child results remain unfinished parts of the [mission-control proposal](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md). This execution slice is not completion of parallel collaboration or the desktop MVP.
 
 ## Verification
 

@@ -22,13 +22,13 @@ spawn Provider 接受显式 `workspaceMode: isolated-worktree` 选择。只有 c
 
 **让每个子 agent 通过工具参数选择目录。** 不予采纳，因为建议路径既不改变执行 cwd，也不记录可信所有权。Provider 在发布之前创建并记录 worktree。
 
-**在没有执行记录支持时复用续行管理器。** 不予采纳，因为冷续行独立于建立子 agent 的 Provider 重建执行。因此，隔离 spawn 在其生命周期能够验证记录的 worktree 之前不提供续行准备。
+**在没有执行记录支持时复用续行管理器。** 不予采纳，因为普通冷续行独立于建立子 agent 的 Provider 重建执行。[自有执行目录的续行](2026-10-07-isolated-writer-continuation.md) 提供必需的记录身份和实时校验，而不转移子 agent 生命周期所有权。
 
 ## 后果
 
 显式配置的单次写入 agent 在独立分支和目录中执行，不复制根更改，也不修改源检出。根与子 agent 保留独立日志和权限。通用 workspace-write 仍包含平台文档规定的可写临时区域；worktree 分离不是新的内核沙箱。
 
-桌面工具集合尚未启用此选项。可续行写入、显式 Integration 节点、冲突关注项、worktree 清理和子结果审查界面仍是[任务控制中心提案](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md) 未完成的部分。此执行切片不代表并行协作或桌面 MVP 已完成。
+桌面工具集合尚未启用此选项。[可续行写入](2026-10-07-isolated-writer-continuation.md) 共享此准备机制；显式 Integration 节点、冲突关注项、worktree 清理和子结果审查界面仍是[任务控制中心提案](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md) 未完成的部分。此执行切片不代表并行协作或桌面 MVP 已完成。
 
 ## 验证
 

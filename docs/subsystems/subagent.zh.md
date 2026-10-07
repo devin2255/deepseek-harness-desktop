@@ -12,7 +12,7 @@ Service Definition：[dsh-subagent](../../packages/subagent/subagent)（`ctx.sub
 
 ## 隔离的进程内执行
 
-[spawn Provider](../../packages/subagent/subagent-spawn-in-process/README.md) 可以在发布子 agent 前准备独立的单次写入 worktree。`subagent/worktree-assigned` 属于子 agent 自身日志，不包含 fork 初始内容，并记录根集成所有者。`foldSubagentWorktree` 拒绝重复或畸形分配；Provider 不变量在追加或恢复发布前验证实际 Session id、父级、来源和 cwd。
+[spawn Provider](../../packages/subagent/subagent-spawn-in-process/README.md) 可以在发布子 agent 前准备独立的单次或可续行写入 worktree。`subagent/worktree-assigned` 属于子 agent 自身日志，不包含 fork 初始内容，并记录根集成所有者。`foldSubagentWorktree` 拒绝重复或畸形分配；Provider 不变量在追加或恢复发布前验证实际 Session id、父级、来源和 cwd。
 
 ```ts type-equiv
 /** Recorded link from one isolated writer to its root integration worktree. */
@@ -278,7 +278,7 @@ interface SubagentReportOptions {
 }
 ```
 
-提供方只参与准备初始创建 spec，`spawn` 与 `fork` 在此有所不同。其返回的 spec 只携带分离的、提供方专属的创建输入——目前是可选的父级历史种子——不含 Agent、`AgentHandle`、提示词投递、结果、dispose 或恢复操作。冷恢复根本不经由提供方分发：管理器折叠通用描述符，通过同一个 activation-owner 作用域调用 `ctx.agents.resume()`，并提交等待中的轮次。
+提供方准备分离的初始历史和可选执行数据，绝不提供 Agent 句柄或生命周期操作。管理器通过其 activation-owner 作用域拥有创建和冷恢复。必需的 `subagent/execution-provider` 记录将自有执行绑定到记录的提供方，在发布前调用其 `validateContinuableExecution()`；普通共享子 agent 仍与提供方无关。校验接收实际尚未发布的 Session，失败会同时阻止发布和收件箱准入。参见[自有执行目录的续行](../../.agents/notes/implemented/feature/2026-10-07-isolated-writer-continuation.md)。
 
 ```ts type-equiv
 /**
@@ -315,6 +315,38 @@ interface ContinuableCreateSpec {
    * `CreateAgentOptions.seed`: contiguous from seq 0, lossless JSON, balanced.
    */
   readonly seed?: readonly SessionEvent[]
+  /** Owned execution data requiring this provider's validation before every publication. */
+  readonly execution?: ContinuableExecutionSpec
+}
+```
+
+```ts type-equiv
+/** One provider-owned initialization fact that adds no conversation surface row. */
+type SubagentInitializationEvent = {
+  [K in Exclude<SessionEventType, SurfaceEventType>]: Readonly<Pick<SessionEvent<K>, 'type' | 'data'>>
+}[Exclude<SessionEventType, SurfaceEventType>]
+```
+
+```ts type-equiv
+/** Detached execution inputs for the first activation of an owned workspace. */
+interface ContinuableExecutionSpec {
+  /** Exact execution directory persisted in the child's immutable header. */
+  readonly cwd: string
+  /** Captured child authority, appended after any inherited history. */
+  readonly policies: DelegatedPolicyOverrides
+  /** Model-hidden execution facts appended before publication. */
+  readonly facts: readonly SubagentInitializationEvent[]
+}
+```
+
+```ts type-equiv
+/** Actual unpublished session data presented for execution validation. */
+interface ContinuableExecutionRequest {
+  readonly sessionId: SessionId
+  readonly parent: Agent
+  readonly meta: SessionHeader
+  readonly events: readonly SessionEvent[]
+  readonly signal: AbortSignal
 }
 ```
 
@@ -481,20 +513,27 @@ interface SubagentProvider {
   start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>
   /**
    * OPTIONAL (continuable-creation capability): contribute the detached
-   * creation inputs that distinguish this provider's continuable children —
-   * only whether the child session is seeded with parent history. Method
+   * creation inputs: optional parent-history seed and owned execution data. Method
    * presence IS the capability: the service rejects continuable starts on
    * providers without it, while a provider that has it may still serve
    * ordinary one-shot delegations.
    *
-   * This is the provider's ONLY participation in a continuable child. The
-   * continuation manager owns identity reservation, composition, Agent
-   * creation, prompt delivery, cold resume, ownership, and disposal, so a
-   * provider never sees the child's Agent, handle, turns, or teardown.
+   * The continuation manager owns identity reservation, composition, Agent
+   * creation, prompt delivery, cold resume, ownership, and disposal. A provider
+   * supplying execution data also validates the unpublished session before
+   * each activation; it never owns the child's Agent, handle, turns, or teardown.
    * Distinct preparations may overlap; each follows its own signal and returns
    * data belonging only to `request.sessionId`.
    */
   prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  /**
+   * Validate provider-owned execution facts against the actual unpublished session and live workspace.
+   * Required when preparation supplies execution data; invoked on initial creation and cold resume.
+   * Missing registration or validation capability rejects publication. This method owns no Agent lifecycle.
+   * @param request - actual header, events, direct parent, and publication cancellation.
+   * @returns after recorded authority and execution identity have been verified.
+   */
+  validateContinuableExecution?(request: ContinuableExecutionRequest): Promise<void>
 }
 ```
 
@@ -686,7 +725,7 @@ async start(name: string, request: SubagentStartRequest): Promise<SubagentRun>
 
 Types: [Agent](core.md) · [ContentBlock](llm-streaming.md) · [MessageId](llm-streaming.md) · [SessionId](core.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:171`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:175`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagent-events"></a>
 
@@ -712,7 +751,7 @@ A published child settled. Scope-filtered dispatch uses the same delegating pare
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:166`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:170`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-added--emit"></a>
 
@@ -729,7 +768,7 @@ A provider became resolvable in the registry.
 'subagent/provider-added'(provider: SubagentProvider): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:140`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:144`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-removed--emit"></a>
 
@@ -746,7 +785,7 @@ A provider left the registry. Accepted runs remain holder-owned.
 'subagent/provider-removed'(name: string): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:146`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:150`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentstart--emit"></a>
 
@@ -770,5 +809,5 @@ A provider established a published child. For in-process providers, `ctx.agents.
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:157`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:161`](../../packages/subagent/subagent/src/index.ts)
 <!-- END GENERATED cordis-surface -->

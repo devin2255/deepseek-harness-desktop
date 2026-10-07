@@ -3,6 +3,21 @@
   "entries": [
     {
       "doc": "docs/subsystems/subagent.md",
+      "symbol": "SubagentInitializationEvent",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "ContinuableExecutionSpec",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "ContinuableExecutionRequest",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
       "symbol": "SubagentWorktreeData",
       "source": "packages/subagent/subagent-spawn-in-process/src/worktree.ts"
     },

@@ -61,7 +61,9 @@ describe('DeepSeekHarness', () => {
   it('preserves an isolated child assignment in tree notifications without adding it to root events', async () => {
     const fixture = fileURLToPath(new URL('../../../../scripts/snapshots/isolated-writer-sdk/assignment.json', import.meta.url))
     const expected: unknown = JSON.parse(await readFile(fixture, 'utf8'))
-    const harness = harnessWith({ FAKE_SUBAGENT: '1', FAKE_WRITER_ASSIGNMENT: fixture })
+    const execution = fileURLToPath(new URL('../../../../scripts/snapshots/isolated-writer-sdk/execution.json', import.meta.url))
+    const owner: unknown = JSON.parse(await readFile(execution, 'utf8'))
+    const harness = harnessWith({ FAKE_SUBAGENT: '1', FAKE_WRITER_ASSIGNMENT: fixture, FAKE_WRITER_EXECUTION: execution })
     const result = await harness.run('delegate', { sessionId: 'parent-1' })
     const notification = result.notifications.find(entry => entry.method === 'session.event'
       && entry.params.sessionId === 'parent-1-child'
@@ -71,6 +73,14 @@ describe('DeepSeekHarness', () => {
       sessionId: 'parent-1-child', event: { type: 'subagent/worktree-assigned', data: expected },
     } })
     expect(result.events.some(event => event.type === 'subagent/worktree-assigned')).toBe(false)
+    const executionNotification = result.notifications.find(entry => entry.method === 'session.event'
+      && entry.params.sessionId === 'parent-1-child'
+      && typeof entry.params.event === 'object' && entry.params.event !== null
+      && 'type' in entry.params.event && entry.params.event.type === 'subagent/execution-provider')
+    expect(executionNotification).toMatchObject({ method: 'session.event', params: {
+      sessionId: 'parent-1-child', event: { type: 'subagent/execution-provider', data: owner },
+    } })
+    expect(result.events.some(event => event.type === 'subagent/execution-provider')).toBe(false)
   })
 
   it('ignores notifications that precede the submitted message receipt', async () => {

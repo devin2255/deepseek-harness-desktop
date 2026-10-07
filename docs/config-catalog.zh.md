@@ -2202,12 +2202,12 @@ export interface Config {
 export interface Config {
   /** Provider name on `ctx.subagents` (default `spawn`). */
   providerName: string
-  /** Shared parent directory, or a distinct one-shot writer worktree (default `shared`). */
+  /** Shared parent directory, or a distinct writer worktree (default `shared`). */
   workspaceMode?: 'shared' | 'isolated-worktree'
 }
 ```
 
-来源：[`packages/subagent/subagent-spawn-in-process/src/index.ts:29`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
+来源：[`packages/subagent/subagent-spawn-in-process/src/index.ts:31`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
 
 <a id="deepseek-aidsh-subprocess-e2b"></a>
 

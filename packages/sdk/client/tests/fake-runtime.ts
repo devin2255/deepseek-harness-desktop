@@ -137,6 +137,9 @@ function runTurn(sessionId: string): void {
     if (env.FAKE_WRITER_ASSIGNMENT !== undefined) {
       event(childId, 'subagent/worktree-assigned', JSON.parse(readFileSync(env.FAKE_WRITER_ASSIGNMENT, 'utf8')) as object)
     }
+    if (env.FAKE_WRITER_EXECUTION !== undefined) {
+      event(childId, 'subagent/execution-provider', JSON.parse(readFileSync(env.FAKE_WRITER_EXECUTION, 'utf8')) as object)
+    }
     event(childId, 'assistant/message', {
       turn: 0,
       step: 0,

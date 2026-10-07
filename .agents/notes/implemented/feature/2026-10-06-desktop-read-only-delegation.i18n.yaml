@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-06-desktop-read-only-delegation.md
-2026-10-06-desktop-read-only-delegation.md: 4d33966571641a58d38839cafab6a08ecbd49d36
-2026-10-06-desktop-read-only-delegation.zh.md: ef0e9d6772575c671f74754a3f71f3288af5e526
+2026-10-06-desktop-read-only-delegation.md: d808874298a8e4e29e02e95fb30156bd56d679f8
+2026-10-06-desktop-read-only-delegation.zh.md: e7b7f0d1ec75c218ce14701596ae75ccb9d4ba95

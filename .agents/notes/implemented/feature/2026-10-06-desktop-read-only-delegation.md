@@ -30,7 +30,7 @@ New desktop spawn, fork, nested, and continuable children can inspect shared tas
 
 Child-writer worktrees, explicit Integration nodes, and conflict attention remain required product work. This decision does not make parallel writing available and must not be used to present the broader mission-control proposal as complete. Out-of-process providers retain their own deployment policy.
 
-The separately configured [isolated writer preparation](2026-10-06-isolated-subagent-writer-preparation.md) provides one-shot execution in child worktrees without changing this shared-child default. Its explicit authority and durable execution record do not replace this delegation decision.
+The separately configured [isolated writer preparation](2026-10-06-isolated-subagent-writer-preparation.md) and [continuation](2026-10-07-isolated-writer-continuation.md) provide execution in child worktrees without changing this shared-child default. Their explicit authority and durable execution records do not replace this delegation decision.
 
 ## Verification
 

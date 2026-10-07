@@ -10,12 +10,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {
   ContinuableCreateSpec,
+  ContinuableCreateRequest,
+  ContinuableExecutionRequest,
   ResolvedSubagentStartRequest,
   SubagentCapabilities,
   SubagentProvider,
 } from '@deepseek-ai/dsh-subagent'
 import { startInProcessRun } from '@deepseek-ai/dsh-subagent-in-process-driver'
-import { isolatedWriterOptions } from './worktree.ts'
+import { isolatedWriterOptions, prepareIsolatedWriter, validateIsolatedWriter } from './worktree.ts'
 
 export { foldSubagentWorktree } from './worktree.ts'
 export type { SubagentWorktreeData } from './worktree.ts'
@@ -29,7 +31,7 @@ export const inject = ['subagents']
 export interface Config {
   /** Provider name on `ctx.subagents` (default `spawn`). */
   providerName: string
-  /** Shared parent directory, or a distinct one-shot writer worktree (default `shared`). */
+  /** Shared parent directory, or a distinct writer worktree (default `shared`). */
   workspaceMode?: 'shared' | 'isolated-worktree'
 }
 
@@ -50,10 +52,17 @@ class SpawnInProcessProvider implements SubagentProvider {
   // Context contract: a spawned child starts fresh — it never sees the parent conversation.
   readonly inheritsParentContext = false
 
-  readonly prepareContinuable?: () => Promise<ContinuableCreateSpec>
+  readonly prepareContinuable: (request: ContinuableCreateRequest) => Promise<ContinuableCreateSpec>
+  readonly validateContinuableExecution?: (request: ContinuableExecutionRequest) => Promise<void>
 
   constructor(readonly name: string, private readonly workspaceMode: 'shared' | 'isolated-worktree') {
     if (workspaceMode === 'shared') this.prepareContinuable = () => Promise.resolve({})
+    else {
+      this.prepareContinuable = async request => ({
+        execution: await prepareIsolatedWriter(request.parent, request.signal)(request.sessionId),
+      })
+      this.validateContinuableExecution = validateIsolatedWriter
+    }
   }
 
   start(request: ResolvedSubagentStartRequest) {
