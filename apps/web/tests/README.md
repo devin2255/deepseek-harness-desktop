@@ -8,6 +8,10 @@ the deliberate composition divergences from `dsh web` — are documented in
 [`scaffold.ts`](scaffold.ts) and the
 [browser e2e Agent Note](../../../.agents/notes/implemented/testing/2026-07-24-web-gui-browser-e2e-lane.md).
 
+## Platform coverage
+
+The required full browser lane targets POSIX fixtures and runs in Linux CI; its recorded `bash` calls do not qualify Windows behavior. Direct shipped-composition assertions use the host's actual shell (`pwsh` on Windows, `bash` elsewhere). Cold-session seeding JSON-escapes replacement identities and workspace paths, including Windows backslashes and quoted directory names, before passing the log to the real persistence parser. These input replacements do not normalize or rewrite expected browser output. Native desktop acceptance remains separate.
+
 ## These are Host-face tests
 
 They type-check in the root `tsconfig.host.json`, not in the Client aggregate,

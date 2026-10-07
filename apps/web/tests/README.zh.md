@@ -7,6 +7,10 @@
 [`scaffold.ts`](scaffold.ts) 和
 [浏览器 e2e Agent Note](../../../.agents/notes/implemented/testing/2026-07-24-web-gui-browser-e2e-lane.md)中。
 
+## 平台覆盖
+
+必需的完整浏览器测试使用 POSIX fixture（测试前置数据），在 Linux CI 中运行；其中录制的 `bash` 调用不能作为 Windows 行为的验收证据。直接检查交付组合的断言使用宿主实际提供的 shell（Windows 上为 `pwsh`，其他平台为 `bash`）。冷会话播种在将日志交给真实持久化解析器前，会对替换的身份标识和工作区路径进行 JSON 转义，包括 Windows 反斜杠和目录名中的引号。这些输入替换不会归一化或改写浏览器预期输出。原生桌面验收仍独立进行。
+
 ## 这些是 Host 面的测试
 
 它们在根 `tsconfig.host.json` 中做类型检查，而不在 Client aggregate 中，因为它们直接读取

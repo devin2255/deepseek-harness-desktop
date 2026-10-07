@@ -676,6 +676,29 @@ export function fixtureUserPrompts(fixtureText: string): string[] {
 }
 
 /**
+ * Realize a recorded seed fixture against one scaffold: substitute the
+ * `{{sessionId}}`/`{{cwd}}` placeholders and rewrite the recorded cwd to the
+ * scaffold's workspace with JSON-escaped replacement strings. Idempotent,
+ * so a caller may realize early (e.g. to
+ * price content exactly as the host will fold it) and still pass the result
+ * through {@link seedSession}.
+ * @param scaffold - the booted scaffold whose workspace the seed targets.
+ * @param fixtureText - the committed seed fixture text.
+ * @param id - the session id the seed is realized for.
+ * @returns the realized fixture text.
+ */
+export function realizeSeedFixture(scaffold: Pick<WebScaffold, 'workspaceCwd'>, fixtureText: string, id: string): string {
+  const escapedCwd = JSON.stringify(scaffold.workspaceCwd).slice(1, -1)
+  const realized = fixtureText
+    .split('{{sessionId}}').join(JSON.stringify(id).slice(1, -1))
+    .split('{{cwd}}').join(escapedCwd)
+  const fixtureCwd = (JSON.parse(realized.split('\n', 1)[0]!) as { cwd?: string }).cwd
+  return fixtureCwd === undefined
+    ? realized
+    : realized.split(JSON.stringify(fixtureCwd).slice(1, -1)).join(escapedCwd)
+}
+
+/**
  * Seed a recorded session fixture into the scaffold's persistence root
  * through the REAL backend API (throwaway Context + SessionStore + JSONL
  * plugin — the semantic-checkpoint precedent), never raw file writes: no
@@ -689,27 +712,6 @@ export function fixtureUserPrompts(fixtureText: string): string[] {
  *   for scenarios asserting what a resumed session reports running.
  * @returns the seeded id.
  */
-/**
- * Realize a recorded seed fixture against one scaffold: substitute the
- * `{{sessionId}}`/`{{cwd}}` placeholders and rewrite the recorded cwd to the
- * scaffold's workspace. Idempotent, so a caller may realize early (e.g. to
- * price content exactly as the host will fold it) and still pass the result
- * through {@link seedSession}.
- * @param scaffold - the booted scaffold whose workspace the seed targets.
- * @param fixtureText - the committed seed fixture text.
- * @param id - the session id the seed is realized for.
- * @returns the realized fixture text.
- */
-export function realizeSeedFixture(scaffold: WebScaffold, fixtureText: string, id: string): string {
-  const realized = fixtureText
-    .split('{{sessionId}}').join(id)
-    .split('{{cwd}}').join(scaffold.workspaceCwd)
-  const fixtureCwd = (JSON.parse(realized.split('\n', 1)[0]!) as { cwd?: string }).cwd
-  return fixtureCwd === undefined
-    ? realized
-    : realized.split(fixtureCwd).join(scaffold.workspaceCwd)
-}
-
 export async function seedSession(
   scaffold: WebScaffold,
   fixtureText: string,
