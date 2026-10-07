@@ -40,8 +40,10 @@ export interface WriteFileAtomicOptions {
  * rename, so replacing a wider-permission file narrows it without a chmod
  * race. The rename also replaces a symlinked target itself instead of writing
  * through to its referent, and the same-directory sibling keeps the rename on
- * one filesystem. On any failure the temp file is removed and the failure
- * rethrown. Crash durability (fsync) is out of scope.
+ * one filesystem. Windows sharing failures (`EPERM`, `EACCES`, `EBUSY`)
+ * retry the same rename for up to one second without removing the target.
+ * Other errors and platforms fail immediately. On failure the temp file is
+ * removed and the last failure rethrown. Crash durability (fsync) is out of scope.
  * @param filename - final path receiving the content.
  * @param content - complete next file content.
  * @param options - permission bits for the replacement inode.
@@ -56,10 +58,37 @@ export async function writeFileAtomic(filename: string, content: string, options
   const temp = `${filename}.${randomBytes(6).toString('hex')}.tmp`
   try {
     await writeFile(temp, content, { mode: options.mode, flag: 'wx' })
-    await rename(temp, filename)
+    await renameWithRetry(temp, filename)
   } catch (error) {
     await rm(temp, { force: true })
     throw error
+  }
+}
+
+// Bound publication retries below the writer-lock acquisition deadline;
+// Windows sharing errors can also represent persistent permission failures.
+const RENAME_TIMEOUT_MS = 1_000
+const RENAME_RETRY_INITIAL_MS = 10
+const RENAME_RETRY_MAX_MS = 100
+
+/** Retry only Windows sharing failures while preserving the prepared replacement. */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  const deadline = performance.now() + RENAME_TIMEOUT_MS
+  let delay = RENAME_RETRY_INITIAL_MS
+  for (;;) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code
+      const remaining = deadline - performance.now()
+      if (process.platform !== 'win32'
+        || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')
+        || remaining <= 0) throw error
+      await new Promise(resolve => setTimeout(resolve, Math.min(delay, remaining)))
+      if (performance.now() >= deadline) throw error
+      delay = Math.min(delay * 2, RENAME_RETRY_MAX_MS)
+    }
   }
 }
 
