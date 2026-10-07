@@ -72,6 +72,9 @@
       "path": "../../subagent/subagent"
     },
     {
+      "path": "../../subagent/subagent-spawn-in-process"
+    },
+    {
       "path": "../../task/task"
     },
     {

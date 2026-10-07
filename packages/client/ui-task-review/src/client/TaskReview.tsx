@@ -2,7 +2,7 @@
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { TaskReviewFile, TaskReviewState, TaskSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId, TaskReviewFile, TaskReviewState, TaskSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TaskReviewInjected } from './index.ts'
 import css from './TaskReview.module.css'
 
@@ -52,25 +52,39 @@ function successKey(task: TaskSnapshot | null): 'successCommit' | 'successApply'
 
 /** Full review workspace with file navigation, patch, evidence, and explicit delivery actions. */
 export function TaskReview({
-  useTasks, useTaskReview, showTasks, refresh, selectFile,
+  useSessions, useTasks, useTaskReview, showTasks, refresh, selectFile, selectSource, setSourcesOpen,
   requestChanges, commit, apply, discard, t,
 }: TaskReviewProps) {
   const review = useTaskReview(value => value)
+  const rootId = review.taskId
   const taskState = useTasks?.(value => value)
+  const sessions = useSessions(value => value)
   const task = review.taskId === undefined
     ? review.result
     : taskState?.byId[review.taskId] ?? review.result
   const [confirmation, setConfirmation] = useState<Confirmation>()
   const [commitMessage, setCommitMessage] = useState('')
   const dialog = useRef<HTMLDivElement>(null)
+  const sourceObserver = useRef(setSourcesOpen)
+  sourceObserver.current = setSourcesOpen
   useEffect(() => { dialog.current?.focus() }, [confirmation])
+  useEffect(() => { setConfirmation(undefined) }, [review.taskId, review.writerSessionId])
+  useEffect(() => {
+    const rootId = review.taskId
+    if (rootId === undefined) return
+    sourceObserver.current(rootId, true)
+    return () => { sourceObserver.current(rootId, false) }
+  }, [review.taskId])
   const evidence = useMemo(
     () => task?.definition?.criteria.flatMap(criterion => criterion.evidence.map(item => ({ criterion: criterion.text, ...item }))) ?? [],
     [task],
   )
   const summary = review.summary
+  const catalog = review.taskId === undefined ? undefined : sessions.subagentsByParent[review.taskId]
+  const writers = catalog?.entries.filter(entry => entry.kind === 'child') ?? []
+  const writerSelected = review.writerSessionId !== undefined
   const busy = review.operation !== null
-  const fresh = review.freshness === 'fresh'
+  const fresh = review.freshness === 'fresh' && review.state === 'ready' && !writerSelected
   const canRequest = fresh && !busy && (task?.status === 'reviewing' || task?.status === 'ready')
   const canCommit = fresh && !busy && task?.reviewDecision === 'ready'
     && task.commitReceipt === undefined && summary?.dirty === true
@@ -78,11 +92,10 @@ export function TaskReview({
     && task.applyReceipt === undefined && task.discardReceipt === undefined
   const canDiscard = fresh && !busy && task?.applyReceipt === undefined && task?.discardReceipt === undefined
   const visibleResult = review.result ?? task ?? null
-  const success = successKey(visibleResult)
+  const success = writerSelected ? undefined : successKey(visibleResult)
 
-  const runConfirmed = (): void => {
-    const action = confirmation
-    if (action === undefined || task == null) return
+  const runConfirmed = (action: Confirmation): void => {
+    if (task == null || writerSelected) return
     setConfirmation(undefined)
     if (action === 'changes') void requestChanges(task.asOfSeq)
     else if (action === 'commit') void commit(commitMessage.trim(), task.asOfSeq)
@@ -96,6 +109,18 @@ export function TaskReview({
         <div className={css.titleBlock}>
           <button type="button" className={css.back} onClick={showTasks}>← {t('back')}</button>
           <h1>{task?.definition?.goal ?? t('review')}</h1>
+          {rootId !== undefined && <label className={css.sourcePicker}>{t('reviewSource')}
+            <select aria-label={t('reviewSource')} value={review.writerSessionId ?? ''} disabled={busy} onChange={(event) => {
+              void selectSource(rootId, event.target.value === '' ? undefined : event.target.value as SessionId)
+            }}>
+              <option value="">{t('rootResult')}</option>
+              {writers.map(writer => <option key={writer.id} value={writer.id} disabled={writer.activity === 'running'}>
+                {t('writerResult', { id: writer.label ?? writer.id })} · {writer.id}
+              </option>)}
+              {review.writerSessionId !== undefined && !writers.some(writer => writer.id === review.writerSessionId)
+                && <option value={review.writerSessionId}>{t('writerResult', { id: review.writerSessionId })}</option>}
+            </select>
+          </label>}
           {summary !== null && <div className={css.facts}>
             <span>{t('branch')}: <code>{summary.branch}</code></span>
             <span>{t('base')}: <code>{summary.baseCommit.slice(0, 10)}</code></span>
@@ -107,6 +132,9 @@ export function TaskReview({
       </header>
 
       {review.freshness === 'stale' && <div role="status" className={css.stale}>{t('stale')}</div>}
+      {catalog?.state === 'loading' && <div role="status" className={css.stale}>{t('sourcesLoading')}</div>}
+      {catalog?.error != null && <div role="alert" className={css.alert}>{catalog.error.message}</div>}
+      {writerSelected && <div role="status" className={css.warning}>{t('writerReadOnly')}</div>}
       {review.state === 'loading' && summary === null && <div role="status" className={css.centerState}>{t('loading')}</div>}
       {review.error !== null && <div role="alert" className={clsx(css.alert, isApplyConflict(review) && css.conflict)}>
         <strong>{isApplyConflict(review) ? t('conflict') : t('error')}</strong>
@@ -177,7 +205,7 @@ export function TaskReview({
 
       <footer className={css.actions}>
         <button type="button" className={css.secondary} disabled={!canRequest} onClick={() => { setConfirmation('changes') }}>{t('requestChanges')}</button>
-        <label className={css.commitField}>{t('commitMessage')}<input value={commitMessage} placeholder={t('commitPlaceholder')}
+        <label className={css.commitField}>{t('commitMessage')}<input value={commitMessage} disabled={writerSelected || busy} placeholder={t('commitPlaceholder')}
           onChange={(event) => { setCommitMessage(event.target.value) }} /></label>
         <button type="button" className={css.primary} disabled={!canCommit || commitMessage.trim() === ''}
           onClick={() => { setConfirmation('commit') }}>{t('commit')}</button>
@@ -195,7 +223,7 @@ export function TaskReview({
                 : summary?.dirty === true ? 'confirmDiscardDirty' : 'confirmDiscardClean')}</p>
           <div>
             <button type="button" className={css.secondary} onClick={() => { setConfirmation(undefined) }}>{t('close')}</button>
-            <button type="button" className={confirmation === 'discard' ? css.danger : css.primary} onClick={runConfirmed}>{t('confirm')}</button>
+            <button type="button" className={confirmation === 'discard' ? css.danger : css.primary} onClick={() => { runConfirmed(confirmation) }}>{t('confirm')}</button>
           </div>
         </div>
       </div>}

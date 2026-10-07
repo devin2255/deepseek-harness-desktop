@@ -32,11 +32,11 @@ Status: implemented
 
 ## 后果
 
-[写入者批量集成](2026-10-07-batch-writer-integration.md) 负责已停止结果的审查和发布，不接管续行生命周期。子结果审查界面仍独立于这些模型工具。
+[写入者批量集成](2026-10-07-batch-writer-integration.md) 负责已停止结果的审查和发布，不接管续行生命周期。[人工子结果检查](2026-10-07-isolated-writer-result-review.md) 仍独立于这些模型工具。
 
 显式隔离可续行写入者跨驻留时段保留检出、transcript（文本记录）和创建权限。卸载其校验器会使后续冷激活不可用，而非静默恢复为共享执行。既有共享子 agent 续行和单次运行所有权保持独立。创建取消或失败时保留已准备的检出作为恢复数据。
 
-准备及通用续行记录保留为活跃记录：其干净基线与单收件箱所有权原理仍适用，本记录拥有执行校验决策。[桌面只读委派](2026-10-06-desktop-read-only-delegation.md) 仍是已分发默认值。显式 Integration 节点、冲突关注项、子结果审查界面、孤立目录恢复及桌面写入工具组合仍是未完成的[任务控制中心要求](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md)；这不代表并行协作或桌面 MVP 已完成。
+准备及通用续行记录保留为活跃记录：其干净基线与单收件箱所有权原理仍适用，本记录拥有执行校验决策。[桌面只读委派](2026-10-06-desktop-read-only-delegation.md) 仍是已分发默认值。显式 Integration 节点、冲突关注项、子结果变更操作界面、孤立目录恢复及桌面写入工具组合仍是未完成的[任务控制中心要求](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md)；这不代表并行协作或桌面 MVP 已完成。
 
 ## 验证
 

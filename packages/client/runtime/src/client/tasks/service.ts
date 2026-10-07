@@ -59,8 +59,11 @@ export class TaskRuntime implements ITasks {
   review(sessionId: SessionId, decision: TaskReviewDecision, expectedSeq: number): Promise<RpcResult<TaskSnapshot>> {
     return this.manager.review(sessionId, decision, expectedSeq)
   }
-  /** Open one Task review. @param sessionId - root Task. @returns completion of the read. */
-  openReview(sessionId: SessionId): Promise<void> { return this.reviewManager.open(sessionId) }
+  /** Open a review. @param sessionId - root Task. @param writerSessionId - optional stopped direct writer, read-only.
+   * @returns completion of the read. */
+  openReview(sessionId: SessionId, writerSessionId?: SessionId): Promise<void> {
+    return this.reviewManager.open(sessionId, writerSessionId)
+  }
   /** Refresh the open review. @returns completion of the read. */
   refreshReview(): Promise<void> { return this.reviewManager.refresh() }
   /** Select one changed file. @param path - review-relative path. @returns completion of the diff read. */

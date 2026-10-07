@@ -36,8 +36,9 @@ export interface ITasks {
   /** Record a review decision. @param sessionId - root Session. @param decision - decision.
    * @param expectedSeq - CAS sequence. @returns command result. */
   review(sessionId: SessionId, decision: TaskReviewDecision, expectedSeq: number): Promise<RpcResult<TaskSnapshot>>
-  /** Open and load one isolated Task review. @param sessionId - root Task. @returns completion of the read. */
-  openReview(sessionId: SessionId): Promise<void>
+  /** Open an isolated review. @param sessionId - root Task. @param writerSessionId - optional stopped direct writer, read-only.
+   * @returns completion of the read. */
+  openReview(sessionId: SessionId, writerSessionId?: SessionId): Promise<void>
   /** Refresh the currently open review. @returns completion of the read. */
   refreshReview(): Promise<void>
   /** Select one changed file. @param path - review-relative path. @returns completion of the diff read. */

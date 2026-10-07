@@ -36,6 +36,8 @@ SlotRegistry 分别为 renderer 提供 `useSessions` 与 `useWorkspaces` 的裸 
 
 `SessionRuntime.search(query, signal)` 是基于 `session.search` RPC 的无状态单次操作。它返回经过排序的会话／snippet 对，但不会将查询条件、加载状态或错误状态写入共享 Session 列表，因此每个 UI 所有者都自行负责防抖、取消、抑制陈旧响应和回退呈现。`searchResultLimit` 将 `SESSION_SEARCH_RESULT_LIMIT`——即响应 schema 自身强制执行的上限——作为注入的呈现数据重新公开，使客户端插件无需复制该值。它是协议常量而非逐连接状态，因此连接 handle 不携带它。
 
+`openReview(rootId, writerSessionId?)` 将根任务交付身份与可选的子结果身份分开。子级读取仍以父级寻址；任一身份切换都会使此前摘要和 Diff 响应失效。交付要求新鲜的根任务审查且没有活动操作，交付期间切换会被拒绝。迟到的变更响应不能替换更新的审查代次。投影刷新失败时，已接受的回执仍保留，刷新错误独立展示。
+
 ## New Session 与 blank 镜像
 
 `WorkspaceRuntime.connectWorkspace(workspaceId, isolation)` 要求调用方明确选择 `direct` 或 `worktree`。直接模式会从列表镜像复用该 Workspace 的既有空 Session（`blank && cwd == workspace.path && sessionIds.includes(id)`——Host 自己的成员规则，绝不只按 cwd，避免劫持 cwd 匹配但未入账的空白 Session），未命中则调用 `session.create({workspaceId, isolation: 'direct'})`。Worktree 模式绝不接纳直接模式的空 Session，而会始终要求 Host 创建隔离 Session；返回的 Worktree 路径会原样保留为即时 Session cwd，完整分配仍以 Task 投影为权威。共享的 `startSession` 和启动选择操作会明确使用直接模式。`SessionSummary.blank` 镜像 Host 派生的空日志位，在客户端只降不升：由 `session.list`／`host/session-added` 帧播种，本地首次获 Host 接受的 `prompt()`（RPC 成功响应时——受理即证明用户消息已入 Host 日志；首讯被拒则 Session 保持 blank、保持可复用）与任何 `running: true` 状态帧翻为 false，每次列表重拉重新对齐。列表界面隐藏 blank 行；store 保留全部行。`SessionRuntime.create` 接受可选的、由调用方预先分配的 SessionId 和隔离模式，失败时抛出 `SessionCreateError`（携带 `requestedSessionId`）。

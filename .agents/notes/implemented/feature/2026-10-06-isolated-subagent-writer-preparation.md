@@ -30,7 +30,7 @@ The immutable, model-hidden `subagent/worktree-assigned` event records the root 
 
 Explicitly configured one-shot writers execute in separate branches and directories without copying root changes or modifying the source checkout. The root and children retain separate logs and authority. Generic workspace-write still includes the platform's documented writable temporary areas; worktree separation is not a new kernel sandbox.
 
-The desktop tool roster does not enable this option. [Continuable writing](2026-10-07-isolated-writer-continuation.md) shares this preparation; explicit Integration nodes, conflict attention, worktree cleanup, and review UI for child results remain unfinished parts of the [mission-control proposal](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md). This execution slice is not completion of parallel collaboration or the desktop MVP.
+The desktop tool roster does not enable this option. [Continuable writing](2026-10-07-isolated-writer-continuation.md) shares this preparation, and [human result inspection](2026-10-07-isolated-writer-result-review.md) is read-only. Explicit Integration nodes, conflict attention, worktree cleanup, and child commit and integration UI remain unfinished parts of the [mission-control proposal](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md). This execution slice is not completion of parallel collaboration or the desktop MVP.
 
 ## Verification
 

@@ -151,7 +151,7 @@ export const taskReviewRequestSchema = z.strictObject({ sessionId: identity, dec
 /** task.review response value. */
 export const taskReviewValueSchema: z.ZodType<Wire<ResponseValue<'task.review'>>> = taskSnapshotSchema
 /** task.reviewSummary request payload. */
-export const taskReviewSummaryRequestSchema = z.strictObject({ sessionId: identity }) as unknown as z.ZodType<Wire<RequestPayload<'task.reviewSummary'>>>
+export const taskReviewSummaryRequestSchema = z.strictObject({ sessionId: identity, writerSessionId: identity.optional() }) as unknown as z.ZodType<Wire<RequestPayload<'task.reviewSummary'>>>
 /** task.reviewSummary response value. */
 export const taskReviewSummaryValueSchema = z.strictObject({
   taskId: identity, workspaceId: identity, revision: reviewRevision, baseCommit: gitObjectId,
@@ -160,7 +160,7 @@ export const taskReviewSummaryValueSchema = z.strictObject({
 }) as unknown as z.ZodType<Wire<ResponseValue<'task.reviewSummary'>>>
 /** task.reviewDiff request payload. */
 export const taskReviewDiffRequestSchema = z.strictObject({
-  sessionId: identity, path: reviewPath, expectedRevision: reviewRevision,
+  sessionId: identity, writerSessionId: identity.optional(), path: reviewPath, expectedRevision: reviewRevision,
 }) as unknown as z.ZodType<Wire<RequestPayload<'task.reviewDiff'>>>
 /** task.reviewDiff response value. */
 export const taskReviewDiffValueSchema = z.strictObject({

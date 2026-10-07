@@ -1,3 +1,4 @@
+{"stage":"writer-review","activeRejected":true,"childIdentity":true,"diffPresent":true,"noActivation":true}
 {"stage":"conflict","reported":true,"paths":["same.txt"],"rootUnchanged":true}
 {"stage":"integrated","reported":true,"contributors":2,"filesPresent":true,"rootClean":true,"sourceUnchanged":true}
 {"stage":"transcript","reviews":4,"commits":4,"integrations":2,"errors":0}

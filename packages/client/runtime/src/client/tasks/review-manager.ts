@@ -12,6 +12,8 @@ export type TaskReviewOperation = 'request-changes' | 'commit' | 'apply' | 'disc
 /** Immutable state for the separate Task Review workspace. */
 export interface TaskReviewState {
   readonly taskId: SessionId | undefined
+  /** Selected direct writer; absent when reviewing the root delivery. */
+  readonly writerSessionId?: SessionId
   readonly state: 'idle' | 'loading' | 'ready' | 'error'
   readonly diffState: 'idle' | 'loading' | 'ready' | 'error'
   readonly freshness: 'fresh' | 'stale'
@@ -26,6 +28,7 @@ export interface TaskReviewState {
 /** Owns one visible Task review, selection, bounded diff, and serialized delivery mutations. */
 export class TaskReviewManager {
   private taskId: SessionId | undefined
+  private writerSessionId: SessionId | undefined
   private state: TaskReviewState['state'] = 'idle'
   private diffState: TaskReviewState['diffState'] = 'idle'
   private freshness: TaskReviewState['freshness'] = 'stale'
@@ -49,14 +52,18 @@ export class TaskReviewManager {
   /**
    * Select a Task and load its review package.
    * @param taskId - Isolated root Task.
+   * @param writerSessionId - Optional stopped direct writer for read-only inspection.
    * @returns Completion of the read.
    */
-  open(taskId: SessionId): Promise<void> {
-    if (this.taskId !== taskId) {
+  open(taskId: SessionId, writerSessionId?: SessionId): Promise<void> {
+    if (this.operation !== null) return Promise.reject(new Error('Wait for the current delivery operation before switching reviews.'))
+    if (this.taskId !== taskId || this.writerSessionId !== writerSessionId) {
       this.requestGeneration += 1
       this.diffGeneration += 1
       this.inflight = null
       this.taskId = taskId
+      this.writerSessionId = writerSessionId
+      this.freshness = 'stale'
       this.summary = null
       this.selectedPath = undefined
       this.diff = null
@@ -69,6 +76,7 @@ export class TaskReviewManager {
   /** Refresh the selected Task summary and its retained file selection. @returns completion of summary and initial diff reads. */
   refresh(): Promise<void> {
     const taskId = this.taskId
+    const writerSessionId = this.writerSessionId
     if (taskId === undefined) return Promise.resolve()
     if (this.inflight !== null) return this.inflight
     const owner = this.requestGeneration
@@ -77,7 +85,9 @@ export class TaskReviewManager {
     this.notifier.markDirty()
     this.inflight = (async () => {
       try {
-        const { result } = await this.api.tasks.reviewSummary({ sessionId: taskId })
+        const { result } = await this.api.tasks.reviewSummary({
+          sessionId: taskId, ...writerSessionId === undefined ? {} : { writerSessionId },
+        })
         if (owner !== this.requestGeneration) return
         if (!result.ok) {
           this.state = 'error'
@@ -93,7 +103,7 @@ export class TaskReviewManager {
         this.diff = null
         this.diffState = this.selectedPath === undefined ? 'idle' : 'loading'
         this.notifier.markDirty()
-        if (this.selectedPath !== undefined) await this.loadDiff(this.selectedPath, result.value, owner)
+        if (this.selectedPath !== undefined) await this.loadDiff(this.selectedPath, result.value, owner, taskId, writerSessionId)
       } catch (error: unknown) {
         if (owner !== this.requestGeneration) return
         this.state = 'error'
@@ -115,7 +125,8 @@ export class TaskReviewManager {
    */
   selectFile(path: string): Promise<void> {
     const summary = this.summary
-    if (summary === null || !summary.files.some(file => file.path === path)) {
+    const taskId = this.taskId
+    if (taskId === undefined || summary === null || !summary.files.some(file => file.path === path)) {
       return Promise.reject(new Error(`Task review file is unavailable: ${path}`))
     }
     this.selectedPath = path
@@ -123,7 +134,7 @@ export class TaskReviewManager {
     this.diffState = 'loading'
     this.error = null
     this.notifier.markDirty()
-    return this.loadDiff(path, summary, this.requestGeneration)
+    return this.loadDiff(path, summary, this.requestGeneration, taskId, this.writerSessionId)
   }
 
   /**
@@ -207,11 +218,14 @@ export class TaskReviewManager {
     return this.snapshotCache
   }
 
-  private async loadDiff(path: string, summary: TaskReviewSummary, requestOwner: number): Promise<void> {
+  private async loadDiff(
+    path: string, summary: TaskReviewSummary, requestOwner: number, taskId: SessionId, writerSessionId: SessionId | undefined,
+  ): Promise<void> {
     const owner = ++this.diffGeneration
     try {
       const { result } = await this.api.tasks.reviewDiff({
-        sessionId: summary.taskId, path, expectedRevision: summary.revision,
+        sessionId: taskId, path, expectedRevision: summary.revision,
+        ...writerSessionId === undefined ? {} : { writerSessionId },
       })
       if (requestOwner !== this.requestGeneration || owner !== this.diffGeneration || path !== this.selectedPath) return
       if (result.ok) {
@@ -237,15 +251,17 @@ export class TaskReviewManager {
   ): Promise<RpcResult<TaskSnapshot>> {
     const taskId = this.taskId
     const summary = this.summary
-    if (taskId === undefined || summary === null) {
+    if (taskId === undefined || summary === null || this.writerSessionId !== undefined
+      || this.freshness !== 'fresh' || this.state !== 'ready' || this.operation !== null) {
       const unavailable: RpcResult<TaskSnapshot> = { ok: false, error: {
-        code: 'task-review-unavailable', message: 'Task review is not loaded.', details: { sessionId: taskId ?? ('' as SessionId) },
+        code: 'task-review-unavailable', message: 'Load a fresh root review and finish any active operation before delivery.', details: { sessionId: taskId ?? ('' as SessionId) },
       } }
       this.error = unavailable.error
       this.notifier.markDirty()
       return unavailable
     }
     this.operation = operation
+    const owner = this.requestGeneration
     this.error = null
     this.notifier.markDirty()
     let result: RpcResult<TaskSnapshot>
@@ -255,20 +271,27 @@ export class TaskReviewManager {
       result = errorResult(error)
     }
     if (result.ok) {
-      this.result = result.value
-      await this.refreshTasks()
-      if (refreshReview) await this.refresh()
-    } else {
+      if (owner === this.requestGeneration) this.result = result.value
+      try {
+        await this.refreshTasks()
+        if (owner === this.requestGeneration && refreshReview) await this.refresh()
+      } catch (error: unknown) {
+        if (owner === this.requestGeneration) this.error = errorResult(error).error
+      }
+    } else if (owner === this.requestGeneration) {
       this.error = result.error
     }
-    this.operation = null
-    this.notifier.markDirty()
+    if (owner === this.requestGeneration) {
+      this.operation = null
+      this.notifier.markDirty()
+    }
     return result
   }
 
   private buildSnapshot(): TaskReviewState {
     return {
       taskId: this.taskId, state: this.state, diffState: this.diffState, freshness: this.freshness,
+      ...this.writerSessionId === undefined ? {} : { writerSessionId: this.writerSessionId },
       summary: this.summary, selectedPath: this.selectedPath, diff: this.diff, error: this.error,
       operation: this.operation, result: this.result,
     }

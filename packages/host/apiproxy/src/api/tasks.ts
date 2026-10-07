@@ -44,11 +44,14 @@ export interface TasksApi {
     decision: TaskReviewDecision
     expectedSeq: number
   }>): Promise<RpcResponse<TaskSnapshot>>
-  /** Inspect the complete bounded review summary for one assigned Task. */
-  reviewSummary(request: RpcRequest<{ sessionId: SessionId }>, signal: AbortSignal): Promise<RpcResponse<TaskReviewSummary>>
+  /** Inspect a root Task or its directly owned stopped isolated writer without activating either Agent. */
+  reviewSummary(
+    request: RpcRequest<{ sessionId: SessionId; writerSessionId?: SessionId }>, signal: AbortSignal,
+  ): Promise<RpcResponse<TaskReviewSummary>>
   /** Read one bounded file diff from an exact Task review revision. */
   reviewDiff(request: RpcRequest<{
     sessionId: SessionId
+    writerSessionId?: SessionId
     path: string
     expectedRevision: string
   }>, signal: AbortSignal): Promise<RpcResponse<TaskFileDiff>>

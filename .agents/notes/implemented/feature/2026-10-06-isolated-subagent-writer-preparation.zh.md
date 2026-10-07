@@ -30,7 +30,7 @@ spawn Provider 接受显式 `workspaceMode: isolated-worktree` 选择。只有 c
 
 显式配置的单次写入 agent 在独立分支和目录中执行，不复制根更改，也不修改源检出。根与子 agent 保留独立日志和权限。通用 workspace-write 仍包含平台文档规定的可写临时区域；worktree 分离不是新的内核沙箱。
 
-桌面工具集合尚未启用此选项。[可续行写入](2026-10-07-isolated-writer-continuation.md) 共享此准备机制；显式 Integration 节点、冲突关注项、worktree 清理和子结果审查界面仍是[任务控制中心提案](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md) 未完成的部分。此执行切片不代表并行协作或桌面 MVP 已完成。
+桌面工具集合尚未启用此选项。[可续行写入](2026-10-07-isolated-writer-continuation.md) 共享此准备机制，[人工成果检查](2026-10-07-isolated-writer-result-review.md) 为只读。显式 Integration 节点、冲突关注项、worktree 清理以及子级提交和集成界面仍是[任务控制中心提案](../../proposed/feature/2026-08-14-desktop-agent-mission-control.md) 未完成的部分。此执行切片不代表并行协作或桌面 MVP 已完成。
 
 ## 验证
 

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import type {
-  SessionId, TaskListState, TaskReviewState, TaskReviewSummary, TaskSnapshot, WorkspaceListState,
+  SessionId, SessionListState, TaskListState, TaskReviewState, TaskReviewSummary, TaskSnapshot, WorkspaceListState,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { sanitizeDiffText, TaskReview, type TaskReviewProps } from '../src/client/TaskReview.tsx'
 import { en } from '../src/client/locales.ts'
@@ -66,18 +66,74 @@ function harness(over: Partial<TaskReviewState> = {}, taskOver: Partial<TaskSnap
   const workspaces: WorkspaceListState = {
     items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null, baselinesReady: true, recentWorkspaceId: undefined,
   }
+  const sessions: SessionListState = {
+    ids: [], byId: {}, current: taskId, state: 'idle', phase: 'ready', error: null,
+    subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+  }
   return {
-    useSessions: (() => undefined) as never,
+    useSessions: selector => selector(sessions),
     useWorkspaces: selector => selector(workspaces),
     useTasks: selector => selector(taskList),
     useTaskReview: selector => selector(review),
-    showTasks: vi.fn(), refresh: vi.fn(async () => {}), selectFile: vi.fn(async () => {}),
+    showTasks: vi.fn(), refresh: vi.fn(async () => {}), selectFile: vi.fn(async () => {}), selectSource: vi.fn(async () => {}),
+    setSourcesOpen: vi.fn(),
     requestChanges: vi.fn(async () => ({})), commit: vi.fn(async () => ({})),
     apply: vi.fn(async () => ({})), discard: vi.fn(async () => ({})), t,
   }
 }
 
 describe('TaskReview', () => {
+  it('observes the durable child catalog and retains a selected result absent from its latest rows', async () => {
+    const p = harness({ writerSessionId: 'unlisted' as SessionId })
+    const rows: SessionListState = {
+      ids: [], byId: {}, current: undefined, state: 'idle', phase: 'ready', error: null, jobsBySession: {}, currentAddress: undefined,
+      subagentsByParent: { [taskId]: {
+        entries: [
+          { kind: 'child', id: 'running' as SessionId, mode: 'one-shot', activity: 'running', hasChildren: false },
+          { kind: 'child', id: 'stopped' as SessionId, mode: 'one-shot', activity: 'inactive', hasChildren: false },
+          { kind: 'diagnostic', id: 'broken' as SessionId, reason: 'corrupt' },
+        ],
+        parentAvailable: false, state: 'loading', error: null,
+      } },
+    }
+    p.useSessions = selector => selector(rows)
+    const view = render(<TaskReview {...p} />)
+    expect(p.setSourcesOpen).toHaveBeenCalledWith(taskId, true)
+    expect(view.getByText('Loading child Agent result catalog…')).toBeTruthy()
+    expect((view.getByRole('option', { name: /Agent result: running/ }) as HTMLOptionElement).disabled).toBe(true)
+    expect(view.queryByRole('option', { name: /broken/ })).toBeNull()
+    expect((view.getByLabelText('Review source') as HTMLSelectElement).value).toBe('unlisted')
+    fireEvent.change(view.getByLabelText('Review source'), { target: { value: 'stopped' } })
+    await waitFor(() => { expect(p.selectSource).toHaveBeenCalledWith(taskId, 'stopped') })
+    rows.subagentsByParent = { [taskId]: { entries: [], parentAvailable: false, state: 'error', error: {
+      code: 'internal', message: 'Child catalog unavailable', details: {},
+    } } }
+    view.rerender(<TaskReview {...p} />)
+    expect(view.getByRole('alert').textContent).toContain('Child catalog unavailable')
+    view.unmount()
+    expect(p.setSourcesOpen).toHaveBeenLastCalledWith(taskId, false)
+  })
+
+  it('selects child results separately and disables root delivery while inspecting a writer', async () => {
+    const writerSessionId = 'writer' as SessionId
+    const p = harness({ writerSessionId, summary: summary({ taskId: writerSessionId }) })
+    p.useSessions = selector => selector({
+      ids: [], byId: {}, current: taskId, state: 'idle', phase: 'ready', error: null, jobsBySession: {}, currentAddress: undefined,
+      subagentsByParent: { [taskId]: {
+        entries: [{ kind: 'child', id: writerSessionId, mode: 'one-shot', label: 'Implement tests', activity: 'inactive', hasChildren: false }],
+        parentAvailable: false, state: 'ready', error: null,
+      } },
+    })
+    const view = render(<TaskReview {...p} />)
+    expect(view.getByText(/Read-only inspection/)).toBeTruthy()
+    expect((view.getByLabelText('Review source') as HTMLSelectElement).value).toBe(writerSessionId)
+    for (const name of ['Request Changes', 'Create Commit', 'Apply to Project', 'Discard Worktree']) {
+      expect((view.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
+    }
+    fireEvent.change(view.getByLabelText('Review source'), { target: { value: '' } })
+    await waitFor(() => { expect(p.selectSource).toHaveBeenCalledWith(taskId, undefined) })
+  })
+
   it('renders branch facts, changed files, sanitized unified diff, criteria, evidence, and risks', async () => {
     const p = harness()
     const view = render(<TaskReview {...p} />)
@@ -212,7 +268,7 @@ describe('TaskReview', () => {
     const missing = harness({ taskId: undefined, result: null })
     const { useTasks: _missingTasks, ...withoutMissingTasks } = missing
     view.rerender(<TaskReview {...withoutMissingTasks} />)
-    fireEvent.click(view.getByRole('button', { name: 'Confirm' }))
+    expect(view.queryByRole('dialog')).toBeNull()
     expect(missing.requestChanges).not.toHaveBeenCalled()
 
     view.rerender(<TaskReview {...dirty} />)
@@ -221,6 +277,18 @@ describe('TaskReview', () => {
     view.rerender(<TaskReview {...noSummary} />)
     fireEvent.click(view.getByRole('button', { name: 'Confirm' }))
     expect(noSummary.discard).not.toHaveBeenCalled()
+  })
+
+  it('refuses a pending confirmation after its task record disappears without changing the review address', () => {
+    const p = harness()
+    const view = render(<TaskReview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Request Changes' }))
+    p.useTasks = selector => selector({
+      ids: [], byId: {}, phase: 'ready', state: 'idle', error: null, freshness: 'fresh', generation: 1,
+    })
+    view.rerender(<TaskReview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Confirm' }))
+    expect(p.requestChanges).not.toHaveBeenCalled()
   })
 
   it('shows each durable success state', () => {

@@ -25,6 +25,41 @@ function task(over: Partial<TaskSnapshot> = {}): TaskSnapshot {
 }
 
 describe('TaskReviewManager reads', () => {
+  it('keeps writer reads parent-addressed and refuses root delivery of a child result', async () => {
+    const api = new FakeApiClient()
+    const writerSessionId = 'writer' as SessionId
+    api.onTaskReviewSummary = () => Promise.resolve(ok({ ...summary(), taskId: writerSessionId }))
+    api.onTaskReviewDiff = () => Promise.resolve(ok({
+      taskId: writerSessionId, workspaceId: 'workspace' as never, revision,
+      path: 'src/one.ts', binary: false, truncated: false, patch: '+writer',
+    }))
+    const manager = new TaskReviewManager(api, async () => {})
+    await manager.open(taskId, writerSessionId)
+    expect(manager.getSnapshot()).toMatchObject({ taskId, writerSessionId, summary: { taskId: writerSessionId } })
+    expect(api.callsOf('task.reviewSummary')).toEqual([{ sessionId: taskId, writerSessionId }])
+    expect(api.callsOf('task.reviewDiff')).toEqual([{ sessionId: taskId, writerSessionId, path: 'src/one.ts', expectedRevision: revision }])
+    await expect(manager.commit('Wrong target', 4)).resolves.toMatchObject({ ok: false })
+    await expect(manager.apply('2'.repeat(40), 4)).resolves.toMatchObject({ ok: false })
+    await expect(manager.discard(true, 4)).resolves.toMatchObject({ ok: false })
+    expect(api.callsOf('task.commit')).toEqual([])
+    expect(api.callsOf('task.apply')).toEqual([])
+    expect(api.callsOf('task.discard')).toEqual([])
+  })
+
+  it('fences a late writer response when switching back to the root result', async () => {
+    const api = new FakeApiClient()
+    const old = deferred<Awaited<ReturnType<FakeApiClient['onTaskReviewSummary']>>>()
+    api.onTaskReviewSummary = () => old.promise
+    const manager = new TaskReviewManager(api, async () => {})
+    const first = manager.open(taskId, 'writer' as SessionId)
+    api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))
+    await manager.open(taskId)
+    old.resolve(ok({ ...summary(), taskId: 'writer' as SessionId }))
+    await first
+    expect(manager.getSnapshot().writerSessionId).toBeUndefined()
+    expect(manager.getSnapshot().summary?.taskId).toBe(taskId)
+  })
+
   it('loads a summary and selected diff, then preserves a still-present selection', async () => {
     const api = new FakeApiClient()
     api.onTaskReviewSummary = () => Promise.resolve(ok(summary()))
@@ -79,6 +114,35 @@ describe('TaskReviewManager reads', () => {
 })
 
 describe('TaskReviewManager actions', () => {
+  it('blocks source switches during delivery and fences a late receipt after disconnect and reselection', async () => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))
+    const delayed = deferred<Awaited<ReturnType<FakeApiClient['onTaskMutation']>>>()
+    api.onTaskMutation = () => delayed.promise
+    const manager = new TaskReviewManager(api, async () => {})
+    await manager.open(taskId)
+    const delivery = manager.commit('Review', 4)
+    await expect(manager.open(taskId, 'writer' as SessionId)).rejects.toThrow('current delivery operation')
+    expect(manager.getSnapshot()).toMatchObject({ taskId, operation: 'commit' })
+    manager.handleDisconnected()
+    api.onTaskReviewSummary = () => Promise.resolve(ok({ ...summary([]), taskId: 'writer' as SessionId }))
+    await manager.open(taskId, 'writer' as SessionId)
+    delayed.resolve(ok(task()))
+    await expect(delivery).resolves.toMatchObject({ ok: true })
+    expect(manager.getSnapshot()).toMatchObject({ writerSessionId: 'writer', result: null, operation: null })
+    expect(api.callsOf('task.reviewSummary')).toHaveLength(2)
+  })
+
+  it('preserves an accepted receipt when refreshing the task projection fails', async () => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))
+    api.onTaskMutation = () => Promise.resolve(ok(task()))
+    const manager = new TaskReviewManager(api, async () => { throw new Error('Projection unavailable') })
+    await manager.open(taskId)
+    await expect(manager.commit('Review', 4)).resolves.toMatchObject({ ok: true })
+    expect(manager.getSnapshot()).toMatchObject({ operation: null, result: { taskId }, error: { message: 'Projection unavailable' } })
+  })
+
   it('routes review, commit, apply, and discard with current revision facts and refreshes Task state', async () => {
     const api = new FakeApiClient()
     let taskRefreshes = 0

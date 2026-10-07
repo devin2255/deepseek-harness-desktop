@@ -1,6 +1,7 @@
 /** Host Task RPC forwarding, validation, error mapping, and change delivery. */
 
 import { describe, expect, it, vi } from 'vitest'
+import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -218,6 +219,83 @@ async function harness(): Promise<{
 }
 
 describe('Task RPC', () => {
+  it('reads only a stopped direct writer from its own execution record without activating it', async () => {
+    const { api, ctx, review, tasks } = await harness()
+    tasks.currentRow = reviewRow
+    const writerSessionId = SessionId('writer')
+    const assignment = { ...executionWorkspace, taskId: writerSessionId, sourcePath: executionWorkspace.path, path: resolve('writer-test') }
+    const child = ctx.sessions.create(writerSessionId, { meta: { origin: 'subagent', parentSession: rootId, cwd: assignment.path } })
+    child.append('subagent/worktree-assigned', { parentTaskId: rootId, assignment })
+    vi.spyOn(review, 'summarize').mockResolvedValue({ ...reviewSummary, taskId: writerSessionId })
+    const signal = new AbortController().signal
+    await expect(api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), signal))
+      .resolves.toMatchObject({ result: { ok: true, value: { taskId: writerSessionId } } })
+    expect(review.last).toBeUndefined()
+    await api.tasks.reviewDiff(request({ sessionId: rootId, writerSessionId, path: 'src/app.ts', expectedRevision: reviewRevision }), signal)
+    expect(review.last).toEqual(['diff', { assignment, path: 'src/app.ts', expectedRevision: reviewRevision }, signal])
+    expect(ctx.agents.get(writerSessionId)).toBeUndefined()
+
+    const remove = ctx.agents.register({ id: writerSessionId, session: child, status: 'idle', ctx } as Agent)
+    delete review.last
+    await expect(api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), signal))
+      .resolves.toMatchObject({ result: { ok: false, error: { details: { reviewCode: 'REVIEW_STALE' } } } })
+    expect(review.last).toBeUndefined()
+    remove()
+    await ctx.fiber.dispose()
+  })
+
+  it('rejects foreign, shared, inherited, and discarded writer selections before Git inspection', async () => {
+    const { api, ctx, review, tasks } = await harness()
+    tasks.currentRow = reviewRow
+    const signal = new AbortController().signal
+    for (const [id, parentSession, seedLength, assigned] of [
+      ['foreign', SessionId('other'), 0, true], ['shared', rootId, 0, false], ['inherited', rootId, 1, true],
+    ] as const) {
+      const writerSessionId = SessionId(id)
+      const assignment = { ...executionWorkspace, taskId: writerSessionId, sourcePath: executionWorkspace.path, path: resolve(`${id}-test`) }
+      const child = ctx.sessions.create(writerSessionId, {
+        meta: { origin: 'subagent', parentSession, seedLength, cwd: assignment.path },
+        ...seedLength === 0 ? {} : { seed: [{ type: 'subagent/worktree-assigned', seq: 0, time: 1, data: { parentTaskId: rootId, assignment } }] },
+      })
+      if (assigned && seedLength === 0) child.append('subagent/worktree-assigned', { parentTaskId: rootId, assignment })
+      await expect(api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), signal))
+        .resolves.toMatchObject({ result: { ok: false, error: { details: { reviewCode: 'REVIEW_INVALID_INTEGRATION' } } } })
+    }
+    tasks.currentRow = { ...reviewRow, discardReceipt }
+    await expect(api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId: SessionId('missing') }), signal))
+      .resolves.toMatchObject({ result: { ok: false, error: { details: { reviewCode: 'REVIEW_WORKTREE_UNAVAILABLE' } } } })
+    expect(review.last).toBeUndefined()
+    await ctx.fiber.dispose()
+  })
+
+  it('inspects cold writer ownership with cancellation and rejects a writer that resumes during the read', async () => {
+    const { api, ctx, review, tasks } = await harness()
+    tasks.currentRow = reviewRow
+    const writerSessionId = SessionId('cold-writer')
+    const assignment = { ...executionWorkspace, taskId: writerSessionId, sourcePath: executionWorkspace.path, path: resolve('cold-writer-test') }
+    const meta = ctx.sessions.prepare(writerSessionId, { meta: { origin: 'subagent', parentSession: rootId, cwd: assignment.path } }).header
+    const events = [{ type: 'subagent/worktree-assigned' as const, seq: 0, time: 1, data: { parentTaskId: rootId, assignment } }]
+    const inspect = vi.fn(async () => ({ meta, events }))
+    ctx.provide('sessionPersistence', { inspect } as never)
+    const signal = new AbortController().signal
+    await api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), signal)
+    expect(inspect).toHaveBeenCalledWith(writerSessionId, signal)
+    expect(review.last?.[1]).toEqual({ assignment })
+    expect(ctx.agents.get(writerSessionId)).toBeUndefined()
+    delete review.last
+    let remove = () => {}
+    inspect.mockImplementation(async () => {
+      const session = ctx.sessions.create(writerSessionId, { meta })
+      remove = ctx.agents.register({ id: writerSessionId, session, status: 'running', ctx } as Agent)
+      return { meta, events }
+    })
+    await expect(api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), signal))
+      .resolves.toMatchObject({ result: { ok: false, error: { details: { reviewCode: 'REVIEW_STALE' } } } })
+    expect(review.last).toBeUndefined()
+    remove()
+    await ctx.fiber.dispose()
+  })
+
   it('publishes the host Agent registry as the complete live Task baseline', async () => {
     const { ctx, tasks } = await harness()
     let clock = 100
@@ -436,6 +514,9 @@ describe('Task wire schemas', () => {
 
   it('strictly validates all Task review and delivery requests', () => {
     expect(taskReviewSummaryRequestSchema.safeParse({ sessionId: 'root' }).success).toBe(true)
+    expect(taskReviewSummaryRequestSchema.safeParse({ sessionId: 'root', writerSessionId: 'writer' }).success).toBe(true)
+    expect(taskReviewSummaryRequestSchema.safeParse({ sessionId: 'root', writerSessionId: ' writer ' }).success).toBe(false)
+    expect(taskReviewDiffRequestSchema.safeParse({ sessionId: 'root', writerSessionId: 1, path: 'a.txt', expectedRevision: reviewRevision }).success).toBe(false)
     expect(taskReviewDiffRequestSchema.safeParse({
       sessionId: 'root', path: '../secret', expectedRevision: reviewRevision,
     }).success).toBe(false)

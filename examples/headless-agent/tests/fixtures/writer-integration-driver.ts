@@ -7,7 +7,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { boot, installFailLoud, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { LlmAdapter, CallId, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { createApiProxy, InProcessApiClient, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 import { resolveConfig, runGit } from '@deepseek-ai/dsh-task-worktree-local'
 import { foldSubagentWorktree } from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import type { TaskCommitReceipt, TaskIntegrationResult, TaskReviewSummary } from '@deepseek-ai/dsh-task-review'
@@ -49,7 +49,8 @@ try {
   await writeFile(join(source, 'tracked.txt'), 'base\n')
   await git(source, ['add', '.'])
   await git(source, ['commit', '-m', 'base'])
-  const integration = await runtime.taskWorktrees.create({ taskId: SessionId('root'), workspaceId: WorkspaceId('workspace'), workspacePath: source })
+  const workspace = await runtime.workspaceRegistry.create(source)
+  const integration = await runtime.taskWorktrees.create({ taskId: SessionId('root'), workspaceId: workspace.id, workspacePath: source })
   const children: SessionId[] = []
   const commits: TaskCommitReceipt[] = []
   let rootRevision = ''
@@ -110,13 +111,25 @@ try {
     parent: parent.agent, label: `writer-${label}`, prompt: [{ type: 'text', text: `writer-${label}` }], signal: new AbortController().signal,
   })))
   children.push(...runs.map(run => run.id))
+  const api = new InProcessApiClient(toFetchHandler(createApiProxy(runtime, {
+    defaultModelSelection: () => ({ provider: 'fixture', model: 'fixture' }), cwd: source,
+  })))
+  const activeReview = await api.tasks.reviewSummary({ sessionId: integration.taskId, writerSessionId: children[0]! })
   barrier.resolve(undefined)
   await Promise.all(runs.map(async (run) => { await run.result; await run.dispose() }))
+  const writerReview = await api.tasks.reviewSummary({ sessionId: integration.taskId, writerSessionId: children[0]! })
+  if (!writerReview.result.ok) throw new Error(writerReview.result.error.message)
+  const writerDiff = await api.tasks.reviewDiff({ sessionId: integration.taskId, writerSessionId: children[0]!,
+    expectedRevision: writerReview.result.value.revision, path: 'same.txt' })
   await parent.agent.whenIdle()
   unpark()
   parent.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'root-integration' }], source: { kind: 'user' } }))
   await parent.agent.whenIdle()
   const output = (value: object): void => { process.stdout.write(`${JSON.stringify(value)}\n`) }
+  output({ stage: 'writer-review', activeRejected: !activeReview.result.ok,
+    childIdentity: writerReview.result.value.taskId === children[0],
+    diffPresent: writerDiff.result.ok && writerDiff.result.value.patch.includes('+writer-a'),
+    noActivation: runtime.agents.get(children[0]!) === undefined })
   output({ stage: 'conflict', reported: conflict?.kind === 'conflict', paths: conflict?.kind === 'conflict' ? conflict.paths : [], rootUnchanged: conflictPreserved })
   output({ stage: 'integrated', reported: integrated?.kind === 'integrated', contributors: integrated?.contributors.length,
     filesPresent: await readFile(join(integration.path, 'writer-c.txt'), 'utf8') === 'writer-c'

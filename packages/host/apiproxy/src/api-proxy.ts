@@ -66,6 +66,7 @@ import type { LiveTaskFact, TaskErrorCode, TaskSnapshot } from '@deepseek-ai/dsh
 import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 import { TaskReviewError, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
+import { foldSubagentWorktree } from '@deepseek-ai/dsh-subagent-spawn-in-process'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -1928,6 +1929,41 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return { task, assignment: task.executionWorkspace, tasks, review }
   }
 
+  function assertWriterStopped(writerSessionId: SessionId | undefined): void {
+    if (writerSessionId !== undefined && ctx.agents.get(writerSessionId) !== undefined) {
+      throw new TaskReviewError('Wait until the writer releases its active execution before reviewing its result.', 'REVIEW_STALE')
+    }
+  }
+
+  /** Resolve a stopped direct writer from its own durable execution record, never a client-supplied path. */
+  async function taskReviewReadAssignment(
+    target: TaskReviewTarget, writerSessionId: SessionId | undefined, signal: AbortSignal,
+  ): Promise<TaskWorktreeAssignment> {
+    if (writerSessionId === undefined) return target.assignment
+    if (target.task.discardReceipt !== undefined) {
+      throw new TaskReviewError('The root Task worktree has been removed.', 'REVIEW_WORKTREE_UNAVAILABLE')
+    }
+    assertWriterStopped(writerSessionId)
+    const live = ctx.sessions.get(writerSessionId)
+    const persistence = ctx.get('sessionPersistence')
+    const inspection = live === undefined
+      ? await persistence?.inspect(writerSessionId, signal)
+      : { meta: live.header, events: live.events }
+    if (inspection === undefined) {
+      throw new TaskReviewError('The writer Session is unavailable.', 'REVIEW_WORKTREE_UNAVAILABLE')
+    }
+    signal.throwIfAborted()
+    const recorded = foldSubagentWorktree(inspection.events.slice(inspection.meta.seedLength ?? 0))
+    if (inspection.meta.origin !== 'subagent' || inspection.meta.parentSession !== target.task.taskId
+      || recorded === undefined || recorded.parentTaskId !== target.task.taskId
+      || recorded.assignment.taskId !== writerSessionId || recorded.assignment.sourcePath !== target.assignment.path
+      || recorded.assignment.workspaceId !== target.assignment.workspaceId || inspection.meta.cwd !== recorded.assignment.path) {
+      throw new TaskReviewError('Select a directly owned isolated writer of this root Task.', 'REVIEW_INVALID_INTEGRATION')
+    }
+    assertWriterStopped(writerSessionId)
+    return recorded.assignment
+  }
+
   /** Map cancellation and user-safe Task review failures without serializing native causes. */
   function taskReviewError(
     request: RpcRequest<{ sessionId: SessionId }>,
@@ -3364,7 +3400,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const target = taskReviewTarget(request.payload.sessionId)
         if ('error' in target) return err(request, target.error)
         try {
-          return ok(request, await target.review.summarize({ assignment: target.assignment }, signal))
+          const assignment = await taskReviewReadAssignment(target, request.payload.writerSessionId, signal)
+          const summary = await target.review.summarize({ assignment }, signal)
+          assertWriterStopped(request.payload.writerSessionId)
+          return ok(request, summary)
         } catch (error: unknown) {
           return taskReviewError(request, error, signal)
         }
@@ -3374,11 +3413,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const target = taskReviewTarget(request.payload.sessionId)
         if ('error' in target) return err(request, target.error)
         try {
-          return ok(request, await target.review.diff({
-            assignment: target.assignment,
+          const assignment = await taskReviewReadAssignment(target, request.payload.writerSessionId, signal)
+          const diff = await target.review.diff({
+            assignment,
             path: request.payload.path,
             expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
-          }, signal))
+          }, signal)
+          assertWriterStopped(request.payload.writerSessionId)
+          return ok(request, diff)
         } catch (error: unknown) {
           return taskReviewError(request, error, signal)
         }

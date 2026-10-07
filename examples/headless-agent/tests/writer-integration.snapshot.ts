@@ -15,6 +15,7 @@ it('reviews and commits writers, preserves a conflicting batch, and integrates a
     binScript, libBinScript: binScript, configPath, binArgs: [configPath], tsconfigPath })
   expect(result.stderr).toBe('')
   expect(result.stdout.trimEnd().split('\n').map(line => JSON.parse(line) as object)).toEqual([
+    { stage: 'writer-review', activeRejected: true, childIdentity: true, diffPresent: true, noActivation: true },
     { stage: 'conflict', reported: true, paths: ['same.txt'], rootUnchanged: true },
     { stage: 'integrated', reported: true, contributors: 2, filesPresent: true, rootClean: true, sourceUnchanged: true },
     { stage: 'transcript', reviews: 4, commits: 4, integrations: 2, errors: 0 },

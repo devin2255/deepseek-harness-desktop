@@ -1,5 +1,8 @@
 /** Task Review workspace dictionary. */
 export const zh = {
+  reviewSource: '审查对象', rootResult: '根任务成果', writerResult: 'Agent 成果：{id}',
+  writerReadOnly: '当前只读检查子 Agent 成果，不会提交或合并。仅支持已释放执行权的独立工作树；共享目录子级不能单独审查。根任务交付操作已禁用，切回根任务后再操作。',
+  sourcesLoading: '正在加载子 Agent 成果目录…',
   review: '变更审查', back: '返回任务', refresh: '刷新', loading: '正在加载审查内容…', stale: '连接已断开；当前审查内容可能已过时。',
   retry: '重试', empty: '这个任务没有可审查的文件变更。', files: '变更文件', diff: '统一 Diff', inspector: '验收与风险',
   branch: '分支', base: '基准提交', head: '任务提交', sourceHead: '源工作区 HEAD', sourceDirty: '任务开始时源工作区有未提交变更',
@@ -28,6 +31,9 @@ export type TaskReviewKey = keyof typeof zh
 
 /** English Task Review copy. */
 export const en = {
+  reviewSource: 'Review source', rootResult: 'Root task result', writerResult: 'Agent result: {id}',
+  writerReadOnly: 'Read-only inspection of a child Agent result; nothing is committed or merged. Only isolated worktrees with released execution can be reviewed; shared-directory children cannot. Root delivery actions are disabled. Return to the root result to deliver it.',
+  sourcesLoading: 'Loading child Agent result catalog…',
   review: 'Change Review', back: 'Back to Tasks', refresh: 'Refresh', loading: 'Loading review…', stale: 'Disconnected; this review may be out of date.',
   retry: 'Retry', empty: 'This task has no file changes to review.', files: 'Changed files', diff: 'Unified diff', inspector: 'Acceptance & risk',
   branch: 'Branch', base: 'Base commit', head: 'Task HEAD', sourceHead: 'Source HEAD', sourceDirty: 'Source workspace had uncommitted changes when the task started',

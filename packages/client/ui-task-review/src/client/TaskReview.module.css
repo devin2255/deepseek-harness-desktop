@@ -20,6 +20,8 @@
 }
 
 .titleBlock { min-width: 0; }
+.sourcePicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.sourcePicker select { max-width: 100%; min-height: 34px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 5px 10px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); font: inherit; }
 .titleBlock h1 { margin: 8px 0 6px; font-size: 22px; line-height: 1.25; overflow-wrap: anywhere; }
 .back { border: 0; padding: 0; color: var(--dsw-alias-label-secondary); background: none; font: inherit; cursor: pointer; }
 .facts { display: flex; flex-wrap: wrap; gap: 5px 14px; color: var(--dsw-alias-label-secondary); font-size: 12px; }

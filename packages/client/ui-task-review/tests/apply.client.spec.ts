@@ -17,25 +17,27 @@ async function bench() {
   }
   const reviewState = { getSnapshot: () => review, subscribe: () => () => {} }
   const tasks = {
-    reviewState, refreshReview: vi.fn(async () => {}), selectReviewFile: vi.fn(async () => {}),
+    reviewState, refreshReview: vi.fn(async () => {}), selectReviewFile: vi.fn(async () => {}), openReview: vi.fn(async () => {}),
     requestChanges: vi.fn(async () => ({})), commitReview: vi.fn(async () => ({})),
     applyReview: vi.fn(async () => ({})), discardReview: vi.fn(async () => ({})),
   }
   const layout = { showHome: vi.fn() }
+  const sessions = { refreshSubagents: vi.fn(async () => {}), setSubagentCatalogOpen: vi.fn() }
   ctx.provide('tasks', tasks as never)
   ctx.provide('layout', layout as never)
+  ctx.provide('sessions', sessions as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
   slots.register(
     { name: 'root', children: { 'shell.review': { kind: 'single', scope: 'root' } }, inject: () => ({}) },
     ({ renderSlot }: PropsRenderSlots<'shell.review'>) => renderSlot('shell.review', {}),
   )
-  return { ctx, slots, tasks, layout, reviewState }
+  return { ctx, slots, tasks, sessions, layout, reviewState, review }
 }
 
 describe('Task Review composition', () => {
   it('registers the workspace and injects only the narrow runtime actions', async () => {
     const b = await bench()
-    expect(inject).toEqual(['slots', 'tasks', 'layout', 'locale'])
+    expect(inject).toEqual(['slots', 'tasks', 'sessions', 'layout', 'locale'])
     const fiber = b.ctx.plugin({ inject, apply })
     await fiber.await()
     expect(b.slots.entries('shell.review')).toHaveLength(1)
@@ -44,13 +46,20 @@ describe('Task Review composition', () => {
     expect(face.hooks.taskReview).toBe(b.reviewState)
     face.showTasks()
     await face.refresh()
+    vi.spyOn(b.reviewState, 'getSnapshot').mockReturnValue({ ...b.review, taskId: 'root' as never })
+    await face.refresh()
+    expect(b.sessions.refreshSubagents).toHaveBeenCalledWith('root')
+    face.setSourcesOpen('root' as never, true)
+    expect(b.sessions.setSubagentCatalogOpen).toHaveBeenCalledWith('root', true)
     await face.selectFile('src/app.ts')
+    await face.selectSource('root' as never, 'writer' as never)
     await face.requestChanges(1)
     await face.commit('feat: done', 2)
     await face.apply('a'.repeat(40), 3)
     await face.discard(true, 4)
     expect(b.layout.showHome).toHaveBeenCalledOnce()
     expect(b.tasks.selectReviewFile).toHaveBeenCalledWith('src/app.ts')
+    expect(b.tasks.openReview).toHaveBeenCalledWith('root', 'writer')
     expect(b.tasks.discardReview).toHaveBeenCalledWith(true, 4)
     await fiber.dispose()
     expect(b.slots.entries('shell.review')).toHaveLength(0)
