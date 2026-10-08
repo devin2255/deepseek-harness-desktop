@@ -37,3 +37,5 @@ The existing writer review and integration notes remain active because they own 
 ## Verification
 
 Registry tests cover atomic acquisition, duplicate and mutated selections, independent operations, live and overlapping ownership, failures, cancellation, initiator attribution, and teardown drain. Real factory tests hold a resume in unpublished setup, acquire offline ownership, and verify publication rejection, rollback, and successful retry. Real Git tool tests hold commit and merge preflight results while competing activation and review arrive. The Loader replay exercises contention through Host reads, the actual resume factory, and a model-visible tool rejection, then resumes successfully after release while retaining the integration transcript and cold projection.
+
+Electron acceptance observes the root's durable tool result before reading the committed writer tree. Selected-child summary polling acquires offline ownership and can itself reject the commit under observation; a transcript read does not reserve that child. The acceptance still requires a successful tool result and a changed Git commit.

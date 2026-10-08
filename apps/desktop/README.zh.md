@@ -19,6 +19,8 @@ pnpm --filter @deepseek-ai/dsh-desktop start
 
 桌面端在 `knip.json` 中列出实际运行的 Electron 验收测试入口，以及由 Cordis 根据 profile 配置或打包依赖树动态加载的运行时依赖。修改桌面端组合时，应保持该列表与包清单一致；仅检查静态 import 无法发现这些必需包。
 
+Electron 验收通过根 Session 历史观察写入者命令完成，再检查已变更的子级目录。所选写入者审查本身会保留该子级，并可能拒绝竞争的提交；轮询它不是被动的完成检查。
+
 ## 运行时生命周期
 
 Main 在应用就绪前启用 Chromium 沙箱并获取 Electron 单实例锁。在 Windows 上，它还通过 PowerShell 子进程持有供安装程序识别的 mutex；macOS 和 Linux 只使用 Electron 锁，不启动该 Windows 辅助进程。`app.whenReady()` 完成后，持有锁的实例创建本地启动窗口，使用 `desktop` profile 在随机 loopback 端口启动且仅启动一个 Harness，并且只在经过认证的就绪检查通过后交接给已授权主窗口。原生窗口关闭时会先释放旧窗口的隔离 session 授权，之后托盘操作或第二次启动才能使用现有 Harness 授权重建并聚焦窗口；该过程不会再启动 Harness。

@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { _electron as electron, type ElectronApplication, type Locator, type Page, type Request } from 'playwright'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { ToolResultMessage } from '@deepseek-ai/dsh-session'
+import type { HistoryEntry } from '@deepseek-ai/dsh-host-apiproxy/api/sessions'
 
 const DESKTOP_ROOT = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
 const SENSITIVE_ENVIRONMENT_KEY = /KEY|SECRET|TOKEN|PASSWORD/iu
@@ -572,20 +574,28 @@ describe('desktop Electron acceptance', () => {
     await pageRpc(page, 'session.prompt', {
       sessionId: writerRoot.sessionId, mode: 'queue', content: [{ type: 'text', text: WRITER_CONTROL_PROMPT }],
     })
-    let committedWriter: TaskReviewSummarySnapshot | undefined
+    let writerCommitResult: ToolResultMessage['content'][number] | undefined
+    // A selected-writer review owns an offline reservation. Observe the root
+    // transcript while commit runs so the test does not contend with its action.
     await expect.poll(async () => {
-      committedWriter = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
-        sessionId: writerRoot.sessionId, writerSessionId: writerId,
+      const history = await pageRpc<{ events: readonly HistoryEntry[] }>(page, 'session.history', {
+        sessionId: writerRoot.sessionId, maxMessages: 30,
       })
-      return committedWriter.headCommit !== writerBeforeCommit.headCommit
+      writerCommitResult = history.events.flatMap(({ event }) => event.type === 'tool/result'
+        ? event.data.message.content : []).find(block => block.toolCallId === 'desktop-commit_agent_changes')
+      return writerCommitResult !== undefined
     }, { timeout: 25_000 }).toBe(true).catch(async (error: unknown) => {
       await writeFile(join(screenshots, 'writer-commit-failure.json'), JSON.stringify({
-        writerControl, committedWriter,
+        writerControl,
         history: await pageRpc(page, 'session.history', { sessionId: writerRoot.sessionId, maxMessages: 30 }),
       }, null, 2))
       throw error
     })
-    if (committedWriter === undefined) throw new Error('The desktop writer commit did not publish')
+    expect(writerCommitResult?.isError, JSON.stringify(writerCommitResult)).not.toBe(true)
+    const committedWriter = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+      sessionId: writerRoot.sessionId, writerSessionId: writerId,
+    })
+    expect(committedWriter.headCommit).not.toBe(writerBeforeCommit.headCommit)
     await expect.poll(async () => (await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})).tasks
       .find(task => task.taskId === writerRoot.sessionId)?.status, { timeout: 15_000 }).not.toBe('running')
     const rootBeforeIntegration = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {

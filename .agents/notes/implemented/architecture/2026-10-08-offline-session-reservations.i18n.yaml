@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-08-offline-session-reservations.md
-2026-10-08-offline-session-reservations.md: 3f65845bae16f3ca9d962728ea33ac913d191fd1
-2026-10-08-offline-session-reservations.zh.md: 4c4bb35900f69f6b8729b035301ce99634f5950d
+2026-10-08-offline-session-reservations.md: ef9188f39b83bf5486015229f7bfe47849b8fb20
+2026-10-08-offline-session-reservations.zh.md: d515644a49f4ebfa40bf1557ae62da9b7eb19e45
