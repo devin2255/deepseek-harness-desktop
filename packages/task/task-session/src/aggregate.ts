@@ -182,7 +182,8 @@ export function aggregateTasks(input: TaskAggregationInput): TaskListSnapshot {
       if (node.outcome.kind !== 'conflict' || node.resolvedBy !== undefined || fold?.discardReceipt !== undefined) continue
       attention.push({ id: AttentionItemId(node.id), taskId: root.header.id, ownerSessionId: root.header.id,
         kind: 'merge-conflict', severity: 'error', summary: node.outcome.result.paths.join(', '),
-        createdAt: node.finishedAt ?? node.startedAt, sourceId: node.id, actionable: true })
+        // Confirmed conflicts always carry the paired tool result's logged completion time.
+        createdAt: node.finishedAt as number, sourceId: node.id, actionable: true })
     }
     for (const fact of live) if (fact.kind === 'attention') attention.push(clone(fact.item))
     const newestEvent = tree.flatMap(session => session.events ?? []).reduce((latest, event) => Math.max(latest, event.time), 0)

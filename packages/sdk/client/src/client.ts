@@ -648,18 +648,23 @@ function isIntegrationHistory(
     }
     if (node.resolvedBy !== undefined && (outcome.kind !== 'conflict' || !isNonBlank(node.resolvedBy))) return false
   }
-  // Each row is validated above; this pass only checks the cross-row resolution relationship.
+  // The nearest later publication for each writer determines which publication completes a conflict.
   const nodes = value as NonNullable<TaskSnapshot['integrations']>
-  return nodes.every((node, index) => {
-    if (node.outcome.kind !== 'conflict') return true
-    const remaining = new Set(node.writerSessionIds)
-    const resolved = nodes.slice(index + 1).find((later) => {
-      if (later.outcome.kind !== 'integrated') return false
-      for (const writer of later.writerSessionIds) remaining.delete(writer)
-      return remaining.size === 0
-    })
-    return node.resolvedBy === resolved?.id
-  })
+  const publications = new Map<TaskSnapshot['descendantSessionIds'][number], typeof nodes[number]>()
+  for (const node of nodes.toReversed()) {
+    if (node.outcome.kind === 'integrated') {
+      for (const writer of node.writerSessionIds) publications.set(writer, node)
+    } else if (node.outcome.kind === 'conflict') {
+      let resolved: typeof node | undefined
+      for (const writer of node.writerSessionIds) {
+        const publication = publications.get(writer)
+        if (publication === undefined) { resolved = undefined; break }
+        if (resolved === undefined || publication.callSeq > resolved.callSeq) resolved = publication
+      }
+      if (node.resolvedBy !== resolved?.id) return false
+    }
+  }
+  return true
 }
 
 function isIntegrationResult(

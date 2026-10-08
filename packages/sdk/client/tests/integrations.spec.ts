@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { DeepSeekHarness, SdkProtocolError, type TaskSnapshot } from '../src/index.ts'
+import { DeepSeekHarness, SdkProtocolError, type TaskIntegrationNode, type TaskSnapshot } from '../src/index.ts'
 
 const fixture = fileURLToPath(new URL('../../../../scripts/snapshots/task-integration-sdk/task.json', import.meta.url))
 const invalid = JSON.parse(readFileSync(new URL('../../../../scripts/snapshots/task-integration-sdk/invalid.json', import.meta.url), 'utf8')) as {
@@ -31,6 +31,39 @@ function harness(path: string): DeepSeekHarness {
 describe('SDK integration history', () => {
   it('preserves every outcome, historical resolution, and unknown publication state', async () => {
     expect((await harness(fixture).listTasks()).tasks[0]).toEqual(row)
+  })
+
+  it.each(['complete', 'partial', 'earlier-second-writer', 'later-republication'] as const)('validates %s contributor coverage across separate batches', async (mode) => {
+    const original = row.integrations![0]!
+    const integrated = row.integrations![4]!
+    if (original.outcome.kind !== 'conflict' || integrated.outcome.kind !== 'integrated') throw new Error('Fixture outcomes changed')
+    const [a, b] = row.descendantSessionIds
+    if (a === undefined || b === undefined) throw new Error('Fixture writers are missing')
+    const receipt = integrated.outcome.result
+    const template = receipt.contributors[0]!
+    const publication = (callSeq: number, id: typeof a): TaskIntegrationNode => ({
+      id: `${row.taskId}:integration:${callSeq}` as TaskIntegrationNode['id'], callSeq, startedAt: callSeq,
+      writerSessionIds: [id], outcome: { kind: 'integrated', result: {
+        ...receipt, contributors: [{ ...template, sessionId: id }], integratedAt: callSeq + 1,
+      } },
+    })
+    const conflict = {
+      ...original, writerSessionIds: [a, b], outcome: { kind: 'conflict', result: {
+        ...original.outcome.result, contributors: [a, b].map(sessionId => ({ ...template, sessionId })),
+      } },
+    } satisfies TaskIntegrationNode
+    if (mode === 'partial') delete conflict.resolvedBy
+    else conflict.resolvedBy = `${row.taskId}:integration:${mode === 'later-republication' ? 9 : 8}` as TaskIntegrationNode['id']
+    const first = mode === 'earlier-second-writer' ? b : a
+    const second = mode === 'earlier-second-writer' ? a : b
+    const integrations = [conflict, publication(5, first), ...mode === 'partial' ? [] : [publication(8, second)], publication(9, a)]
+    const modified = { ...row, asOfSeq: 10, integrations }
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-integration-coverage-'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const file = join(dir, 'task.json')
+    await writeFile(file, JSON.stringify(modified))
+    if (mode === 'later-republication') await expect(harness(file).listTasks()).rejects.toThrow(SdkProtocolError)
+    else expect((await harness(file).listTasks()).tasks[0]).toEqual(JSON.parse(JSON.stringify(modified)))
   })
 
   it.each(invalid)('rejects $name as a protocol error', async ({ path, value }) => {

@@ -16,6 +16,8 @@ Only complete JSON receipts matching the recorded root assignment, requested rev
 
 A verified preflight conflict produces root-owned merge attention. Its historical outcome remains unchanged. Later successful batches cover the selected writer identities, allowing revised commits and separate batches; only complete coverage clears the attention and records the last covering node as `resolvedBy`. Partial or unrelated successes do not resolve it. This records later integration, not the current contents of Git or proof of an automatic conflict repair.
 
+The TypeScript SDK validates coverage with a reverse scan retaining each writer's nearest later publication; the latest selected publication completes the conflict. Repeated publication cannot replace the first complete covering result. Conflict attention uses the paired tool result's logged completion time, which every confirmed outcome carries.
+
 Task wire validation and both SDKs preserve all five outcomes, root ownership, ordered call identities, contributor selection, and complete later coverage. The Provider's executed invariant checks those relationships on published snapshots. Review displays history independently of file-list emptiness, provides read-only contributor selection, and distinguishes root integration from source delivery. Unresolved conflicts disable Commit and Apply while permitting Request Changes. Conflict attention opens root Review; opening it does not clear the conflict.
 
 ## Alternatives considered

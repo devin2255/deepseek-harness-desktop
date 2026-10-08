@@ -70,7 +70,7 @@ describe('integration nodes', () => {
     const blocked = project([start(), result(conflict)])
     expect(blocked.status).toBe('needs-attention')
     expect(blocked.attention).toMatchObject([{ id: 'root:integration:1', kind: 'merge-conflict', ownerSessionId: rootId,
-      actionable: true, sourceId: 'root:integration:1', summary: 'src/shared.ts' }])
+      actionable: true, sourceId: 'root:integration:1', summary: 'src/shared.ts', createdAt: 3 }])
     const unrelatedArgs = { ...args, writers: [{ ...args.writers[0], subagent_id: 'other' }] }
     const other = { ...receipt, contributors: [{ ...receipt.contributors[0], sessionId: 'other' }] }
     const children: TaskSessionInput[] = ['writer', 'other'].map(id => ({ header: {

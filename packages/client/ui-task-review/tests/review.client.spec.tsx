@@ -99,6 +99,30 @@ describe('TaskReview', () => {
     expect((view.getByRole('button', { name: 'Create Commit' }) as HTMLButtonElement).disabled).toBe(true)
     expect((view.getByRole('button', { name: 'Apply to Project' }) as HTMLButtonElement).disabled).toBe(true)
     expect((view.getByRole('button', { name: 'Request Changes' }) as HTMLButtonElement).disabled).toBe(false)
+    const baseline = p.useSessions
+    let entries: NonNullable<SessionListState['subagentsByParent'][SessionId]>['entries'] = [
+      { kind: 'diagnostic', id: 'writer' as SessionId, reason: 'unavailable' },
+      { kind: 'child', id: 'other' as SessionId, mode: 'one-shot', activity: 'inactive', hasChildren: false },
+    ]
+    p.useSessions = selector => baseline(state => selector({ ...state, subagentsByParent: { [taskId]: {
+      entries, parentAvailable: true, state: 'ready', error: null,
+    } } }))
+    view.rerender(<TaskReview {...p} />)
+    expect((view.getByRole('button', { name: 'Inspect Agent: writer' }) as HTMLButtonElement).disabled).toBe(false)
+    entries = [{ kind: 'child', id: 'writer' as SessionId, mode: 'one-shot', activity: 'running', hasChildren: false }]
+    view.rerender(<TaskReview {...p} />)
+    const runningWriter = view.getByRole('button', { name: 'Inspect Agent: writer' }) as HTMLButtonElement
+    expect(runningWriter.disabled).toBe(true)
+    fireEvent.click(runningWriter)
+    expect(p.selectSource).toHaveBeenCalledTimes(1)
+    entries = [{ kind: 'child', id: 'writer' as SessionId, mode: 'one-shot', activity: 'inactive', hasChildren: false }]
+    view.rerender(<TaskReview {...p} />)
+    fireEvent.click(view.getByRole('button', { name: 'Inspect Agent: writer' }))
+    expect(p.selectSource).toHaveBeenCalledTimes(2)
+    const detached = harness({ taskId: undefined, result: task({ integrations: [node] }) })
+    view.rerender(<TaskReview {...detached} />)
+    fireEvent.click(view.getByRole('button', { name: 'Inspect Agent: writer' }))
+    expect(detached.selectSource).not.toHaveBeenCalled()
     view.rerender(<TaskReview {...harness({}, { integrations: [
       { ...node, resolvedBy: 'later' as never },
       { ...node, id: 'later' as never, callSeq: 3, outcome: { kind: 'unconfirmed' } },
