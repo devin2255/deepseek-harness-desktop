@@ -787,13 +787,15 @@ async function persistSeedSession(
  * wall time the local run took to stream them, so it moves between two runs
  * on one machine (measured 69 → 70 tok/s) and swings wildly on a fast replay
  * (26333 tok/s for a 3 ms stream).
+ * @param snapshot - captured aria text.
+ * @param workspaceCwd - absolute workspace root for this run.
+ * @returns aria text with run-local volatility tokenized.
  */
-function normalizeAria(snapshot: string, workspaceCwd: string): string {
+export function normalizeAria(snapshot: string, workspaceCwd: string): string {
   // The session heading renders the workspace's basename, not the full
   // path, so both spellings must collapse to the token.
-  const base = workspaceCwd.split('/').pop()!
-  return snapshot
-    .split(workspaceCwd).join('{{cwd}}')
+  const base = workspaceCwd.split(/[\\/]/).pop()!
+  return tokenizeAriaPath(snapshot, workspaceCwd, '{{cwd}}')
     .split(base).join('{{workspace}}')
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '{{uuid}}')
     // The optional space in `\d+m ?\d+s` covers both minute spellings: the
@@ -816,6 +818,21 @@ function normalizeAria(snapshot: string, workspaceCwd: string): string {
     .replace(/\d{1,2}月\d{1,2}日 \d{2}:\d{2}/g, '{{clock}}')
     .replace(/(?<!\d)\d{1,2}:\d{2}:\d{2}(?:\.\d+)?(?:\s*[AP]M)?(?!\d)/gi, '{{clock}}')
     .replace(/(?<!\d)\d{2}:\d{2}(?!\d)/g, '{{clock}}')
+}
+
+/**
+ * Tokenize one run-local root in plain or JSON-escaped aria text without changing other paths or command text.
+ * @param snapshot - aria text containing the root.
+ * @param root - absolute run-local path.
+ * @param token - stable placeholder for that root.
+ * @returns aria text with the root and its immediate child separator tokenized.
+ */
+export function tokenizeAriaPath(snapshot: string, root: string, token: string): string {
+  const spellings = [...new Set([root, root.replaceAll('\\', '/'), JSON.stringify(root).slice(1, -1)])]
+    .sort((left, right) => right.length - left.length)
+  let result = snapshot
+  for (const spelling of spellings) result = result.split(spelling).join(token)
+  return result.replaceAll(`${token}\\\\`, `${token}/`).replaceAll(`${token}\\`, `${token}/`)
 }
 
 /**
