@@ -31,6 +31,6 @@ A standing-policy change appends an owner-rendered superseding runtime-context s
 ## Known Limitations and Deferred Work
 
 - Line-oriented output is normalized; full-screen alternate-buffer interaction is unsupported.
-- Exact stdin-wait detection depends on the mounted subprocess provider; providers that cannot prove it use prompt-marker and silence/timeout readiness.
+- Exact stdin-wait detection depends on the mounted subprocess provider. Prompt readiness also requires an observed foreground group; missing foreground facts, including at startup, leave only silence (`inferred_idle`) or timeout readiness.
 - Cleanup guarantees are those of `SubprocessTerminalHandle`; provider-specific gaps belong to that implementation's contract rather than this PTY consumer.
 - Sessions do not survive harness process exit.

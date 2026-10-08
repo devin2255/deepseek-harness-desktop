@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { PassThrough } from 'node:stream'
+import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -216,7 +217,7 @@ describe('BashTerminalBackend startup rollback', () => {
     expect(initialized).toHaveBeenCalledWith(undefined)
     expect((ctx.sandbox as RecordingSandbox).calls).toEqual([{
       argv: ['/bin/bash', '-i'],
-      policy: { mode: 'workspace-write', sessionId: 'agent', workspaceRoot: '/workspace' },
+      policy: { mode: 'workspace-write', sessionId: 'agent', workspaceRoot: resolve('/workspace') },
     }])
   })
 
@@ -244,11 +245,11 @@ describe('BashTerminalBackend startup rollback', () => {
 
     expect(spawned).toMatchObject({
       argv: ['/sandbox', '--', '/bin/bash', '-i'],
-      cwd: '/session-workspace',
+      cwd: resolve('/session-workspace'),
     })
     expect((ctx.sandbox as RecordingSandbox).calls).toEqual([{
       argv: ['/bin/bash', '-i'],
-      policy: { mode: 'workspace-write', sessionId: 'agent', workspaceRoot: '/session-workspace' },
+      policy: { mode: 'workspace-write', sessionId: 'agent', workspaceRoot: resolve('/session-workspace') },
     }])
   })
 
@@ -313,6 +314,7 @@ describe('BashTerminalBackend startup rollback', () => {
   it('composes the default local session around a spawned terminal', async () => {
     const ctx = new Context()
     await ctx.plugin(EmptySandbox)
+    await ctx.plugin(StubSubprocessRuntime)
     await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: '/workspace' })
     const output = new PassThrough()
     const outcome = Promise.withResolvers<{ exitCode: number | null; signal: NodeJS.Signals | null }>()
@@ -329,12 +331,10 @@ describe('BashTerminalBackend startup rollback', () => {
       },
     }
     queueMicrotask(() => { output.write(Buffer.from('\x1b]133;D;0\x07dsh> ')) })
-    const backend = new BashTerminalBackend(
-      ctx,
-      config(),
-      async () => terminal,
-    )
+    const spawnTerminal = vi.spyOn(ctx.subprocess, 'spawnTerminal').mockResolvedValue(terminal)
+    const backend = new BashTerminalBackend(ctx, config())
     const session = await backend.spawn(spec(agent(ctx)))
+    expect(spawnTerminal).toHaveBeenCalledOnce()
     expect(session.motd).toBe('dsh> ')
     await session.close('test complete')
   })

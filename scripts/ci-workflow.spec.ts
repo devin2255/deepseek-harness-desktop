@@ -205,6 +205,14 @@ describe('CI workflow', () => {
     expect(config).not.toContain('packages/lsp/lsp-stdio/src/instance.ts')
   })
 
+  it('runs portable terminal lifecycle tests and coverage on Windows', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).not.toContain("'packages/terminal/terminal-bash',")
+    expect(config).not.toContain("'packages/terminal/terminal-bash/tests/**/*.spec.ts'")
+    expect(config).toContain("'packages/terminal/terminal-bash/tests/local.spec.ts'")
+  })
+
   it('requires one release-shaped Python runtime target on every pull request', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const pythonRuntime = workflowJob(workflow, 'python-runtime')

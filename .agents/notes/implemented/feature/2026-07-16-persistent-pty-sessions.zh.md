@@ -78,6 +78,8 @@ UI 渲染约定精确且不携带位置信息。`terminal_send` 只为前台发�
 
 macOS 没有精确 syscall 层。任何前台进程组输出静默都会返回 `inferred_idle`，包括 Python 和 `gdb`；从 `ps` 推导的终端 PGID 只用于发送信号，不作为「只有 shell 才能 idle」的证明。纯进程检查逻辑可注入，并在 Linux 上经过单元测试，同时由 macOS CI job 驱动真实 PTY 和进程表路径。
 
+提示符就绪要求当前观察到的前台进程组与 shell 进程组匹配。两个缺失的进程组值不能证明这一关系，包括启动阶段首次捕获 shell 进程组之前。检查无法识别进程组时，仅有提示符文本只允许返回静默或超时就绪结果；随后观察到进程组归属时，精确提示符就绪才恢复可用。
+
 Tier 2 在持续 `idleSilenceMs` 没有输出后返回 `inferred_idle`，因此 sleep 或网络阻塞的命令可能看似 ready。如果此前已经见过 prompt marker，Tier 2 会再等待 `handoffGraceMs`，使恰好落在静默边界上的 bash 前台交接仍然以精确的 `stdin_read` 归因结束，而不是退到较弱的推断；该宽限是由部署方拥有的配置字段，并被校验为至少覆盖一个 `pollIntervalMs`——短于轮询周期的宽限装不下一次就绪轮询，因此不可能改变任何结果。它只约束见过 marker 的 send，代价是这一种情况的交互返回延迟，而不是每一次 send。Tier 3 在 `timeoutMs` 后返回 `timeout`，避免前台工具调用无限占住 agent。结果保留这些区别；调用方可以通过 `ctx.jobs` 等待、向前台组发信号，或从另一个会话排查。
 
 一次 send 在任一层级 settle 之后，`TerminalSendOperation.append` 就不再接受输出，此后子进程的输出不会再进入那个已 settle 的 operation；它仍然会进入 scrollback，以及此时恰好处于活跃状态的任何 send。因此，等待自己所启动的 operation 上出现标记的测试，必须把 `idleSilenceMs` 与 `timeoutMs` 设得高于子进程自身的启动耗时；否则在负载较高的 macOS runner 上，解释器启动会在标记打印之前就结束这次 send。
@@ -160,6 +162,7 @@ plugins:
 - 子进程 fixture（测试前置数据）覆盖非 leader 与非主线程的 stdin 等待、僵尸进程完全停稳、不可读进程状态、受支持的 syscall 表、不支持的架构和误报拒绝；同一单元测试套件通过注入覆盖 macOS 检查器逻辑。
 - 真实 `node-pty` 与 PTY 消费方测试共同在受支持宿主上覆盖 shell 状态、共享沙箱策略、环境清洗、raw mode 前台 `SIGINT`、忽略 `SIGTERM` 的后代进程，以及 dispose 返回后立即完全停稳。
 - Loader 驱动的 `cordis.yml` 测试挂载真实三包组合。ACP 与 headless 快照通过 opt-in overlay 固定 6 个 schema、有界结果和错误；TUI 快照固定 terminal 与 generic 卡片展示。
+- headless 终端就绪 transcript（文本记录）使用真实后端和工具，仅控制操作系统终端传输；它区分前台事实不可用与归属恢复。可移植的解析器、配置和生命周期测试在 Windows 上执行，仅真实 POSIX PTY 套件被排除。这不提供 Windows 进程归属管理或信号发送能力。
 - 包约定、架构图、子系统页面、生成目录和 website API 描述同一个已发布接口。
 
 ## 后果

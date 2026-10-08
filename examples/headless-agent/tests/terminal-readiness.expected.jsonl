@@ -1,0 +1,1 @@
+{"opened":"started terminal session pty-1 (main) [type: shell]\ndsh> ","unknownForeground":"dsh> \n[wait: inferred_idle]\n[session: running]","observedForeground":"dsh> \n[wait: stdin_read]\n[session: running]","close":"closed terminal session pty-1","closed":true}

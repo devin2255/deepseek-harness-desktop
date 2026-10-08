@@ -444,7 +444,7 @@ export class LocalPtySession implements TerminalBackendSession {
         this.shellPgid = foreground.processGroupId
       }
       if (this.promptSeen && this.promptTextSeen && idleFor >= this.config.pollIntervalMs
-        && foreground?.processGroupId === this.shellPgid) {
+        && foreground !== undefined && foreground.processGroupId === this.shellPgid) {
         this.settleActive('stdin_read')
         return
       }

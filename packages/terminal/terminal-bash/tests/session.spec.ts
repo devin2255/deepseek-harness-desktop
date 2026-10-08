@@ -795,6 +795,33 @@ describe('LocalPtySession readiness and output', () => {
     await rejected
   })
 
+  it('does not infer an exact prompt wait when no foreground group has been observed', async () => {
+    vi.useFakeTimers()
+    const terminal = new FakeTerminal()
+    const inspector = new FakeInspector()
+    inspector.pgid = undefined
+    const session = makeSession(terminal, inspector, config())
+    let initialized = false
+    const initializing = session.initialize().then(() => { initialized = true })
+    terminal.emitData('\x1b]133;D;0\x07dsh> ')
+    await vi.advanceTimersByTimeAsync(10)
+    expect(initialized).toBe(false)
+    await vi.advanceTimersByTimeAsync(50)
+    await initializing
+
+    const operation = session.startSend({ text: 'true', submit: true })
+    let settled = false
+    void operation.done.then(() => { settled = true })
+    await Promise.resolve()
+    await Promise.resolve()
+    terminal.emitData('\x1b]133;D;0\x07dsh> ')
+    await vi.advanceTimersByTimeAsync(10)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(50)
+    expect((await operation.done).waitReason).toBe('inferred_idle')
+    await session.close('test complete')
+  })
+
   it('waits for printable prompt text when the startup marker is split from PS1', async () => {
     vi.useFakeTimers()
     const terminal = new FakeTerminal()
