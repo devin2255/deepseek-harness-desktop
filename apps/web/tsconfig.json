@@ -24,6 +24,7 @@
   "exclude": [
     "tests/scaffold.ts",
     "tests/scaffold-seed.spec.ts",
+    "tests/scaffold-aria.spec.ts",
     "tests/scaffold-hermetic.e2e.ts",
     "tests/minimal-preset.snapshot.ts",
     "tests/task-attention.snapshot.ts",
