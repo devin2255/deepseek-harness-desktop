@@ -1998,6 +1998,42 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
   }
 
+  /** Keep root execution excluded until Git and receipt recording have both settled. */
+  async function withTaskDelivery(
+    request: RpcRequest<{ sessionId: SessionId }>, signal: AbortSignal,
+    operation: (signal: AbortSignal) => Promise<TaskSnapshot>,
+  ): Promise<RpcResponse<TaskSnapshot>> {
+    const deliver = async (operationSignal: AbortSignal): Promise<RpcResponse<TaskSnapshot>> => {
+      try {
+        operationSignal.throwIfAborted()
+        return ok(request, await operation(operationSignal))
+      } catch (error: unknown) {
+        return taskReviewError(request, error, operationSignal)
+      }
+    }
+    if (signal.aborted) return taskReviewError(request, signal.reason, signal)
+    const { sessionId } = request.payload
+    const agent = ctx.agents.get(sessionId)
+    if (agent === undefined) {
+      try {
+        return await ctx.agents.withOfflineSessions([sessionId], () => deliver(signal))
+      } catch (error: unknown) {
+        if (error instanceof AgentOfflineReservationError) {
+          return taskError(request, new TaskError(`Task "${sessionId}" already has active work.`, 'TASK_ACTIVE'))
+        }
+        return taskReviewError(request, error, signal)
+      }
+    }
+    let maintenance: Promise<RpcResponse<TaskSnapshot>>
+    try {
+      maintenance = agent.runMaintenance(agentSignal => deliver(AbortSignal.any([signal, agentSignal])))
+    } catch (_busy: unknown) {
+      // Maintenance rejects synchronously only when another activity owns the Agent.
+      return taskError(request, new TaskError(`Task "${sessionId}" already has active work.`, 'TASK_ACTIVE'))
+    }
+    return maintenance
+  }
+
   /** Resolve a session's agent, apply one goal mutation, and acknowledge with the new CAS ref. */
   async function mutateGoal(
     request: RpcRequest<{ sessionId: SessionId }>,
@@ -3435,18 +3471,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId: request.payload.sessionId },
           })
         }
-        try {
+        return withTaskDelivery(request, signal, async (operationSignal) => {
           const receipt = await target.review.commit({
             assignment: target.assignment,
             expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
             message: request.payload.message,
-          }, signal)
-          return ok(request, await target.tasks.recordCommit(request.payload.sessionId, {
+          }, operationSignal)
+          return target.tasks.recordCommit(request.payload.sessionId, {
             receipt, expectedSeq: request.payload.expectedSeq,
-          }))
-        } catch (error: unknown) {
-          return taskReviewError(request, error, signal)
-        }
+          })
+        })
       },
 
       async apply(request, signal) {
@@ -3464,19 +3498,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId: request.payload.sessionId },
           })
         }
-        try {
+        return withTaskDelivery(request, signal, async (operationSignal) => {
           const receipt = await target.review.apply({
             assignment: target.assignment,
             expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
             expectedSourceHead: request.payload.expectedSourceHead,
             commit: request.payload.commit,
-          }, signal)
-          return ok(request, await target.tasks.recordApply(request.payload.sessionId, {
+          }, operationSignal)
+          return target.tasks.recordApply(request.payload.sessionId, {
             receipt, expectedSeq: request.payload.expectedSeq,
-          }))
-        } catch (error: unknown) {
-          return taskReviewError(request, error, signal)
-        }
+          })
+        })
       },
 
       async discard(request, signal) {
@@ -3492,18 +3524,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId: request.payload.sessionId },
           })
         }
-        try {
+        return withTaskDelivery(request, signal, async (operationSignal) => {
           const receipt = await target.review.discard({
             assignment: target.assignment,
             expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
             confirmedUncommittedLoss: request.payload.confirmedUncommittedLoss,
-          }, signal)
-          return ok(request, await target.tasks.recordDiscard(request.payload.sessionId, {
+          }, operationSignal)
+          return target.tasks.recordDiscard(request.payload.sessionId, {
             receipt, expectedSeq: request.payload.expectedSeq,
-          }))
-        } catch (error: unknown) {
-          return taskReviewError(request, error, signal)
-        }
+          })
+        })
       },
     },
 

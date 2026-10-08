@@ -1,0 +1,2 @@
+{"stage":"cold","blocked":["commit","apply","discard"],"receipts":["commit","apply","discard"],"branchRetained":true,"sourceHeadPreserved":true,"sourceContentApplied":true,"reservationReleased":true}
+{"stage":"resident","blocked":["commit","apply","discard"],"receipts":["commit","apply","discard"],"branchRetained":true,"sourceHeadPreserved":true,"sourceContentApplied":true,"reservationReleased":true}

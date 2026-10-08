@@ -219,6 +219,209 @@ async function harness(): Promise<{
   }
 }
 
+type DeliveryMethod = 'commit' | 'apply' | 'discard'
+
+function deliver(api: ReturnType<typeof createApiProxy>, method: DeliveryMethod, signal: AbortSignal) {
+  switch (method) {
+    case 'commit': return api.tasks.commit(request({
+      sessionId: rootId, expectedRevision: reviewRevision, message: 'feat: deliver', expectedSeq: 2,
+    }), signal)
+    case 'apply': return api.tasks.apply(request({
+      sessionId: rootId, expectedRevision: committedRevision, expectedSourceHead: '2'.repeat(40),
+      commit: commitReceipt.commit, expectedSeq: 2,
+    }), signal)
+    case 'discard': return api.tasks.discard(request({
+      sessionId: rootId, expectedRevision: committedRevision, confirmedUncommittedLoss: false, expectedSeq: 2,
+    }), signal)
+  }
+}
+
+describe('root delivery execution ownership', () => {
+  it.each(['commit', 'apply', 'discard'] as const)('keeps a cold root offline through %s and receipt settlement', async (method) => {
+    const { api, ctx, tasks, review } = await harness()
+    tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+    const entered = Promise.withResolvers<undefined>()
+    const gitDone = Promise.withResolvers<undefined>()
+    const recording = Promise.withResolvers<undefined>()
+    const receiptDone = Promise.withResolvers<TaskSnapshot>()
+    const hold = async <T>(receipt: T): Promise<T> => {
+      entered.resolve(undefined)
+      await gitDone.promise
+      return receipt
+    }
+    if (method === 'commit') vi.spyOn(review, 'commit').mockImplementation(() => hold(commitReceipt))
+    if (method === 'apply') vi.spyOn(review, 'apply').mockImplementation(() => hold(applyReceipt))
+    if (method === 'discard') vi.spyOn(review, 'discard').mockImplementation(() => hold(discardReceipt))
+    const record = method === 'commit' ? 'recordCommit' : method === 'apply' ? 'recordApply' : 'recordDiscard'
+    vi.spyOn(tasks, record).mockImplementation(() => {
+      recording.resolve(undefined)
+      return receiptDone.promise
+    })
+    const session = ctx.sessions.create(rootId)
+    const activation = () => ctx.agents.enter({ id: rootId, session, status: 'idle', ctx } as Agent, undefined)
+    const pending = deliver(api, method, new AbortController().signal)
+    try {
+      await entered.promise
+      expect(activation).toThrow(AgentOfflineReservationError)
+      await expect(deliver(api, method, new AbortController().signal))
+        .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-active' } } })
+      gitDone.resolve(undefined)
+      await recording.promise
+      expect(activation).toThrow(AgentOfflineReservationError)
+      const otherId = SessionId('independent-root')
+      const other = ctx.sessions.create(otherId)
+      ctx.agents.enter({ id: otherId, session: other, status: 'idle', ctx } as Agent, undefined)()
+      receiptDone.resolve(tasks.currentRow)
+      await expect(pending).resolves.toMatchObject({ result: { ok: true } })
+      expect(ctx.agents.get(rootId)).toBeUndefined()
+      activation()()
+    } finally {
+      gitDone.resolve(undefined)
+      receiptDone.resolve(tasks.currentRow)
+      await pending
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['commit', 'apply', 'discard'] as const)('releases a cold root after %s Provider or recording failure', async (method) => {
+    const { api, ctx, tasks, review } = await harness()
+    tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+    const session = ctx.sessions.create(rootId)
+    try {
+      review.nextError = new TaskReviewError('The reviewed tree changed.', 'REVIEW_STALE')
+      await expect(deliver(api, method, new AbortController().signal))
+        .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-review-rejected' } } })
+      ctx.agents.enter({ id: rootId, session, status: 'idle', ctx } as Agent, undefined)()
+      delete review.nextError
+      tasks.nextError = new TaskError('Receipt could not be recorded.', 'TASK_STALE_SEQUENCE')
+      await expect(deliver(api, method, new AbortController().signal))
+        .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-stale-sequence' } } })
+      ctx.agents.enter({ id: rootId, session, status: 'idle', ctx } as Agent, undefined)()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['commit', 'apply', 'discard'] as const)('rejects busy resident %s before calling Git', async (method) => {
+    const { api, ctx, tasks, review } = await harness()
+    tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+    const session = ctx.sessions.create(rootId)
+    try {
+      for (const status of ['idle', 'running'] as const) {
+        const busyAgent: Partial<Agent> = { id: rootId, session, status, ctx,
+          runMaintenance<T>(): Promise<T> { throw new Error('Already executing or maintaining') },
+        }
+        const remove = ctx.agents.register(busyAgent as Agent)
+        try {
+          await expect(deliver(api, method, new AbortController().signal))
+            .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-active' } } })
+          expect(review.last).toBeUndefined()
+          expect(tasks.last).toBeUndefined()
+        } finally { remove() }
+      }
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['commit', 'apply', 'discard'] as const)('holds resident maintenance until %s receipt recording finishes', async (method) => {
+    const { api, ctx, tasks, review } = await harness()
+    tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+    const recording = Promise.withResolvers<undefined>()
+    const finish = Promise.withResolvers<TaskSnapshot>()
+    let busy = false
+    const agent = { id: rootId, session: ctx.sessions.create(rootId), status: 'idle', ctx,
+      runMaintenance<T>(job: (signal: AbortSignal) => Promise<T>): Promise<T> {
+        if (busy) throw new Error('Maintenance is already owned')
+        busy = true
+        return job(new AbortController().signal).finally(() => { busy = false })
+      },
+    } as Agent
+    ctx.agents.register(agent)
+    const record = method === 'commit' ? 'recordCommit' : method === 'apply' ? 'recordApply' : 'recordDiscard'
+    vi.spyOn(tasks, record).mockImplementation(() => { recording.resolve(undefined); return finish.promise })
+    const signal = new AbortController().signal
+    const pending = deliver(api, method, signal)
+    try {
+      await recording.promise
+      expect(busy).toBe(true)
+      expect(review.last?.[2]).not.toBe(signal)
+      await expect(deliver(api, method, signal))
+        .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-active' } } })
+      finish.resolve(tasks.currentRow)
+      await expect(pending).resolves.toMatchObject({ result: { ok: true } })
+      expect(busy).toBe(false)
+    } finally {
+      finish.resolve(tasks.currentRow)
+      await pending
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['commit', 'apply', 'discard'] as const)('propagates both cancellation owners and awaits %s quiescence', async (method) => {
+    for (const owner of ['agent', 'request'] as const) {
+      const { api, ctx, tasks, review } = await harness()
+      tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+      const agentAbort = new AbortController()
+      const requestAbort = new AbortController()
+      const entered = Promise.withResolvers<undefined>()
+      const finish = Promise.withResolvers<undefined>()
+      let busy = false
+      const agent = { id: rootId, session: ctx.sessions.create(rootId), status: 'idle', ctx,
+        runMaintenance<T>(job: (signal: AbortSignal) => Promise<T>): Promise<T> {
+          if (busy) throw new Error('Maintenance is already owned')
+          busy = true
+          return job(agentAbort.signal).finally(() => { busy = false })
+        },
+      } as Agent
+      ctx.agents.register(agent)
+      let providerSignal: AbortSignal | undefined
+      vi.spyOn(review, method).mockImplementation(async (
+        _request: CommitTaskReviewRequest | ApplyTaskReviewRequest | DiscardTaskReviewRequest, signal?: AbortSignal,
+      ) => {
+        providerSignal = signal
+        entered.resolve(undefined)
+        await finish.promise
+        signal?.throwIfAborted()
+        throw new Error('Expected cancellation')
+      })
+      const pending = deliver(api, method, requestAbort.signal)
+      try {
+        await entered.promise
+        const abort = owner === 'agent' ? agentAbort : requestAbort
+        abort.abort(new Error(`${owner} cancelled`))
+        expect(providerSignal?.aborted).toBe(true)
+        expect(busy).toBe(true)
+        expect(tasks.last).toBeUndefined()
+        await expect(deliver(api, method, new AbortController().signal))
+          .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-active' } } })
+        finish.resolve(undefined)
+        await expect(pending).resolves.toMatchObject({ result: { ok: false, error: { code: 'cancelled' } } })
+        expect(busy).toBe(false)
+      } finally {
+        finish.resolve(undefined)
+        await pending
+        await ctx.fiber.dispose()
+      }
+    }
+  })
+
+  it.each(['commit', 'apply', 'discard'] as const)('does not call %s after request cancellation', async (method) => {
+    const { api, ctx, tasks, review } = await harness()
+    tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+    const abort = new AbortController()
+    abort.abort()
+    try {
+      await expect(deliver(api, method, abort.signal))
+        .resolves.toMatchObject({ result: { ok: false, error: { code: 'cancelled' } } })
+      expect(review.last).toBeUndefined()
+      expect(tasks.last).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+})
+
 describe('Task RPC', () => {
   it('reads only a stopped direct writer from its own execution record without activating it', async () => {
     const { api, ctx, review, tasks } = await harness()
