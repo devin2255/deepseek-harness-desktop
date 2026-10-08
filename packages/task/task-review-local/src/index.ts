@@ -252,9 +252,25 @@ export class LocalTaskReview extends TaskReviewService {
     }
   }
 
-  private serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  private async serialize<T>(
+    assignment: TaskWorktreeAssignment, signal: AbortSignal | undefined, operation: () => Promise<T>,
+  ): Promise<T> {
+    signal?.throwIfAborted()
+    const path = await this.worktreePath(assignment)
+    const executable = await this.git(signal)
+    const common = await this.command(executable, path, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal)
+    const directory = common.stdout.trim()
+    if (!isAbsolute(directory)) throw failure('Git returned an invalid common repository directory.', 'REVIEW_GIT_FAILED')
+    let key: string
+    try {
+      key = await realpath(directory)
+      if (!(await lstat(key)).isDirectory()) throw new Error('Git common repository path is not a directory')
+    } catch (error) {
+      throw failure('The Git common repository directory is unavailable.', 'REVIEW_GIT_FAILED', error)
+    }
+    // Root and child assignments have different source paths but share Git metadata and contributor state.
     const previous = this.chains.get(key) ?? Promise.resolve()
-    const result = previous.then(operation)
+    const result = previous.then(() => { signal?.throwIfAborted(); return operation() })
     const settled = result.then(() => undefined, () => undefined)
     this.chains.set(key, settled)
     return result.finally(() => {
@@ -497,7 +513,7 @@ export class LocalTaskReview extends TaskReviewService {
   }
 
   async commit(request: CommitTaskReviewRequest, signal?: AbortSignal): Promise<TaskCommitReceipt> {
-    return this.serialize(request.assignment.sourcePath, async () => {
+    return this.serialize(request.assignment, signal, async () => {
       if (request.message.trim().length === 0 || request.message.includes('\0')) {
         throw failure('The commit message must contain non-NUL text.', 'REVIEW_INVALID_MESSAGE')
       }
@@ -556,7 +572,7 @@ export class LocalTaskReview extends TaskReviewService {
   }
 
   async apply(request: ApplyTaskReviewRequest, signal?: AbortSignal): Promise<TaskApplyReceipt> {
-    return this.serialize(request.assignment.sourcePath, async () => {
+    return this.serialize(request.assignment, signal, async () => {
       if (!COMMIT.test(request.commit) || !COMMIT.test(request.expectedSourceHead)) {
         throw failure('Apply requires exact Git commit identities.', 'REVIEW_GIT_FAILED')
       }
@@ -676,7 +692,7 @@ export class LocalTaskReview extends TaskReviewService {
   }
 
   async integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): Promise<TaskIntegrationResult> {
-    return this.serialize(request.assignment.sourcePath, async () => {
+    return this.serialize(request.assignment, signal, async () => {
       const executable = await this.git(signal)
       return integrateTaskReview(request, {
         maxInputs: this.config.maxIntegrationInputs,
@@ -687,7 +703,7 @@ export class LocalTaskReview extends TaskReviewService {
   }
 
   async discard(request: DiscardTaskReviewRequest, signal?: AbortSignal): Promise<TaskDiscardReceipt> {
-    return this.serialize(request.assignment.sourcePath, async () => {
+    return this.serialize(request.assignment, signal, async () => {
       const reviewed = await this.state(request.assignment, signal)
       if (reviewed.summary.revision !== request.expectedRevision) {
         throw failure('The Task worktree changed after this review was loaded.', 'REVIEW_STALE')

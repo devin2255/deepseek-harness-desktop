@@ -14,7 +14,7 @@ Status: implemented
 
 审查摘要标识 Task、Workspace、已记录基线、当前 worktree commit、当前源 `HEAD`、分支、源目录脏状态、有界文件列表和不透明 revision。revision 对 worktree 身份及完整变更内容进行哈希，包括未跟踪文件。文件路径必须是该摘要中确切且规范化的成员。文本 diff 是有界统一 patch；二进制与截断结果使用显式值表示，不伪装为空成功结果。
 
-提交要求 Task 已就绪且审查完整、当前有效。它暂存已审查 worktree，在 Task 分支创建一个 commit，不修改源 checkout。应用要求使用确切的已记录 Task commit 和已提交 revision。它按规范源仓库串行执行，要求源目录在请求的 `HEAD` 上保持干净，生成从分配基线到 Task commit 的单个有界二进制 patch，并在任何源目录变更前执行三方检查。临时索引提供第二次无副作用模拟。随后提供方再次检查源 `HEAD` 和状态，把相同字节应用到真实索引与工作树。源 `HEAD` 保持不变。
+提交要求 Task 已就绪且审查完整、当前有效。它暂存已审查 worktree，在 Task 分支创建一个 commit，不修改源 checkout。应用要求使用确切的已记录 Task commit 和已提交 revision。它共享提供方的公共仓库变更队列，要求源目录在请求的 `HEAD` 上保持干净，生成从分配基线到 Task commit 的单个有界二进制 patch，并在任何源目录变更前执行三方检查。临时索引提供第二次无副作用模拟。随后提供方再次检查源 `HEAD` 和状态，把相同字节应用到真实索引与工作树。源 `HEAD` 保持不变。
 
 丢弃只针对 Git 实时注册表中完全一致的受管 worktree。脏的未提交内容必须显式确认损失，并报告为不可恢复。已提交分支会被保留，其 commit 作为恢复信息返回。清理失败时不会声称 worktree 已删除。
 

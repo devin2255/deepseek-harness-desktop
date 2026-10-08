@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
 import type { TaskIntegrationInput } from '@deepseek-ai/dsh-task-review'
@@ -22,6 +22,65 @@ async function writer(test: Awaited<ReturnType<typeof mount>>, id: string, path:
 }
 
 describe('writer batch integration', () => {
+  it('finishes root publication before a child delivery enters the same repository queue', async () => {
+    const test = await mount(repository())
+    const held = Promise.withResolvers<undefined>()
+    const entered = Promise.withResolvers<undefined>()
+    const order: string[] = []
+    const pending: Promise<unknown>[] = []
+    let restore: (() => void) | undefined
+    try {
+      const input = await writer(test, 'a', 'a.txt', 'alpha\n')
+      const root = await test.ctx.taskReview.summarize({ assignment: test.assignment })
+      const other = await test.ctx.taskWorktrees.create({
+        taskId: SessionId('unrelated'), workspaceId: test.assignment.workspaceId, workspacePath: repository().source,
+      })
+      const spawn = test.ctx.subprocess.spawn.bind(test.ctx.subprocess)
+      const intercepted = vi.spyOn(test.ctx.subprocess, 'spawn').mockImplementation((spec) => {
+        const handle = spawn(spec)
+        if (spec.argv.includes('merge-tree')) {
+          entered.resolve(undefined)
+          // Hold the real Git result, not a fabricated tree, while both delivery requests arrive.
+          return { ...handle, done: handle.done.then(async (outcome) => { await held.promise; return outcome }) }
+        }
+        if (spec.argv.includes('merge') && spec.argv.includes('--ff-only')) order.push('root-publication')
+        return handle
+      })
+      restore = () => { intercepted.mockRestore() }
+      const integration = test.ctx.taskReview.integrate({
+        assignment: test.assignment, expectedRevision: root.revision, inputs: [input], message: 'Integrate',
+      })
+      pending.push(integration)
+      await entered.promise
+      const invalid = { assignment: input.assignment, expectedRevision: input.expectedRevision, message: '' }
+      const child = test.ctx.taskReview.commit(invalid).catch((error: unknown) => {
+        order.push('child-rejection')
+        return error
+      })
+      pending.push(child)
+      const abort = new AbortController()
+      const cancelled = test.ctx.taskReview.commit({ ...invalid, message: 'Cancelled writer commit' }, abort.signal)
+        .catch((error: unknown) => error)
+      pending.push(cancelled)
+      // An unrelated repository must remain available while this root publication is held.
+      await expect(test.ctx.taskReview.commit({ ...invalid, assignment: other }))
+        .rejects.toMatchObject({ code: 'REVIEW_INVALID_MESSAGE' })
+      abort.abort()
+      held.resolve(undefined)
+      expect((await integration).kind).toBe('integrated')
+      expect(await child).toMatchObject({ code: 'REVIEW_INVALID_MESSAGE' })
+      expect(await cancelled).toMatchObject({ name: 'AbortError' })
+      expect(order).toEqual(['root-publication', 'child-rejection'])
+      expect(git(input.assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(input.commit)
+      expect(git(test.assignment.path, ['status', '--porcelain=v1'])).toBe('')
+    } finally {
+      held.resolve(undefined)
+      await Promise.allSettled(pending)
+      restore?.()
+      await test.dispose()
+    }
+  }, 30_000)
+
   it('publishes both reviewed commits only on the root branch and retains contributor branches', async () => {
     const fixture = repository()
     const test = await mount(fixture)

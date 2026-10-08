@@ -16,6 +16,8 @@ Git `merge-tree --write-tree` computes merges without changing indexes, branches
 
 Caller cancellation is honored through final revalidation. Final publication and verification retain command deadlines but omit caller cancellation. Git failures or inconsistent final HEADs return errors, not receipts; no destructive reset conceals an ambiguous outcome. External Git writers and hooks are not locked out. This is not a filesystem transaction or execution lease.
 
+All local review mutations share a queue keyed by Git's canonical common directory, not an assignment's source checkout. Root publication and child Commit or Discard therefore cannot interleave inside this Provider. Queue discovery validates an absolute existing common directory, unrelated repositories remain independent, and queued cancellation is checked before mutation. The queue covers Provider operations only, not Agent execution or other processes.
+
 The opt-in `dsh-tool-subagent-control/integrate` Consumer registers review, child commit, and integration tools. It requires the exact registered root Agent in its available managed worktree and recorded child assignments matching immutable direct-parent metadata, Workspace, source directory, and cwd. Active or resident children are rejected; cold inspection does not activate them. Mutations enforce root write authority in the executor. Schema-validated JSON results use generic cards and ordinary durable tool results, not a second Task database or human-approval record.
 
 Writer creation accepts a clean committed root even when its HEAD differs from the original assignment base. The worktree Provider owns required-clean and captured-HEAD checks; review changes relative to the original base do not imply uncommitted work. Subsequent writer waves use the integrated HEAD.
@@ -28,6 +30,8 @@ Writer creation accepts a clean committed root even when its HEAD differs from t
 
 **Resolve conflicts automatically or reset after failure.** Rejected because either can overwrite independent work or conceal an ambiguous result. Errors and conflicts preserve contributor branches for inspection.
 
+**Queue by the recorded source directory.** Rejected because a root assignment names the original checkout while its writers name the root worktree. Separate queues permit child mutation during root preflight or publication even though all assignments share one Git repository.
+
 ## Consequences
 
 Explicitly composed agents can review, commit, and integrate stopped isolated writers and start another writer wave. The execution and root-delivery notes remain active because their ownership and recovery rationale still apply; this note owns batch publication only. [Integration history](2026-10-08-task-integration-history.md) owns explicit nodes and durable conflict attention. Desktop defaults remain read-only. Human integration and conflict-resolution controls, cross-process leases, orphan recovery, and full desktop acceptance remain incomplete mission-control requirements.
@@ -35,3 +39,5 @@ Explicitly composed agents can review, commit, and integrate stopped isolated wr
 ## Verification
 
 Real Git tests cover complete publication, retained branches, unchanged source, later-conflict non-publication, stale revisions, dirty trees, and repeated integration. Executor tests cover root identity, write denials, active and resumed children, cold ownership, diffs, and plugin disposal. Fault tests cover process-output validation, ancestry, identity, cancellation ordering, and final HEAD checks. A real Loader composition replaces only model responses and drives filesystem tools and the root agent loop through four reviews, four commits, conflict and success batches, and another writer wave. Keyless evidence does not establish live-model or desktop integration UI acceptance.
+
+A concurrency regression holds a real merge-tree result while a child delivery and an unrelated-repository delivery arrive. Root publication precedes child validation, the unrelated repository remains available, and malformed or missing common-directory results reject delivery before Git mutation.

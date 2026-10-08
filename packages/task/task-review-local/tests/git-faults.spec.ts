@@ -106,4 +106,30 @@ describe('Task review Git identity faults', () => {
       await test.dispose()
     }
   })
+
+  it.each(['relative', 'missing', 'file'])('rejects a %s Git common directory before delivery', async (mode) => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      const handle = spawn(spec)
+      if (!spec.argv.includes('--git-common-dir')) return handle
+      const stdout = mode === 'relative' ? 'relative.git'
+        : mode === 'missing' ? join(fixture.root, 'missing.git') : join(fixture.source, 'tracked.txt')
+      return { ...handle, collected: {
+        ...handle.collected,
+        stdout: { readFrom: () => ({ nextOffset: Buffer.byteLength(stdout), text: stdout, lossy: false }) },
+      } }
+    })
+    try {
+      await expect(ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Commit' }))
+        .rejects.toMatchObject({ code: 'REVIEW_GIT_FAILED' })
+      await expect(ctx.taskReview.summarize({ assignment })).resolves.toMatchObject({ headCommit: assignment.baseCommit })
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
+  })
 })

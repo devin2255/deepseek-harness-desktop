@@ -10,6 +10,8 @@ Commit stages the complete reviewed final tree and writes one commit on the Task
 
 Every Git command runs without a shell through the managed subprocess service, with configured output, deadline, and termination bounds.
 
+Commit, Apply, Integrate, and Discard share one in-process mutation queue per canonical Git common directory. Root and child worktrees therefore cannot enter overlapping Provider mutations even when their recorded source directories differ; unrelated repositories remain independent. Repository discovery precedes queue entry, and cancellation is checked again when a queued operation enters. This does not prevent Agent filesystem writes, external Git commands, hooks, or another process from changing the repository.
+
 Batch integration requires Git with `merge-tree --write-tree` support, exact root and committed child review revisions, and clean working trees. It prepares the complete merge history as unreachable Git objects, rechecks every selection, then publishes one fast-forward into the root execution worktree. A conflict leaves all branches, indexes, and working trees unchanged. Caller cancellation stops preparation but does not interrupt final bounded publication or verification. A publication failure is reported without destructive reset; external Git writers and hooks are not locked out. See the [integration decision](../../../.agents/notes/implemented/feature/2026-10-07-batch-writer-integration.md).
 
 ## Configuration
