@@ -6,7 +6,9 @@ The task capability turns a root Session and its uninterrupted subagent descenda
 
 ## Durable facts
 
-Eight whole-value Session events define the persistent record: `task/worktree-assigned`, `task/defined`, `task/criterion-updated`, `task/risk-recorded`, `task/review-decided`, `task/review-committed`, `task/review-applied`, and `task/review-discarded`. The worktree event records one immutable source Workspace, base commit, source status digest, application branch, and execution directory. A human review decision can only request changes or declare readiness. Commit, apply, and discard events carry the complete receipt returned by the Git Provider, including the exact review revision, operation identity, Git object ids, and recovery facts. The strict fold rejects reassignment, malformed identities, mismatched Task or Workspace ownership, extra fields, blank normalized text, duplicate identities, invalid evidence sequences, missing criteria, forbidden status changes, and delivery events that skip required states. The [persistence catalog](../persistence-catalog.md#taskdefined--log-only) records their exact declarations.
+Nine whole-value Session events define the persistent record: `task/worktree-assigned`, `task/defined`, `task/criterion-updated`, `task/risk-recorded`, `task/review-decided`, `task/delivery-started`, `task/review-committed`, `task/review-applied`, and `task/review-discarded`. The worktree event records one immutable source Workspace, base commit, source status digest, application branch, and execution directory. A human review decision can only request changes or declare readiness. Commit, apply, and discard events carry the complete receipt returned by the Git Provider, including the exact review revision, operation identity, Git object ids, and recovery facts. The strict fold rejects reassignment, malformed identities, mismatched Task or Workspace ownership, extra fields, blank normalized text, duplicate identities, invalid evidence sequences, missing criteria, forbidden status changes, and delivery events that skip required states. The [persistence catalog](../persistence-catalog.md#taskdefined--log-only) records their exact declarations.
+
+`TaskDeliveryIntent` retains the operation id and exact review revision, plus the commit message for `commit`, commit and source HEAD for `apply`, or explicit uncommitted-loss confirmation for `discard`. `StartTaskDeliveryRequest` adds the authorization's `expectedSeq`. An unmatched intent produces `delivery-unconfirmed` attention; completion requires the same id, kind, revision, and operation-specific inputs. Receipt-only histories reject. Unrelated Session events may intervene, but Task metadata, overlapping delivery, and root model steps remain blocked. Git and Session persistence are not an atomic transaction; neither replay nor read-only refresh retries or settles an unconfirmed operation.
 
 Evidence identifies one exact `(sessionId, seq)` event. This package validates its serialized fields; the Session Provider validates that the event exists within the same root task tree before accepting a mutation.
 
@@ -133,7 +135,9 @@ interface TaskIntegrationNode {
 
 ## Service behavior
 
-[`TaskService`](../../packages/task/task/src/service.ts) is the definition consumed by Host APIs and implemented by a Session-backed Provider. `assignWorktree` also verifies that the assignment names the target root, its source Workspace still exists, and its source path matches that Workspace. `recordCommit`, `recordApply`, and `recordDiscard` accept only complete Provider receipts and reject while the Task tree has active work. Every durable mutation carries `expectedSeq`; the Provider compares it with the root Session's next sequence immediately before appending exactly one validated event. Subscribers receive detached whole-row changes and must be isolated from one another by the Provider.
+`TaskSnapshot.retryableDeliveryCheckpoint` identifies an existing receipt owned by the original attached Session. `retryDeliveryCheckpoint` only saves that receipt: it runs no Git, appends no event, and requires no readable worktree. Missing or replaced receipts reject; repeated save failures preserve uncertainty. Cold replay has no live retry owner and uses only durable log facts.
+
+[`TaskService`](../../packages/task/task/src/service.ts) is the definition consumed by Host and SDK APIs and implemented by a Session-backed Provider. `assignWorktree` also verifies that the assignment names the target root, its source Workspace still exists, and its source path matches that Workspace. Metadata commands and `startDelivery` compare `expectedSeq` with the root Session's next sequence before appending exactly one validated event; authorization also rejects active Task trees. `recordCommit`, `recordApply`, and `recordDiscard` accept only complete receipts matching the outstanding intent and append at the current sequence. Authorization and completion await the live Session flush participant or cold persistence acknowledgment; missing or failed live checkpoints retain unconfirmed attention. Subscribers receive detached whole-row changes and must be isolated from one another by the Provider.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -277,33 +281,51 @@ abstract recordRisk(sessionId: SessionId, request: RecordTaskRiskRequest): Promi
 abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot>
 
 /**
+ * Authorize one delivery and await its durable Session checkpoint before Git may change.
+ * Rejects concurrent delivery or Task metadata changes until a matching result is recorded.
+ * @param sessionId - owning root Session identity.
+ * @param request - exact mutation and expected authorization sequence.
+ * @returns the committed task row after persistence settles; failure never permits Git mutation.
+ */
+abstract startDelivery(sessionId: SessionId, request: StartTaskDeliveryRequest): Promise<TaskSnapshot>
+
+/**
+ * Retry persistence of an existing live delivery receipt without appending events or running Git.
+ * Rejects missing receipts, mismatched operations, and replaced or detached Session instances.
+ * @param sessionId - owning root Session identity.
+ * @param operationId - exact operation advertised by retryableDeliveryCheckpoint.
+ * @returns the confirmed Task row; failure retains the unconfirmed delivery.
+ */
+abstract retryDeliveryCheckpoint(sessionId: SessionId, operationId: TaskReviewOperationId): Promise<TaskSnapshot>
+
+/**
  * Record facts returned by a completed Task commit operation.
  * @param sessionId - root Session identity.
- * @param request - whole commit receipt and expected next sequence.
- * @returns the committed task row.
+ * @param request - whole commit receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
  */
 abstract recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot>
 
 /**
  * Record facts returned by a completed source application.
  * @param sessionId - root Session identity.
- * @param request - whole apply receipt and expected next sequence.
- * @returns the committed task row.
+ * @param request - whole apply receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
  */
 abstract recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot>
 
 /**
  * Record facts returned by a completed worktree discard.
  * @param sessionId - root Session identity.
- * @param request - whole discard receipt and expected next sequence.
- * @returns the committed task row.
+ * @param request - whole discard receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
  */
 abstract recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot>
 ```
 
 Types: [SessionId](core.md)
 
-Source: [`packages/task/task/src/service.ts:66`](../../packages/task/task/src/service.ts)
+Source: [`packages/task/task/src/service.ts:69`](../../packages/task/task/src/service.ts)
 
 <a id="ctxtaskworktrees--taskworktreeservice-abstract-seam"></a>
 

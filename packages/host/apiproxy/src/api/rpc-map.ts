@@ -67,6 +67,7 @@ export interface RpcMethodMap {
   'goal.complete': GoalsApi['complete']
   'goal.clear': GoalsApi['clear']
   'task.list': TasksApi['list']
+  'task.retryDeliveryCheckpoint': TasksApi['retryDeliveryCheckpoint']
   'task.define': TasksApi['define']
   'task.updateCriterion': TasksApi['updateCriterion']
   'task.recordRisk': TasksApi['recordRisk']

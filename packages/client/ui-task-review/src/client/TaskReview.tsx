@@ -53,7 +53,7 @@ function successKey(task: TaskSnapshot | null): 'successCommit' | 'successApply'
 /** Full review workspace with file navigation, patch, evidence, and explicit delivery actions. */
 export function TaskReview({
   useSessions, useTasks, useTaskReview, showTasks, refresh, selectFile, selectSource, setSourcesOpen,
-  requestChanges, commit, apply, discard, t,
+  requestChanges, commit, apply, discard, retryDeliveryCheckpoint, t,
 }: TaskReviewProps) {
   const review = useTaskReview(value => value)
   const rootId = review.taskId
@@ -83,8 +83,10 @@ export function TaskReview({
   const catalog = review.taskId === undefined ? undefined : sessions.subagentsByParent[review.taskId]
   const writers = catalog?.entries.filter(entry => entry.kind === 'child') ?? []
   const writerSelected = review.writerSessionId !== undefined
+  const pendingDelivery = task?.attention.find(item => item.kind === 'delivery-unconfirmed')
+  const retryableCheckpoint = writerSelected ? undefined : task?.retryableDeliveryCheckpoint
   const busy = review.operation !== null
-  const fresh = review.freshness === 'fresh' && review.state === 'ready' && !writerSelected
+  const fresh = review.freshness === 'fresh' && review.state === 'ready' && !writerSelected && pendingDelivery === undefined
   const integrationBlocked = task?.integrations?.some(node => node.outcome.kind === 'conflict' && node.resolvedBy === undefined) === true
   const canRequest = fresh && !busy && (task?.status === 'reviewing' || task?.status === 'ready' || integrationBlocked)
   const canCommit = fresh && !busy && !integrationBlocked && task?.reviewDecision === 'ready'
@@ -93,7 +95,7 @@ export function TaskReview({
     && task.applyReceipt === undefined && task.discardReceipt === undefined
   const canDiscard = fresh && !busy && task?.applyReceipt === undefined && task?.discardReceipt === undefined
   const visibleResult = review.result ?? task ?? null
-  const success = writerSelected ? undefined : successKey(visibleResult)
+  const success = writerSelected || pendingDelivery !== undefined ? undefined : successKey(visibleResult)
 
   const runConfirmed = (action: Confirmation): void => {
     if (task == null || writerSelected) return
@@ -136,6 +138,15 @@ export function TaskReview({
       {catalog?.state === 'loading' && <div role="status" className={css.stale}>{t('sourcesLoading')}</div>}
       {catalog?.error != null && <div role="alert" className={css.alert}>{catalog.error.message}</div>}
       {writerSelected && <div role="status" className={css.warning}>{t('writerReadOnly')}</div>}
+      {pendingDelivery !== undefined && <div role="alert" className={css.alert}>
+        <strong>{t('deliveryUnconfirmed')}</strong><span>{t('deliveryUnconfirmedHelp')}</span>
+        <code>{pendingDelivery.sourceId}</code>
+        {retryableCheckpoint !== undefined && <>
+          <span>{t('saveReceiptHelp')}</span>
+          <button type="button" className={css.secondary} disabled={busy || task?.freshness !== 'live'}
+            onClick={() => { void retryDeliveryCheckpoint(retryableCheckpoint) }}>{t('saveReceipt')}</button>
+        </>}
+      </div>}
       {review.state === 'loading' && summary === null && <div role="status" className={css.centerState}>{t('loading')}</div>}
       {review.error !== null && <div role="alert" className={clsx(css.alert, isApplyConflict(review) && css.conflict)}>
         <strong>{isApplyConflict(review) ? t('conflict') : t('error')}</strong>

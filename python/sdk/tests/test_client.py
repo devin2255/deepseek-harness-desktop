@@ -183,9 +183,10 @@ def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.M
         confirmed_uncommitted_loss=False, expected_seq=6,
     )
     assert discarded.discard_receipt.worktree_removed is True
+    client.retry_task_delivery_checkpoint('root', '00000000-0000-4000-8000-000000000001')
     assert [method for method, _params in calls] == [
         "task/list", "task/define", "task/updateCriterion", "task/recordRisk", "task/review",
-        "task/reviewSummary", "task/reviewDiff", "task/commit", "task/apply", "task/discard",
+        "task/reviewSummary", "task/reviewDiff", "task/commit", "task/apply", "task/discard", "task/retryDeliveryCheckpoint",
     ]
 
 
@@ -198,6 +199,33 @@ def test_malformed_task_projection_uses_sdk_protocol_error(monkeypatch: pytest.M
     monkeypatch.setattr(client, "request", request)
     with pytest.raises(SdkProtocolError, match="malformed Task response"):
         client.list_tasks()
+
+
+@pytest.mark.parametrize("case", ["valid", "invalid-id", "missing", "child", "kind", "operation"])
+def test_retryable_checkpoint_matches_root_attention(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    client = HarnessClient()
+    operation_id = "00000000-0000-4000-8000-000000000001"
+    item = {
+        "id": "pending", "taskId": "root", "ownerSessionId": "child" if case == "child" else "root",
+        "kind": "review-request" if case == "kind" else "delivery-unconfirmed",
+        "severity": "error", "summary": "Save receipt", "createdAt": 1, "actionable": True,
+        "sourceId": "different" if case == "operation" else operation_id,
+    }
+    row = {
+        "taskId": "root", "descendantSessionIds": [], "status": "reviewing", "freshness": "live",
+        "attention": [] if case == "missing" else [item], "risks": [], "updatedAt": 1, "asOfSeq": 1,
+        "retryableDeliveryCheckpoint": "invalid" if case == "invalid-id" else operation_id,
+    }
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": 1, "tasks": [row]})
+
+    monkeypatch.setattr(client, "request", request)
+    if case == "valid":
+        assert client.list_tasks().tasks[0].retryable_delivery_checkpoint == operation_id
+    else:
+        with pytest.raises(SdkProtocolError, match="malformed Task response"):
+            client.list_tasks()
 
 
 def test_mismatched_task_worktree_uses_sdk_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:

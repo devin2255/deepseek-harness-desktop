@@ -37,7 +37,7 @@ const attentionSchema = z.strictObject({
   id: identity,
   taskId: identity,
   ownerSessionId: identity,
-  kind: z.enum(['approval', 'question', 'plan-review', 'run-failure', 'merge-conflict', 'validation-failure', 'review-request']),
+  kind: z.enum(['approval', 'question', 'plan-review', 'run-failure', 'merge-conflict', 'validation-failure', 'review-request', 'delivery-unconfirmed']),
   severity: z.enum(['info', 'warning', 'error', 'critical']),
   summary: nonBlank,
   createdAt: z.number().int(),
@@ -118,6 +118,7 @@ export const taskSnapshotSchema = z.strictObject({
   commitReceipt: taskCommitReceiptSchema.optional(),
   applyReceipt: taskApplyReceiptSchema.optional(),
   discardReceipt: taskDiscardReceiptSchema.optional(),
+  retryableDeliveryCheckpoint: operationId.optional(),
   integrations: z.array(integrationNode).min(1).optional(),
   updatedAt: z.number().int(),
   asOfSeq: sequence,
@@ -145,6 +146,9 @@ export const taskSnapshotSchema = z.strictObject({
   })
   return node.resolvedBy === resolved?.id
 }), 'integration nodes must match the owning Task and selected descendants',
+).refine(value => value.retryableDeliveryCheckpoint === undefined || value.attention.some(item =>
+  item.kind === 'delivery-unconfirmed' && item.ownerSessionId === value.taskId
+  && item.sourceId === value.retryableDeliveryCheckpoint), 'retryable checkpoint must match an unconfirmed root delivery',
 ) as unknown as z.ZodType<Wire<TaskSnapshot>>
 
 /** Complete task-list baseline. */
@@ -166,6 +170,12 @@ const defineCriterionSchema = z.strictObject({ id: identity.optional(), text: no
 export const taskListRequestSchema = z.strictObject({}) as unknown as z.ZodType<Wire<RequestPayload<'task.list'>>>
 /** task.list response value. */
 export const taskListValueSchema: z.ZodType<Wire<ResponseValue<'task.list'>>> = taskListSnapshotSchema
+/** task.retryDeliveryCheckpoint request payload. */
+export const taskRetryDeliveryCheckpointRequestSchema = z.strictObject({
+  sessionId: identity, operationId,
+}) as unknown as z.ZodType<Wire<RequestPayload<'task.retryDeliveryCheckpoint'>>>
+/** task.retryDeliveryCheckpoint response value. */
+export const taskRetryDeliveryCheckpointValueSchema: z.ZodType<Wire<ResponseValue<'task.retryDeliveryCheckpoint'>>> = taskSnapshotSchema
 /** task.define request payload. */
 export const taskDefineRequestSchema = z.strictObject({
   sessionId: identity,

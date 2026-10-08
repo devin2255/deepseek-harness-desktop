@@ -1,4 +1,4 @@
-/** Wire-safe values for Task review and delivery. @module @deepseek-ai/dsh-task-review/types */
+/** Task review requests and portable results. @module @deepseek-ai/dsh-task-review/types */
 
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
@@ -17,7 +17,7 @@ export function TaskReviewRevision(value: string): TaskReviewRevision {
   return value as TaskReviewRevision
 }
 
-/** Opaque identity of one completed delivery operation. */
+/** Opaque identity shared by one delivery authorization and its completed receipt. */
 export type TaskReviewOperationId = Branded<'TaskReviewOperationId'>
 
 /**
@@ -109,11 +109,22 @@ export interface GetTaskFileDiffRequest {
   readonly expectedRevision: TaskReviewRevision
 }
 
+/** Caller-owned durable authorization, awaited inside the repository queue before its first mutation. */
+export interface TaskDeliveryAuthorization {
+  readonly operationId: TaskReviewOperationId
+  /**
+   * Persist authorization before Git changes the index, worktree, or branch.
+   * @returns settlement permitting mutation; rejection prevents mutation.
+   */
+  readonly authorize: () => Promise<void>
+}
+
 /** Request to commit the exact reviewed state inside the Task worktree. */
 export interface CommitTaskReviewRequest {
   readonly assignment: TaskWorktreeAssignment
   readonly expectedRevision: TaskReviewRevision
   readonly message: string
+  readonly authorization?: TaskDeliveryAuthorization
 }
 
 /** Durable facts returned after committing a Task review. */
@@ -135,6 +146,7 @@ export interface ApplyTaskReviewRequest {
   readonly expectedRevision: TaskReviewRevision
   readonly expectedSourceHead: string
   readonly commit: string
+  readonly authorization?: TaskDeliveryAuthorization
 }
 
 /** Durable facts returned after applying a Task commit to its source checkout. */
@@ -208,6 +220,7 @@ export interface DiscardTaskReviewRequest {
   readonly assignment: TaskWorktreeAssignment
   readonly expectedRevision: TaskReviewRevision
   readonly confirmedUncommittedLoss: boolean
+  readonly authorization?: TaskDeliveryAuthorization
 }
 
 /** Durable facts returned after releasing a Task worktree. */

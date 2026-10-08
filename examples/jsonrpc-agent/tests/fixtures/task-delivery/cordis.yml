@@ -1,0 +1,38 @@
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+    compression: none
+- id: agent
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents: []
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    goals: false
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+- id: worktrees
+  name: '@deepseek-ai/dsh-task-worktree-local'
+  config:
+    dshHome: './.dsh'
+    minFreeBytes: 0
+- id: review
+  name: '@deepseek-ai/dsh-task-review-local'
+- id: tasks
+  name: '@deepseek-ai/dsh-task-session'
+- id: storage
+  name: '@deepseek-ai/dsh-storage'
+- id: storage-json
+  name: '@deepseek-ai/dsh-storage-json'
+  config:
+    root: './.storage'
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+- id: workspaces
+  name: '@deepseek-ai/dsh-workspace'

@@ -202,6 +202,7 @@ export class FakeApiClient implements IApiClient {
     commit: (payload: unknown) => this.record('task.commit', payload, this.onTaskMutation(payload)),
     apply: (payload: unknown) => this.record('task.apply', payload, this.onTaskMutation(payload)),
     discard: (payload: unknown) => this.record('task.discard', payload, this.onTaskMutation(payload)),
+    retryDeliveryCheckpoint: (payload: unknown) => this.record('task.retryDeliveryCheckpoint', payload, this.onTaskMutation(payload)),
   }
 
   // The archive-set field defaults at the binding below so list stubs keep

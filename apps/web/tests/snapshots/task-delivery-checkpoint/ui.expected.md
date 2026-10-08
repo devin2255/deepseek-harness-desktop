@@ -1,0 +1,104 @@
+# Unconfirmed commit
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Recover browser delivery receipts" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - text: "Branch:"
+  - code: dsh/task-869db580bf9a40b3d804c8f5
+  - text: "Base commit:"
+  - code: {{baseCommitShort}}
+  - text: "Task HEAD:"
+  - code: {{baseCommitShort}}
+  - text: "Source HEAD:"
+  - code: {{baseCommitShort}}
+  - button "Refresh"
+  - alert:
+    - strong: Delivery result unconfirmed
+    - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
+    - code: {{uuid}}
+    - text: The current Session still holds the receipt. This only retries saving existing records; it does not commit, apply, or discard files again.
+    - button "Retry saving delivery receipt"
+  - alert:
+    - strong: Could not complete the operation
+    - text: Delivery result is unconfirmed. The operation may have changed Git; inspect the Task and source checkout before retrying.
+    - button "Retry"
+  - navigation "Changed files":
+    - heading "Changed files" [level=2]
+    - text: +1 −1
+    - list:
+      - listitem:
+        - button "tracked.txt Modified · +1 −1"
+  - region "Unified diff":
+    - heading "Unified diff" [level=2]
+    - text: diff --git a/tracked.txt b/tracked.txt index df967b9..3147e18 100644 --- a/tracked.txt +++ b/tracked.txt @@ -1 +1 @@ -base +delivered
+  - complementary "Acceptance & risk":
+    - heading "Acceptance criteria" [level=2]
+    - list:
+      - listitem: Waived Reviewed tracked file
+    - heading "Verification evidence" [level=2]
+    - paragraph: No verification evidence yet.
+    - heading "Unresolved risks" [level=2]
+    - paragraph: No unresolved risks.
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+    - text: Browser receipt recovery
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]
+
+# Removed worktree with an unsaved receipt
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Recover browser delivery receipts" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - button "Refresh"
+  - status: This review may be out of date.
+  - alert:
+    - strong: Delivery result unconfirmed
+    - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
+    - code: {{uuid}}
+    - text: The current Session still holds the receipt. This only retries saving existing records; it does not commit, apply, or discard files again.
+    - button "Retry saving delivery receipt"
+  - alert:
+    - strong: Could not complete the operation
+    - text: The recorded Task worktree is unavailable.
+    - button "Retry"
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]
+
+# Confirmed discard
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Recover browser delivery receipts" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - button "Refresh"
+  - status: This review may be out of date.
+  - status:
+    - strong: The task worktree was removed.
+    - text: "Preserved branch:"
+    - code: dsh/task-869db580bf9a40b3d804c8f5
+    - text: "Recoverable commit:"
+    - code: {{taskCommit}}
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]

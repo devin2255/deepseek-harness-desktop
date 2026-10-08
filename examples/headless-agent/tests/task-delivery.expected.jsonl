@@ -1,2 +1,3 @@
-{"stage":"cold","blocked":["commit","apply","discard"],"receipts":["commit","apply","discard"],"branchRetained":true,"sourceHeadPreserved":true,"sourceContentApplied":true,"reservationReleased":true}
-{"stage":"resident","blocked":["commit","apply","discard"],"receipts":["commit","apply","discard"],"branchRetained":true,"sourceHeadPreserved":true,"sourceContentApplied":true,"reservationReleased":true}
+{"stage":"cold","blocked":["commit","apply","discard"],"durable":["commit","apply","discard"],"metadataBlocked":["commit","apply","discard"],"interleavedInput":false,"receipts":["commit","apply","discard"],"branchRetained":true,"sourceHeadPreserved":true,"sourceContentApplied":true,"reservationReleased":true}
+{"stage":"resident","blocked":["commit","apply","discard"],"durable":["commit","apply","discard"],"metadataBlocked":["commit","apply","discard"],"interleavedInput":true,"receipts":["commit","apply","discard"],"branchRetained":true,"sourceHeadPreserved":true,"sourceContentApplied":true,"reservationReleased":true}
+{"stage":"unconfirmed","intentRetained":true,"executionBlocked":true,"receiptAbsent":true,"retryRejected":true,"gitCommitExists":true}

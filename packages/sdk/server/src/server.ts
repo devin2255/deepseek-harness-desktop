@@ -7,19 +7,20 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { carrierKeyOf, type Scoped } from '@deepseek-ai/dsh-scope'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
-import type {} from '@deepseek-ai/dsh-task'
+import { TaskError } from '@deepseek-ai/dsh-task'
 import type {
   DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
-  TaskSnapshot, UpdateTaskCriterionRequest,
+  TaskSnapshot, TaskDeliveryIntent, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
 import type {} from '@deepseek-ai/dsh-task-review'
-import { TaskReviewRevision, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
+import { TaskReviewOperationId, TaskReviewRevision, type TaskDeliveryAuthorization, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   InitializeParams,
@@ -247,12 +248,30 @@ export class HarnessSdkJsonRpcServer {
       || target.task.discardReceipt !== undefined) {
       throw new Error('Commit requires a ready Task without an existing delivery receipt.')
     }
-    const receipt = await target.review.commit({
-      assignment: target.task.executionWorkspace,
-      expectedRevision: TaskReviewRevision(params.expectedRevision),
-      message: params.message,
+    return this.deliverTask(params.sessionId, params.expectedSeq, {
+      kind: 'commit', operationId: TaskReviewOperationId(randomUUID()),
+      reviewRevision: TaskReviewRevision(params.expectedRevision), message: params.message,
+    }, async (authorization, signal) => {
+      const receipt = await target.review.commit({
+        assignment: target.task.executionWorkspace,
+        expectedRevision: TaskReviewRevision(params.expectedRevision),
+        message: params.message,
+        authorization,
+      }, signal)
+      return target.tasks.recordCommit(SessionId(params.sessionId), { receipt })
     })
-    return target.tasks.recordCommit(SessionId(params.sessionId), { receipt, expectedSeq: params.expectedSeq })
+  }
+
+  /**
+   * Retry saving an existing live delivery receipt without running Git.
+   * @param sessionId - root Session identity.
+   * @param operationId - exact retryable checkpoint from the Task projection.
+   * @returns the confirmed Task; missing receipts and replaced Sessions reject.
+   */
+  retryTaskDeliveryCheckpoint(sessionId: string, operationId: string): Promise<TaskSnapshot> {
+    const tasks = this.ctx.get('tasks')
+    if (tasks === undefined) throw new TaskError('Task service is unavailable in this SDK runtime', 'TASK_UNAVAILABLE')
+    return tasks.retryDeliveryCheckpoint(SessionId(sessionId), TaskReviewOperationId(operationId))
   }
 
   /**
@@ -268,13 +287,19 @@ export class HarnessSdkJsonRpcServer {
       || committed.commit !== params.commit || committed.committedRevision !== params.expectedRevision) {
       throw new Error('Apply requires the exact recorded Task commit without an existing apply or discard receipt.')
     }
-    const receipt = await target.review.apply({
-      assignment: target.task.executionWorkspace,
-      expectedRevision: TaskReviewRevision(params.expectedRevision),
-      expectedSourceHead: params.expectedSourceHead,
-      commit: params.commit,
+    return this.deliverTask(params.sessionId, params.expectedSeq, {
+      kind: 'apply', operationId: TaskReviewOperationId(randomUUID()),
+      reviewRevision: TaskReviewRevision(params.expectedRevision), commit: params.commit, sourceHead: params.expectedSourceHead,
+    }, async (authorization, signal) => {
+      const receipt = await target.review.apply({
+        assignment: target.task.executionWorkspace,
+        expectedRevision: TaskReviewRevision(params.expectedRevision),
+        expectedSourceHead: params.expectedSourceHead,
+        commit: params.commit,
+        authorization,
+      }, signal)
+      return target.tasks.recordApply(SessionId(params.sessionId), { receipt })
     })
-    return target.tasks.recordApply(SessionId(params.sessionId), { receipt, expectedSeq: params.expectedSeq })
   }
 
   /**
@@ -289,12 +314,48 @@ export class HarnessSdkJsonRpcServer {
       || (target.task.status !== 'ready' && target.task.commitReceipt === undefined && target.task.applyReceipt === undefined)) {
       throw new Error('Discard requires a ready or delivered Task whose worktree has not already been removed.')
     }
-    const receipt = await target.review.discard({
-      assignment: target.task.executionWorkspace,
-      expectedRevision: TaskReviewRevision(params.expectedRevision),
-      confirmedUncommittedLoss: params.confirmedUncommittedLoss,
+    return this.deliverTask(params.sessionId, params.expectedSeq, {
+      kind: 'discard', operationId: TaskReviewOperationId(randomUUID()),
+      reviewRevision: TaskReviewRevision(params.expectedRevision), confirmedUncommittedLoss: params.confirmedUncommittedLoss,
+    }, async (authorization, signal) => {
+      const receipt = await target.review.discard({
+        assignment: target.task.executionWorkspace,
+        expectedRevision: TaskReviewRevision(params.expectedRevision),
+        confirmedUncommittedLoss: params.confirmedUncommittedLoss,
+        authorization,
+      }, signal)
+      return target.tasks.recordDiscard(SessionId(params.sessionId), { receipt })
     })
-    return target.tasks.recordDiscard(SessionId(params.sessionId), { receipt, expectedSeq: params.expectedSeq })
+  }
+
+  private async deliverTask(
+    sessionId: string, expectedSeq: number, intent: TaskDeliveryIntent,
+    operation: (authorization: TaskDeliveryAuthorization, signal?: AbortSignal) => Promise<TaskSnapshot>,
+  ): Promise<TaskSnapshot> {
+    const tasks = this.ctx.get('tasks')
+    const agents = this.ctx.get('agents')
+    if (tasks === undefined || agents === undefined) throw new TaskError('Task delivery services are unavailable', 'TASK_UNAVAILABLE')
+    const id = SessionId(sessionId)
+    let authorized = false
+    const authorization: TaskDeliveryAuthorization = { operationId: intent.operationId, authorize: async () => {
+      await tasks.startDelivery(id, { expectedSeq, intent })
+      authorized = true
+    } }
+    const deliver = async (signal?: AbortSignal): Promise<TaskSnapshot> => {
+      try {
+        signal?.throwIfAborted()
+        return await operation(authorization, signal)
+      } catch (error: unknown) {
+        if (authorized || tasks.snapshot().tasks.some(task => task.taskId === id
+          && task.attention.some(item => item.kind === 'delivery-unconfirmed' && item.sourceId === intent.operationId))) {
+          throw new TaskError('Delivery result is unconfirmed. Inspect the Task and source checkout before retrying.', 'TASK_DELIVERY_PENDING', { cause: error })
+        }
+        throw error
+      }
+    }
+    const agent = agents.get(id)
+    if (agent === undefined) return agents.withOfflineSessions([id], () => deliver())
+    return agent.runMaintenance(deliver)
   }
 
   /**
@@ -350,6 +411,10 @@ export class HarnessSdkJsonRpcServer {
         return this.prompt(params as unknown as SessionPromptParams)
       case 'task/list':
         return this.listTasks()
+      case 'task/retryDeliveryCheckpoint': {
+        const { sessionId, operationId } = params as unknown as { sessionId: string; operationId: string }
+        return this.retryTaskDeliveryCheckpoint(sessionId, operationId)
+      }
       case 'task/define': {
         const { sessionId, ...request } = params as unknown as DefineTaskRequest & { sessionId: string }
         return this.defineTask(sessionId, request)

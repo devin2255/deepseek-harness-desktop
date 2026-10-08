@@ -2278,7 +2278,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/task/task-review-local/src/index.ts:52`](../packages/task/task-review-local/src/index.ts)
+Source: [`packages/task/task-review-local/src/index.ts:57`](../packages/task/task-review-local/src/index.ts)
 
 <a id="deepseek-aidsh-task-worktree-local"></a>
 

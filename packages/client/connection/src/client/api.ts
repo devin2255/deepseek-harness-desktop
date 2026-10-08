@@ -16,7 +16,7 @@ export type {
   GoalsApi, GoalRef,
   AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
   TaskListChange, TaskListSnapshot, TaskReviewDecision, TaskRisk, TaskSnapshot, TasksApi,
-  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskReviewFile, TaskReviewSummary,
+  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskReviewFile, TaskReviewOperationId, TaskReviewSummary,
   SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSecretView,
   CredentialsApi, CredentialView, ConfigurableProviderView, DiscoveredModelView, LlmApi,
   SubagentsApi, SubagentAddress, SubagentCatalog, SubagentListEntry, SubagentPromptReceipt,

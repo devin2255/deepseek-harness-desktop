@@ -20,6 +20,7 @@ async function bench() {
     reviewState, refreshReview: vi.fn(async () => {}), selectReviewFile: vi.fn(async () => {}), openReview: vi.fn(async () => {}),
     requestChanges: vi.fn(async () => ({})), commitReview: vi.fn(async () => ({})),
     applyReview: vi.fn(async () => ({})), discardReview: vi.fn(async () => ({})),
+    retryDeliveryCheckpoint: vi.fn(async () => ({})),
   }
   const layout = { showHome: vi.fn() }
   const sessions = { refreshSubagents: vi.fn(async () => {}), setSubagentCatalogOpen: vi.fn() }
@@ -57,6 +58,8 @@ describe('Task Review composition', () => {
     await face.commit('feat: done', 2)
     await face.apply('a'.repeat(40), 3)
     await face.discard(true, 4)
+    await face.retryDeliveryCheckpoint('00000000-0000-4000-8000-000000000001' as never)
+    expect(b.tasks.retryDeliveryCheckpoint).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001')
     expect(b.layout.showHome).toHaveBeenCalledOnce()
     expect(b.tasks.selectReviewFile).toHaveBeenCalledWith('src/app.ts')
     expect(b.tasks.openReview).toHaveBeenCalledWith('root', 'writer')

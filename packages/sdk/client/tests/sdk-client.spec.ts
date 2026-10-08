@@ -317,6 +317,7 @@ describe('DeepSeekHarness', () => {
       expectedRevision: committed.commitReceipt!.committedRevision,
       confirmedUncommittedLoss: false, expectedSeq: 6,
     })).discardReceipt).toMatchObject({ worktreeRemoved: true })
+    expect((await harness.retryTaskDeliveryCheckpoint('task-root', '00000000-0000-4000-8000-000000000001')).status).toBe('settled')
   })
 })
 
@@ -363,6 +364,7 @@ describe('HarnessClient', () => {
       confirmedUncommittedLoss: false, expectedSeq: 6,
     })
     expect(discarded.discardReceipt).toMatchObject({ worktreeRemoved: true })
+    expect((await client.retryTaskDeliveryCheckpoint('task-root', '00000000-0000-4000-8000-000000000001')).status).toBe('settled')
   })
 
   it('rejects malformed Task projections as protocol errors', async () => {
@@ -386,11 +388,23 @@ describe('HarnessClient', () => {
     'commit-receipt-invalid',
     'apply-receipt-invalid',
     'discard-receipt-invalid',
+    'checkpoint-invalid-id',
+    'checkpoint-no-attention',
+    'checkpoint-child-owner',
+    'checkpoint-other-kind',
+    'checkpoint-other-operation',
   ])('rejects the malformed Task projection case %s', async (taskCase) => {
     const client = new HarnessClient(fakeLaunch({ FAKE_TASK_CASE: taskCase }))
     cleanups.push(() => client.close())
     await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
     await expect(client.listTasks()).rejects.toThrow(SdkProtocolError)
+  })
+
+  it('accepts a retryable checkpoint matching root-owned unconfirmed attention', async () => {
+    const client = new HarnessClient(fakeLaunch({ FAKE_TASK_CASE: 'checkpoint-valid' }))
+    cleanups.push(() => client.close())
+    await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
+    expect((await client.listTasks()).tasks[0]?.retryableDeliveryCheckpoint).toBe('00000000-0000-4000-8000-000000000001')
   })
 
   it.each([

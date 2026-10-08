@@ -6,13 +6,16 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { AgentOfflineReservationError, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
 import type {
-  RecordTaskApplyRequest, RecordTaskCommitRequest, RecordTaskDiscardRequest, TaskSnapshot,
+  RecordTaskApplyRequest, RecordTaskCommitRequest, RecordTaskDiscardRequest, StartTaskDeliveryRequest, TaskSnapshot,
 } from '@deepseek-ai/dsh-task'
-import type { GetTaskFileDiffRequest } from '@deepseek-ai/dsh-task-review'
+import type {
+  ApplyTaskReviewRequest, CommitTaskReviewRequest, DiscardTaskReviewRequest, GetTaskFileDiffRequest, TaskReviewRevision,
+} from '@deepseek-ai/dsh-task-review'
 import * as agentCore from '@deepseek-ai/dsh-agent-spine-demo'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
@@ -121,6 +124,7 @@ describe('HarnessSdkJsonRpcServer', () => {
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
     for (const [method, params] of [
       ['task/list', {}],
+      ['task/retryDeliveryCheckpoint', { sessionId: 'root', operationId: '00000000-0000-4000-8000-000000000001' }],
       ['task/define', { sessionId: 'root', goal: 'Ship', criteria: [], expectedSeq: 0 }],
       ['task/updateCriterion', { sessionId: 'root', criterion: {}, expectedSeq: 0 }],
       ['task/recordRisk', { sessionId: 'root', risk: {}, expectedSeq: 0 }],
@@ -146,7 +150,9 @@ describe('HarnessSdkJsonRpcServer', () => {
     }
     const ctx = {
       on: vi.fn(() => () => undefined),
-      get: (name: string) => name === 'tasks' ? tasks : name === 'taskReview' && reviewAvailable ? review : undefined,
+      get: (name: string) => name === 'tasks' ? tasks : name === 'agents' ? {
+        get: () => undefined, withOfflineSessions: async (_ids: unknown, operation: () => Promise<unknown>) => operation(),
+      } : name === 'taskReview' && reviewAvailable ? review : undefined,
     } as unknown as Context
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
     const commit = { sessionId: 'root', expectedRevision: 'b'.repeat(64), message: 'Ship', expectedSeq: 5 }
@@ -229,6 +235,8 @@ describe('HarnessSdkJsonRpcServer', () => {
     }
     const tasks = {
       snapshot: vi.fn(() => ({ generation: 2, tasks: [row] })),
+      retryDeliveryCheckpoint: vi.fn(async () => row),
+      startDelivery: vi.fn(async (_id: SessionId, _request: StartTaskDeliveryRequest) => row),
       define: vi.fn(async () => ({ ...row, definition: { goal: 'Ship', criteria: [] }, asOfSeq: 1 })),
       updateCriterion: vi.fn(async () => ({ ...row, asOfSeq: 2 })),
       recordRisk: vi.fn(async () => ({ ...row, asOfSeq: 3 })),
@@ -250,13 +258,24 @@ describe('HarnessSdkJsonRpcServer', () => {
         taskId: SessionId('root'), workspaceId: 'workspace', revision: request.expectedRevision,
         path: request.path, binary: false, truncated: false, patch: 'diff',
       })),
-      commit: vi.fn(async () => commitReceipt),
-      apply: vi.fn(async () => applyReceipt),
-      discard: vi.fn(async () => discardReceipt),
+      commit: vi.fn(async (request: CommitTaskReviewRequest) => {
+        await request.authorization!.authorize()
+        return { ...commitReceipt, operationId: request.authorization!.operationId }
+      }),
+      apply: vi.fn(async (request: ApplyTaskReviewRequest) => {
+        await request.authorization!.authorize()
+        return { ...applyReceipt, operationId: request.authorization!.operationId }
+      }),
+      discard: vi.fn(async (request: DiscardTaskReviewRequest) => {
+        await request.authorization!.authorize()
+        return { ...discardReceipt, operationId: request.authorization!.operationId }
+      }),
     }
     const ctx = {
       on: vi.fn(() => () => undefined),
-      get: (name: string) => name === 'tasks' ? tasks : name === 'taskReview' ? review : undefined,
+      get: (name: string) => name === 'tasks' ? tasks : name === 'agents' ? {
+        get: () => undefined, withOfflineSessions: async (_ids: unknown, operation: () => Promise<unknown>) => operation(),
+      } : name === 'taskReview' ? review : undefined,
     } as unknown as Context
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
 
@@ -271,18 +290,114 @@ describe('HarnessSdkJsonRpcServer', () => {
     expect(await server.handleRequest('task/reviewDiff', {
       sessionId: 'root', path: 'src/app.ts', expectedRevision: 'b'.repeat(64),
     })).toMatchObject({ path: 'src/app.ts', patch: 'diff' })
-    expect(await server.handleRequest('task/commit', {
+    const committedTask = await server.handleRequest('task/commit', {
       sessionId: 'root', expectedRevision: 'b'.repeat(64), message: 'feat: ship', expectedSeq: 4,
-    })).toMatchObject({ commitReceipt })
+    }) as TaskSnapshot
+    expect(committedTask.commitReceipt).toMatchObject({ ...commitReceipt,
+      operationId: tasks.startDelivery.mock.calls[0]?.[1].intent.operationId,
+    })
     row = { ...row, status: 'settled', commitReceipt, asOfSeq: 5 }
-    expect(await server.handleRequest('task/apply', {
+    const appliedTask = await server.handleRequest('task/apply', {
       sessionId: 'root', expectedRevision: 'c'.repeat(64), expectedSourceHead: '2'.repeat(40),
       commit: commitReceipt.commit, expectedSeq: 5,
-    })).toMatchObject({ applyReceipt })
+    }) as TaskSnapshot
+    expect(appliedTask.applyReceipt).toMatchObject({ ...applyReceipt,
+      operationId: tasks.startDelivery.mock.calls[1]?.[1].intent.operationId,
+    })
     row = { ...row, status: 'settled', commitReceipt, applyReceipt, asOfSeq: 6 }
-    expect(await server.handleRequest('task/discard', {
+    const discardedTask = await server.handleRequest('task/discard', {
       sessionId: 'root', expectedRevision: 'c'.repeat(64), confirmedUncommittedLoss: false, expectedSeq: 6,
-    })).toMatchObject({ discardReceipt })
+    }) as TaskSnapshot
+    expect(discardedTask.discardReceipt).toMatchObject({ ...discardReceipt,
+      operationId: tasks.startDelivery.mock.calls[2]?.[1].intent.operationId,
+    })
+    expect(tasks.startDelivery.mock.calls.map(call => call[1].intent.kind)).toEqual(['commit', 'apply', 'discard'])
+    expect(await server.handleRequest('task/retryDeliveryCheckpoint', {
+      sessionId: 'root', operationId: commitReceipt.operationId,
+    })).toBe(row)
+    expect(tasks.retryDeliveryCheckpoint).toHaveBeenCalledWith(SessionId('root'), commitReceipt.operationId)
+    expect(review.commit).toHaveBeenCalledTimes(1)
+    expect(review.apply).toHaveBeenCalledTimes(1)
+    expect(review.discard).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['cold', 'resident'] as const)('distinguishes %s preflight rejection from unconfirmed delivery', async (mode) => {
+    for (const phase of ['preflight', 'authorization', 'authorization-uncertain', 'result', 'receipt'] as const) {
+      const ctx = new Context()
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(AgentRegistry)
+      let row = { taskId: SessionId('root'), asOfSeq: 1, status: 'ready', attention: [],
+        executionWorkspace: { taskId: SessionId('root') },
+      } as unknown as TaskSnapshot
+      const failure = new Error(`Injected ${phase} failure`)
+      let claimed = false
+      const tasks = {
+        snapshot: () => ({ generation: 1, tasks: [row] }),
+        startDelivery: vi.fn(async (_id: SessionId, request: StartTaskDeliveryRequest) => {
+          if (phase === 'authorization-uncertain') row = { ...row, attention: [{
+            id: AttentionItemId('pending'), taskId: row.taskId, ownerSessionId: row.taskId,
+            kind: 'delivery-unconfirmed', severity: 'error', summary: 'Unconfirmed',
+            createdAt: 1, sourceId: request.intent.operationId, actionable: true,
+          }] }
+          if (phase === 'authorization' || phase === 'authorization-uncertain') throw failure
+          return row
+        }),
+        recordCommit: vi.fn(async () => { throw failure }),
+      }
+      const review = { commit: vi.fn(async (request: CommitTaskReviewRequest) => {
+        if (mode === 'resident') expect(claimed).toBe(true)
+        else expect(() => ctx.agents.enter({ id: row.taskId, session: ctx.sessions.create(row.taskId) } as Agent, undefined))
+          .toThrow(AgentOfflineReservationError)
+        if (phase === 'preflight') throw failure
+        await request.authorization!.authorize()
+        if (phase === 'result') throw failure
+        return {} as never
+      }) }
+      ctx.provide('tasks', tasks as never)
+      ctx.provide('taskReview', review as never)
+      if (mode === 'resident') ctx.agents.register({ id: row.taskId, session: ctx.sessions.create(row.taskId),
+        runMaintenance<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+          claimed = true
+          return operation(new AbortController().signal).finally(() => { claimed = false })
+        },
+      } as Agent)
+      const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+      try {
+        const result = server.commitTask({ sessionId: 'root', expectedSeq: 1,
+          expectedRevision: 'b'.repeat(64) as TaskReviewRevision, message: 'Ship' })
+        if (phase === 'preflight' || phase === 'authorization') await expect(result).rejects.toBe(failure)
+        else await expect(result).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING', cause: failure })
+        expect(tasks.recordCommit).toHaveBeenCalledTimes(phase === 'receipt' ? 1 : 0)
+        expect(claimed).toBe(false)
+      } finally {
+        await server.shutdown()
+        await ctx.fiber.dispose()
+      }
+    }
+  })
+
+  it('rejects SDK delivery without execution ownership and before a cancelled maintenance callback', async () => {
+    const row = { taskId: SessionId('root'), asOfSeq: 1, status: 'ready', attention: [],
+      executionWorkspace: { taskId: SessionId('root') },
+    } as unknown as TaskSnapshot
+    const review = { commit: vi.fn() }
+    const tasks = { snapshot: () => ({ generation: 1, tasks: [row] }) }
+    const ctx = new Context()
+    ctx.provide('tasks', tasks as never)
+    ctx.provide('taskReview', review as never)
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    const request = { sessionId: 'root', expectedSeq: 1, expectedRevision: 'b'.repeat(64) as TaskReviewRevision, message: 'Ship' }
+    try {
+      await expect(server.commitTask(request)).rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' } satisfies Partial<TaskError>)
+      const abort = new AbortController()
+      abort.abort(new Error('Maintenance cancelled'))
+      ctx.provide('agents', { get: () => ({ runMaintenance: (job: (signal: AbortSignal) => Promise<unknown>) => job(abort.signal) }) } as never)
+      await expect(server.commitTask(request)).rejects.toThrow('Maintenance cancelled')
+      expect(review.commit).not.toHaveBeenCalled()
+    } finally {
+      await server.shutdown()
+      await ctx.fiber.dispose()
+    }
   })
 
   it('creates a harness agent and calls the configured OpenAI-compatible endpoint', { timeout: 15_000 }, async () => {

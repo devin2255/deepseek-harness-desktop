@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-`dsh-task-review` 定义仅供 Host 使用的审查与交付服务。它公开有界摘要和单文件 diff 读取，以及提交、应用和丢弃变更。每个变更请求都携带确切的审查 revision。`dsh-task-review-local` 通过受管进程能力使用 Git 实现该服务。`dsh-host-apiproxy` 是唯一远程消费方：它解析持久根 Task worktree 分配，强制执行生命周期与序列前提，调用提供方，并通过 `ctx.tasks` 记录成功回执。
+`dsh-task-review` 定义 Host 侧审查与交付服务。它公开有界摘要和单文件 diff 读取，以及提交、应用和丢弃变更。每个变更请求都携带确切的审查 revision。`dsh-task-review-local` 通过受管进程能力使用 Git 实现该服务。Host API 与 SDK 服务器解析持久根 Task worktree 分配，强制执行生命周期与序列前提，调用提供方，并通过 `ctx.tasks` 记录成功回执。[交付日志](../architecture/2026-10-08-root-delivery-journal.md)拥有变更前持久授权、完成关联和待核实状态保留。
 
 审查摘要标识 Task、Workspace、已记录基线、当前 worktree commit、当前源 `HEAD`、分支、源目录脏状态、有界文件列表和不透明 revision。revision 对 worktree 身份及完整变更内容进行哈希，包括未跟踪文件。文件路径必须是该摘要中确切且规范化的成员。文本 diff 是有界统一 patch；二进制与截断结果使用显式值表示，不伪装为空成功结果。
 

@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
-import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskIntegrationConflict, TaskIntegrationReceipt } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskIntegrationConflict, TaskIntegrationReceipt, TaskReviewOperationId, TaskReviewRevision } from '@deepseek-ai/dsh-task-review/types'
 
 /** Opaque identity of one acceptance criterion. */
 export type TaskCriterionId = Branded<'TaskCriterionId'>
@@ -82,6 +82,22 @@ export type TaskRiskSeverity = 'low' | 'medium' | 'high' | 'critical'
 /** Human review decision that cannot assert a Git-backed delivery result. */
 export type TaskReviewDecision = 'changes-requested' | 'ready'
 
+/** Exact user-authorized mutation retained before Git begins; absence of a receipt never authorizes replay. */
+export type TaskDeliveryIntent = {
+  readonly operationId: TaskReviewOperationId
+  readonly reviewRevision: TaskReviewRevision
+} & (
+  | { readonly kind: 'commit'; readonly message: string }
+  | { readonly kind: 'apply'; readonly commit: string; readonly sourceHead: string }
+  | { readonly kind: 'discard'; readonly confirmedUncommittedLoss: boolean }
+)
+
+/** Compare-and-set authorization for one delivery, durably flushed before it may mutate Git. */
+export interface StartTaskDeliveryRequest {
+  readonly intent: TaskDeliveryIntent
+  readonly expectedSeq: number
+}
+
 /** Derived operational state of one root task and its owned descendants. */
 export type TaskStatus = 'needs-attention' | 'failed' | 'running' | 'reviewing' | 'ready' | 'settled'
 
@@ -97,6 +113,7 @@ export interface AttentionKindMap {
   'merge-conflict': unknown
   'validation-failure': unknown
   'review-request': unknown
+  'delivery-unconfirmed': unknown
 }
 
 /** Source category of an attention item. */
@@ -161,6 +178,8 @@ export interface TaskSnapshot {
   readonly commitReceipt?: TaskCommitReceipt
   readonly applyReceipt?: TaskApplyReceipt
   readonly discardReceipt?: TaskDiscardReceipt
+  /** Exact live receipt whose failed persistence checkpoint may be retried without running Git. */
+  readonly retryableDeliveryCheckpoint?: TaskReviewOperationId
   /** Absent when the root log contains no integration attempts. */
   readonly integrations?: readonly TaskIntegrationNode[]
   readonly updatedAt: number
@@ -243,20 +262,17 @@ export interface ReviewTaskRequest {
   readonly expectedSeq: number
 }
 
-/** Compare-and-set input for recording a completed Task commit. */
+/** Commit result correlated to the outstanding durable intent, independent of intervening non-Task events. */
 export interface RecordTaskCommitRequest {
   readonly receipt: TaskCommitReceipt
-  readonly expectedSeq: number
 }
 
-/** Compare-and-set input for recording a completed source application. */
+/** Source-application result correlated to the outstanding durable intent. */
 export interface RecordTaskApplyRequest {
   readonly receipt: TaskApplyReceipt
-  readonly expectedSeq: number
 }
 
-/** Compare-and-set input for recording a completed worktree discard. */
+/** Worktree-removal result correlated to the outstanding durable intent. */
 export interface RecordTaskDiscardRequest {
   readonly receipt: TaskDiscardReceipt
-  readonly expectedSeq: number
 }

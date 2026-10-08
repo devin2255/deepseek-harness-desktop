@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { Service } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-agent'
 import {
   TaskCriterionId,
   TaskError,
@@ -18,6 +19,9 @@ import {
   type RecordTaskCommitRequest,
   type RecordTaskDiscardRequest,
   type ReviewTaskRequest,
+  type StartTaskDeliveryRequest,
+  type TaskDeliveryIntent,
+  AttentionItemId,
   type TaskErrorCode,
   type TaskListChange,
   type TaskListSnapshot,
@@ -25,6 +29,7 @@ import {
   type UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { TaskReviewOperationId } from '@deepseek-ai/dsh-task-review/types'
 import { aggregateTasks, type TaskSessionInput } from './aggregate.ts'
 
 export * from './aggregate.ts'
@@ -35,6 +40,7 @@ type TaskEventType =
   | 'task/criterion-updated'
   | 'task/risk-recorded'
   | 'task/review-decided'
+  | 'task/delivery-started'
   | 'task/review-committed'
   | 'task/review-applied'
   | 'task/review-discarded'
@@ -45,9 +51,16 @@ interface TaskEventDataMap {
   readonly 'task/criterion-updated': Extract<SessionEvent, { type: 'task/criterion-updated' }>['data']
   readonly 'task/risk-recorded': Extract<SessionEvent, { type: 'task/risk-recorded' }>['data']
   readonly 'task/review-decided': Extract<SessionEvent, { type: 'task/review-decided' }>['data']
+  readonly 'task/delivery-started': Extract<SessionEvent, { type: 'task/delivery-started' }>['data']
   readonly 'task/review-committed': Extract<SessionEvent, { type: 'task/review-committed' }>['data']
   readonly 'task/review-applied': Extract<SessionEvent, { type: 'task/review-applied' }>['data']
   readonly 'task/review-discarded': Extract<SessionEvent, { type: 'task/review-discarded' }>['data']
+}
+
+interface DeliveryCheckpoint {
+  readonly intent: TaskDeliveryIntent
+  readonly session: Session
+  phase: 'appending' | 'saving'
 }
 
 function clone<T>(value: T): T {
@@ -73,6 +86,8 @@ export class TaskSessionProvider extends TaskService {
   private invalidated = false
   private operationTail: Promise<void> = Promise.resolve()
   private notificationsOpen = true
+  // Receipt durability settles independently from the synchronous in-memory Session append.
+  private readonly uncertainCheckpoints = new Map<SessionId, DeliveryCheckpoint>()
 
   /** Load cold history, overlay live owners, and attach projection subscriptions. */
   protected async [Service.init](): Promise<void> {
@@ -88,6 +103,14 @@ export class TaskSessionProvider extends TaskService {
     }))
     for (const session of this.ctx.sessions.list()) this.captureLive(session)
     this.rebuild(false)
+
+    this.ctx.on('agent/pre-step', async ({ agent }, next) => {
+      if (this.current.tasks.some(task => task.taskId === agent.session.id
+        && task.attention.some(item => item.kind === 'delivery-unconfirmed'))) {
+        throw new TaskError('Delivery result is unconfirmed. Inspect Git before continuing this Task.', 'TASK_DELIVERY_PENDING')
+      }
+      return next()
+    }, { global: true })
 
     this.ctx.on('session/created', (session) => {
       this.captureLive(session)
@@ -214,23 +237,56 @@ export class TaskSessionProvider extends TaskService {
   }
 
   /** @inheritdoc */
+  startDelivery(sessionId: SessionId, request: StartTaskDeliveryRequest): Promise<TaskSnapshot> {
+    return this.enqueueValue(async () => {
+      const input = this.requireRoot(sessionId)
+      if (this.hasActiveRun(sessionId)) throw new TaskError(`Task "${sessionId}" still has active work`, 'TASK_ACTIVE')
+      return await this.commit(input, request.expectedSeq, 'TASK_INVALID_REVIEW', 'task/delivery-started', { intent: request.intent })
+    })
+  }
+
+  /** @inheritdoc */
+  retryDeliveryCheckpoint(sessionId: SessionId, operationId: TaskReviewOperationId): Promise<TaskSnapshot> {
+    return this.enqueueValue(async () => {
+      this.requireRoot(sessionId)
+      const checkpoint = this.retryableCheckpoint(sessionId)
+      if (checkpoint === undefined || checkpoint.intent.operationId !== operationId) {
+        throw new TaskError('No matching live delivery receipt is available to save. Inspect Git before continuing.', 'TASK_DELIVERY_PENDING')
+      }
+      try {
+        await this.flushDeliveryCheckpoint(checkpoint.session)
+      } catch (error: unknown) {
+        this.rebuild(true)
+        throw taskFailure(error, 'TASK_UNAVAILABLE')
+      }
+      this.uncertainCheckpoints.delete(sessionId)
+      this.captureLive(checkpoint.session)
+      this.rebuild(true)
+      const task = this.current.tasks.find(current => current.taskId === sessionId)
+      /* v8 ignore next -- the attached Session and synchronous rebuild retain this root */
+      if (task === undefined) throw new TaskError(`Task "${sessionId}" disappeared after checkpoint`, 'TASK_UNAVAILABLE')
+      return clone(task)
+    })
+  }
+
+  /** @inheritdoc */
   recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot> {
     return this.appendTerminalCommand(
-      sessionId, request.expectedSeq, 'TASK_INVALID_COMMIT', 'task/review-committed', { receipt: request.receipt },
+      sessionId, 'TASK_INVALID_COMMIT', 'task/review-committed', { receipt: request.receipt },
     )
   }
 
   /** @inheritdoc */
   recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot> {
     return this.appendTerminalCommand(
-      sessionId, request.expectedSeq, 'TASK_INVALID_APPLY', 'task/review-applied', { receipt: request.receipt },
+      sessionId, 'TASK_INVALID_APPLY', 'task/review-applied', { receipt: request.receipt },
     )
   }
 
   /** @inheritdoc */
   recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot> {
     return this.appendTerminalCommand(
-      sessionId, request.expectedSeq, 'TASK_INVALID_DISCARD', 'task/review-discarded', { receipt: request.receipt },
+      sessionId, 'TASK_INVALID_DISCARD', 'task/review-discarded', { receipt: request.receipt },
     )
   }
 
@@ -249,13 +305,22 @@ export class TaskSessionProvider extends TaskService {
   private rebuild(notify: boolean): void {
     const previous = this.current
     const workspaceBySession = this.workspaceBySession()
-    const next = aggregateTasks({
+    const aggregate = aggregateTasks({
       generation: this.generation,
       sessions: [...this.inputs.values()],
-      liveFacts: this.liveFacts,
+      liveFacts: [...this.liveFacts, ...[...this.uncertainCheckpoints].map(([taskId, { intent }]): LiveTaskFact => ({
+        kind: 'attention', item: { id: AttentionItemId(`${taskId}:delivery:${intent.operationId}`), taskId,
+          ownerSessionId: taskId, kind: 'delivery-unconfirmed', severity: 'error',
+          summary: 'Git returned a result whose Session durability checkpoint is unconfirmed. Inspect Git before continuing.',
+          createdAt: this.inputs.get(taskId)?.events?.at(-1)?.time ?? 0, sourceId: intent.operationId, actionable: true },
+      }))],
       freshness: this.freshness,
       ...workspaceBySession === undefined ? {} : { workspaceBySession },
     })
+    const next: TaskListSnapshot = { ...aggregate, tasks: aggregate.tasks.map((task) => {
+      const checkpoint = this.retryableCheckpoint(task.taskId)
+      return checkpoint === undefined ? task : { ...task, retryableDeliveryCheckpoint: checkpoint.intent.operationId }
+    }) }
     this.current = next
     if (!notify || !this.notificationsOpen) return
     const before = new Map(previous.tasks.map(task => [task.taskId, task]))
@@ -321,15 +386,13 @@ export class TaskSessionProvider extends TaskService {
 
   private appendTerminalCommand<T extends 'task/review-committed' | 'task/review-applied' | 'task/review-discarded'>(
     sessionId: SessionId,
-    expectedSeq: number,
     invalidCode: TaskErrorCode,
     type: T,
     data: TaskEventDataMap[T],
   ): Promise<TaskSnapshot> {
     return this.enqueueValue(async () => {
       const input = this.requireRoot(sessionId)
-      if (this.hasActiveRun(sessionId)) throw new TaskError(`Task "${sessionId}" still has active work`, 'TASK_ACTIVE')
-      return await this.commit(input, expectedSeq, invalidCode, type, data)
+      return await this.commit(input, input.events.length, invalidCode, type, data)
     })
   }
 
@@ -346,6 +409,11 @@ export class TaskSessionProvider extends TaskService {
     if (expectedSeq !== events.length) {
       throw new TaskError(`Task "${input.header.id}" expected sequence ${expectedSeq}, current sequence is ${events.length}`, 'TASK_STALE_SEQUENCE')
     }
+    const preceding = foldTask(events)
+    if ((preceding.pendingDelivery !== undefined || this.uncertainCheckpoints.has(input.header.id))
+      && type !== 'task/review-committed' && type !== 'task/review-applied' && type !== 'task/review-discarded') {
+      throw new TaskError(`Task "${input.header.id}" has an unconfirmed delivery; inspect Git before continuing`, 'TASK_DELIVERY_PENDING')
+    }
     const candidate = clone({ type, seq: events.length, time: Date.now(), data }) as SessionEvent
     try {
       this.validateEvidence(input.header.id, candidate)
@@ -358,6 +426,11 @@ export class TaskSessionProvider extends TaskService {
       /* v8 ignore next 2 -- Session append publication synchronously refreshes inputs, so a live seq cannot diverge here */
       if (live.seq !== expectedSeq) {
         throw new TaskError(`Task "${input.header.id}" changed before the update`, 'TASK_STALE_SEQUENCE')
+      }
+      if (preceding.pendingDelivery !== undefined) {
+        this.uncertainCheckpoints.set(input.header.id, {
+          intent: preceding.pendingDelivery.intent, session: live, phase: 'appending',
+        })
       }
       switch (type) {
         case 'task/worktree-assigned':
@@ -375,6 +448,9 @@ export class TaskSessionProvider extends TaskService {
         case 'task/review-decided':
           live.append('task/review-decided', data as TaskEventDataMap['task/review-decided'])
           break
+        case 'task/delivery-started':
+          live.append('task/delivery-started', data as TaskEventDataMap['task/delivery-started'])
+          break
         case 'task/review-committed':
           live.append('task/review-committed', data as TaskEventDataMap['task/review-committed'])
           break
@@ -386,6 +462,23 @@ export class TaskSessionProvider extends TaskService {
           break
       }
       this.captureLive(live)
+      const checkpoint = this.uncertainCheckpoints.get(input.header.id)
+      if (checkpoint !== undefined) {
+        checkpoint.phase = 'saving'
+        this.rebuild(true)
+      }
+      if (type === 'task/delivery-started' || type === 'task/review-committed'
+        || type === 'task/review-applied' || type === 'task/review-discarded') {
+        try {
+          await this.flushDeliveryCheckpoint(live)
+          this.uncertainCheckpoints.delete(input.header.id)
+        } catch (error: unknown) {
+          if (preceding.pendingDelivery !== undefined) {
+            this.rebuild(true)
+          }
+          throw taskFailure(error, 'TASK_UNAVAILABLE')
+        }
+      }
     } else {
       try {
         await this.ctx.sessionPersistence.append(input.header.id, [candidate])
@@ -399,6 +492,20 @@ export class TaskSessionProvider extends TaskService {
     /* v8 ignore next -- rebuilding a retained root always returns its row */
     if (task === undefined) throw new TaskError(`Task "${input.header.id}" disappeared after update`, 'TASK_UNAVAILABLE')
     return clone(task)
+  }
+
+  private retryableCheckpoint(sessionId: SessionId): DeliveryCheckpoint | undefined {
+    const checkpoint = this.uncertainCheckpoints.get(sessionId)
+    return checkpoint?.phase === 'saving' && this.ctx.sessions.get(sessionId) === checkpoint.session ? checkpoint : undefined
+  }
+
+  private async flushDeliveryCheckpoint(session: Session): Promise<void> {
+    if (!await this.ctx.sessions.flush(session)) {
+      throw new TaskError(`Task "${session.id}" has no Session durability checkpoint`, 'TASK_UNAVAILABLE')
+    }
+    if (this.ctx.sessions.get(session.id) !== session) {
+      throw new TaskError(`Task "${session.id}" changed Session ownership during its durability checkpoint`, 'TASK_UNAVAILABLE')
+    }
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {

@@ -107,6 +107,7 @@ export const rpcErrorSchema: z.ZodType<RpcError> = z.discriminatedUnion('code', 
   z.object({ code: z.literal('task-invalid-worktree'), message: z.string(), details: z.object({ sessionId: z.string() }) }),
   z.object({ code: z.literal('task-worktree-assigned'), message: z.string(), details: z.object({ sessionId: z.string() }) }),
   z.object({ code: z.literal('task-active'), message: z.string(), details: z.object({ sessionId: z.string() }) }),
+  z.object({ code: z.literal('task-delivery-pending'), message: z.string(), details: z.object({ sessionId: z.string() }) }),
   z.object({ code: z.literal('task-unavailable'), message: z.string(), details: z.object({ sessionId: z.string().optional() }) }),
   z.object({ code: z.literal('internal'), message: z.string(), details: z.object({}) }),
 ]) as unknown as z.ZodType<RpcError>

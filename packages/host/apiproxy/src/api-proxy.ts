@@ -62,10 +62,10 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
-import type { LiveTaskFact, TaskErrorCode, TaskSnapshot } from '@deepseek-ai/dsh-task'
+import type { LiveTaskFact, TaskDeliveryIntent, TaskErrorCode, TaskService, TaskSnapshot } from '@deepseek-ai/dsh-task'
 import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
-import { TaskReviewError, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewError, TaskReviewOperationId, TaskReviewRevision, type TaskDeliveryAuthorization } from '@deepseek-ai/dsh-task-review'
 import { foldSubagentWorktree } from '@deepseek-ai/dsh-subagent-spawn-in-process'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
@@ -1877,6 +1877,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     TASK_INVALID_WORKTREE: 'task-invalid-worktree',
     TASK_WORKTREE_ASSIGNED: 'task-worktree-assigned',
     TASK_ACTIVE: 'task-active',
+    TASK_DELIVERY_PENDING: 'task-delivery-pending',
     TASK_UNAVAILABLE: 'task-unavailable',
   } as const satisfies Record<TaskErrorCode, RpcError['code']>
 
@@ -2000,14 +2001,25 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
   /** Keep root execution excluded until Git and receipt recording have both settled. */
   async function withTaskDelivery(
-    request: RpcRequest<{ sessionId: SessionId }>, signal: AbortSignal,
-    operation: (signal: AbortSignal) => Promise<TaskSnapshot>,
+    request: RpcRequest<{ sessionId: SessionId; expectedSeq: number }>, signal: AbortSignal,
+    tasks: TaskService, intent: TaskDeliveryIntent,
+    operation: (signal: AbortSignal, authorization: TaskDeliveryAuthorization) => Promise<TaskSnapshot>,
   ): Promise<RpcResponse<TaskSnapshot>> {
+    let authorized = false
+    const authorization: TaskDeliveryAuthorization = { operationId: intent.operationId, authorize: async () => {
+      await tasks.startDelivery(request.payload.sessionId, { intent, expectedSeq: request.payload.expectedSeq })
+      authorized = true
+    } }
     const deliver = async (operationSignal: AbortSignal): Promise<RpcResponse<TaskSnapshot>> => {
       try {
         operationSignal.throwIfAborted()
-        return ok(request, await operation(operationSignal))
+        return ok(request, await operation(operationSignal, authorization))
       } catch (error: unknown) {
+        if (authorized || tasks.snapshot().tasks.some(task => task.taskId === request.payload.sessionId
+          && task.attention.some(item => item.kind === 'delivery-unconfirmed' && item.sourceId === intent.operationId))) {
+          ctx.logger.warn(`Task delivery "${intent.operationId}" has no confirmed durable result: ${String(error)}`)
+          return taskError(request, new TaskError('Delivery result is unconfirmed. The operation may have changed Git; inspect the Task and source checkout before retrying.', 'TASK_DELIVERY_PENDING'))
+        }
         return taskReviewError(request, error, operationSignal)
       }
     }
@@ -3380,6 +3392,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     },
 
     tasks: {
+      async retryDeliveryCheckpoint(request) {
+        const tasks = ctx.get('tasks')
+        if (tasks === undefined) {
+          return taskError(request, new TaskError('Task projection service is not mounted.', 'TASK_UNAVAILABLE'))
+        }
+        try {
+          return ok(request, await tasks.retryDeliveryCheckpoint(request.payload.sessionId, request.payload.operationId))
+        } catch (error: unknown) {
+          return taskError(request, error)
+        }
+      },
       list(request) {
         const tasks = ctx.get('tasks')
         if (tasks === undefined) {
@@ -3471,14 +3494,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId: request.payload.sessionId },
           })
         }
-        return withTaskDelivery(request, signal, async (operationSignal) => {
+        return withTaskDelivery(request, signal, target.tasks, {
+          kind: 'commit', operationId: TaskReviewOperationId(randomUUID()),
+          reviewRevision: TaskReviewRevision(request.payload.expectedRevision), message: request.payload.message,
+        }, async (operationSignal, authorization) => {
           const receipt = await target.review.commit({
             assignment: target.assignment,
             expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
             message: request.payload.message,
+            authorization,
           }, operationSignal)
           return target.tasks.recordCommit(request.payload.sessionId, {
-            receipt, expectedSeq: request.payload.expectedSeq,
+            receipt,
           })
         })
       },
@@ -3498,15 +3525,20 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId: request.payload.sessionId },
           })
         }
-        return withTaskDelivery(request, signal, async (operationSignal) => {
+        return withTaskDelivery(request, signal, target.tasks, {
+          kind: 'apply', operationId: TaskReviewOperationId(randomUUID()),
+          reviewRevision: TaskReviewRevision(request.payload.expectedRevision), commit: request.payload.commit,
+          sourceHead: request.payload.expectedSourceHead,
+        }, async (operationSignal, authorization) => {
           const receipt = await target.review.apply({
             assignment: target.assignment,
             expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
             expectedSourceHead: request.payload.expectedSourceHead,
             commit: request.payload.commit,
+            authorization,
           }, operationSignal)
           return target.tasks.recordApply(request.payload.sessionId, {
-            receipt, expectedSeq: request.payload.expectedSeq,
+            receipt,
           })
         })
       },
@@ -3524,14 +3556,19 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId: request.payload.sessionId },
           })
         }
-        return withTaskDelivery(request, signal, async (operationSignal) => {
+        return withTaskDelivery(request, signal, target.tasks, {
+          kind: 'discard', operationId: TaskReviewOperationId(randomUUID()),
+          reviewRevision: TaskReviewRevision(request.payload.expectedRevision),
+          confirmedUncommittedLoss: request.payload.confirmedUncommittedLoss,
+        }, async (operationSignal, authorization) => {
           const receipt = await target.review.discard({
             assignment: target.assignment,
             expectedRevision: TaskReviewRevision(request.payload.expectedRevision),
             confirmedUncommittedLoss: request.payload.confirmedUncommittedLoss,
+            authorization,
           }, operationSignal)
           return target.tasks.recordDiscard(request.payload.sessionId, {
-            receipt, expectedSeq: request.payload.expectedSeq,
+            receipt,
           })
         })
       },

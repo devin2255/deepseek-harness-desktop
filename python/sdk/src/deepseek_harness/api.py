@@ -212,6 +212,11 @@ class DeepSeekHarness:
             confirmed_uncommitted_loss=confirmed_uncommitted_loss, expected_seq=expected_seq,
         )
 
+    def retry_task_delivery_checkpoint(self, session_id: str, operation_id: str) -> TaskSnapshot:
+        """Save the advertised live receipt without appending events or executing Git."""
+        self.start()
+        return self._client.retry_task_delivery_checkpoint(session_id, operation_id)
+
 
 class Session:
     def __init__(self, harness: DeepSeekHarness, session_id: str) -> None:

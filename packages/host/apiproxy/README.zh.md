@@ -48,7 +48,7 @@ Settings 分节中的 `reasoningEffort` 在 agent-default-model 插件配置中�
 
 Host 还会从自己的 Agent 注册表和待回答问题注册表发布一个完整的实时 Task generation。Agent 生命周期变化会替换运行事实，问题注册或结算会替换可操作的问题注意事项，同时保持用于隔离完整行流更新的 generation 不变。
 
-根任务 Commit、Apply 和 Discard 在 Provider 与回执记录都完成前保留执行权。驻留 Agent 使用空闲维护；离线根任务保持离线。执行权获取竞争返回 `task-active`；生命周期验证可能更早拒绝。请求和 Agent 取消传递至 Provider，但不会在其完成前释放归属。这种进程内互斥不阻止排队输入或 Task 命令改变回执序号，也不记录被中断的 Git 变更操作；参见[根任务交付执行互斥决策](../../../.agents/notes/implemented/architecture/2026-10-08-root-delivery-execution-exclusion.md)。
+根任务 Commit、Apply 和 Discard 在 Provider 与回执记录都完成前保留执行权。驻留 Agent 使用空闲维护；离线根任务保持离线。执行权获取竞争返回 `task-active`；生命周期验证可能更早拒绝。请求和 Agent 取消传递至 Provider，但不会在其完成前释放归属；参见[根任务交付执行互斥决策](../../../.agents/notes/implemented/architecture/2026-10-08-root-delivery-execution-exclusion.md)。最终无变更预检后，Provider 等待按 `expectedSeq` 授权的持久化交付意图。回执完成匹配该操作，而非原始序号，因此无关 Session 追加不会使其失效。授权后失败返回 `task-delivery-pending`，保留可检查的待核实状态，绝不自动重复 Git；参见[交付日志决策](../../../.agents/notes/implemented/architecture/2026-10-08-root-delivery-journal.md)。
 
 `task.reviewSummary` 和 `task.reviewDiff` 接受可选的 `writerSessionId`，而 `sessionId` 仍指向所属根 Task。Host 读取子级自身事件后缀中的 `subagent/worktree-assigned`，验证直接父级、Workspace、源目录和执行目录归属，并拒绝仍驻留的子级或已丢弃的根任务。离线 Session 保留在整个读取期间阻止子级激活和竞争检查；保留冲突报告 `REVIEW_STALE`。读取不会激活任一 Agent，也不接受客户端指定目录。返回的审查身份属于子级；根任务 Commit、Apply 和 Discard 仍是独立方法，不接受写入者选择。参见[隔离写入者审查决策](../../../.agents/notes/implemented/feature/2026-10-07-isolated-writer-result-review.md)。
 
@@ -75,6 +75,8 @@ Workspace 列表与 Session 列表是相互独立的重连基线。`workspace.cr
 ## 载体层（`/client` + 根路径）
 
 `AbstractApiClient` 持有全部协议不变量：签发 rpcId、包装／解包信封、Zod 解析、SSE 帧解码、一元请求超时，以及按微任务批处理的信封观测（`subscribeEnvelopes`）；平台子类只提供 `doFetch` 传输环节。`InProcessApiClient` 以 `toFetchHandler(api)` 为基础，仍是同构接点：它运行完整的协议序列化与校验路径而不经过网络，供需要该路径的调用方和载体测试使用。产品的 `dsh --profile headless` 是直连 core 的入口，不挂载本包。
+
+`task.retryDeliveryCheckpoint({sessionId, operationId})` 只保存 Task Provider 提供的确切实时回执。它不要求可读取的 worktree 或 Review 服务，不恢复 Agent，也不执行 Git；回执缺失或被替换时返回 `task-delivery-pending`，再次保存失败时返回 `task-unavailable` 并保留待核实状态。
 
 ## 模型体验
 

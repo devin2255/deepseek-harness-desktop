@@ -73,7 +73,7 @@ class AttentionItem(TaskWireModel):
     owner_session_id: str = Field(alias="ownerSessionId")
     kind: Literal[
         "approval", "question", "plan-review", "run-failure", "merge-conflict",
-        "validation-failure", "review-request",
+        "validation-failure", "review-request", "delivery-unconfirmed",
     ]
     severity: Literal["info", "warning", "error", "critical"]
     summary: str
@@ -298,6 +298,10 @@ class TaskSnapshot(TaskWireModel):
     commit_receipt: TaskCommitReceipt | None = Field(default=None, alias="commitReceipt")
     apply_receipt: TaskApplyReceipt | None = Field(default=None, alias="applyReceipt")
     discard_receipt: TaskDiscardReceipt | None = Field(default=None, alias="discardReceipt")
+    retryable_delivery_checkpoint: str | None = Field(
+        default=None, alias="retryableDeliveryCheckpoint",
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    )
     integrations: list[TaskIntegrationNode] | None = Field(default=None, min_length=1)
     updated_at: int = Field(alias="updatedAt")
     as_of_seq: int = Field(alias="asOfSeq")
@@ -310,6 +314,11 @@ class TaskSnapshot(TaskWireModel):
         ):
             raise ValueError("executionWorkspace must match the Task and Workspace identities")
         receipts = [self.commit_receipt, self.apply_receipt, self.discard_receipt]
+        if self.retryable_delivery_checkpoint is not None and not any(
+            item.kind == "delivery-unconfirmed" and item.owner_session_id == self.task_id
+            and item.source_id == self.retryable_delivery_checkpoint for item in self.attention
+        ):
+            raise ValueError("retryable checkpoint must match an unconfirmed root delivery")
         if any(receipt is not None and (
             receipt.task_id != self.task_id or receipt.workspace_id != self.workspace_id
         ) for receipt in receipts):

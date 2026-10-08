@@ -10,6 +10,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { resolveConfig, runGit } from '@deepseek-ai/dsh-task-worktree-local'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskSnapshot } from '@deepseek-ai/dsh-task'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 const configPath = process.argv[2]
 if (configPath === undefined) throw new Error('task-delivery-driver requires a config path')
@@ -74,6 +75,9 @@ try {
   for (const mode of ['cold', 'resident'] as const) {
     const { assignment, handle } = mode === 'cold' ? { assignment: cold, handle: undefined } : await prepare('resident-root', true)
     const blocked: string[] = []
+    const durable: string[] = []
+    const metadataBlocked: string[] = []
+    let interleavedInput = false
     const review = await runtime.taskReview.summarize({ assignment })
     let commit = ''
     let committedRevision = review.revision
@@ -103,6 +107,19 @@ try {
             confirmedUncommittedLoss: false, expectedSeq })
       try {
         await Promise.race([entered.promise, pending.then(() => { throw new Error(`${method} did not reach its real Provider result`) })])
+        const stored = await runtime.sessionPersistence.inspect(assignment.taskId)
+        const start = stored.events.at(-1)
+        if (start?.type !== 'task/delivery-started' || start.data.intent.kind !== method) {
+          throw new Error('Git began without a durable delivery intent')
+        }
+        durable.push(method)
+        try {
+          await runtime.tasks.review(assignment.taskId, { decision: 'changes-requested', expectedSeq: current(assignment.taskId).asOfSeq })
+          throw new Error('Task metadata changed during delivery')
+        } catch (error: unknown) {
+          if (!(error instanceof Error) || !('code' in error) || error.code !== 'TASK_DELIVERY_PENDING') throw error
+        }
+        metadataBlocked.push(method)
         if (handle === undefined) {
           try {
             const unexpected = await runtime.agents.resume({ resumeSessionId: assignment.taskId })
@@ -112,6 +129,10 @@ try {
             if (!(error instanceof AgentOfflineReservationError)) throw error
           }
         } else {
+          handle.agent.inject(createUserMessage({
+            content: [{ type: 'text', text: `Context queued during ${method}` }], source: { kind: 'user' },
+          }))
+          interleavedInput = true
           let rejected = false
           try { await handle.agent.runMaintenance(() => Promise.resolve()) } catch { rejected = true }
           if (!rejected) throw new Error('Resident root admitted competing maintenance')
@@ -137,10 +158,49 @@ try {
     await handle?.dispose()
     const resumed = await runtime.agents.resume({ resumeSessionId: assignment.taskId, agentOptions: { provider: 'fixture', model: 'fixture' } })
     await resumed.dispose()
-    process.stdout.write(`${JSON.stringify({ stage: mode, blocked, receipts: [row.commitReceipt?.kind, row.applyReceipt?.kind, row.discardReceipt?.kind],
+    process.stdout.write(`${JSON.stringify({ stage: mode, blocked, durable, metadataBlocked, interleavedInput,
+      receipts: [row.commitReceipt?.kind, row.applyReceipt?.kind, row.discardReceipt?.kind],
       branchRetained, sourceHeadPreserved, sourceContentApplied, reservationReleased: runtime.agents.get(assignment.taskId) === undefined })}\n`)
     await git(source, ['commit', '-m', `Adopt ${mode}`])
   }
+  const { assignment, handle } = await prepare('unconfirmed-root', true)
+  if (handle === undefined) throw new Error('Unconfirmed delivery needs a resident Agent')
+  const reviewed = await runtime.taskReview.summarize({ assignment })
+  const originalCommit = runtime.taskReview.commit.bind(runtime.taskReview)
+  let committed = ''
+  runtime.taskReview.commit = async (request, signal) => {
+    committed = (await originalCommit(request, signal)).commit
+    throw new Error('Injected result loss after Git commit')
+  }
+  let executionBlocked = false
+  try {
+    const response = await api.tasks.commit({ sessionId: assignment.taskId, expectedRevision: reviewed.revision,
+      message: 'Interrupted delivery', expectedSeq: current(assignment.taskId).asOfSeq })
+    if (response.result.ok || response.result.error.code !== 'task-delivery-pending') throw new Error('Missing unconfirmed delivery error')
+    handle.agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Do not execute while delivery is unconfirmed' }], source: { kind: 'user' },
+    }))
+    await handle.agent.whenIdle()
+    executionBlocked = !handle.agent.session.events.some(event => event.type === 'request/header')
+      && handle.agent.session.events.some(event => event.type === 'turn/end' && event.data.reason.kind === 'error')
+  } finally {
+    runtime.taskReview.commit = originalCommit
+    await handle.dispose()
+  }
+  await runtime.fiber.dispose()
+  ctx = await boot('task-delivery-unconfirmed-replay', resolveConfigPath(configPath, undefined))
+  const replayed = ctx.tasks.snapshot().tasks.find(task => task.taskId === assignment.taskId)
+  const stored = await ctx.sessionPersistence.inspect(assignment.taskId)
+  const intentRetained = stored.events.filter(event => event.type === 'task/delivery-started').length === 1
+    && replayed?.attention.some(item => item.kind === 'delivery-unconfirmed') === true
+  const retryApi = new InProcessApiClient(toFetchHandler(createApiProxy(ctx, {
+    defaultModelSelection: () => ({ provider: 'fixture', model: 'fixture' }), cwd: source,
+  })))
+  const retried = await retryApi.tasks.commit({ sessionId: assignment.taskId, expectedRevision: reviewed.revision,
+    message: 'Must not repeat', expectedSeq: replayed?.asOfSeq ?? 0 })
+  process.stdout.write(`${JSON.stringify({ stage: 'unconfirmed', intentRetained, executionBlocked,
+    receiptAbsent: replayed?.commitReceipt === undefined, retryRejected: !retried.result.ok,
+    gitCommitExists: (await git(source, ['rev-parse', assignment.branch])).stdout.trim() === committed })}\n`)
 } finally {
   await ctx?.fiber.dispose()
   uninstallFailLoud()

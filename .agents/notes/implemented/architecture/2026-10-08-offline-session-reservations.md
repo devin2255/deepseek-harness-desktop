@@ -30,7 +30,7 @@ The Host reserves a selected writer across ownership inspection and the complete
 
 ## Consequences
 
-An offline operation cannot be overlapped by a supported in-process Agent activation on its selected writers. It does not lock external processes, Git hooks, files, or shared-directory agents. It ends with the operation and supplies no authority for a later call. [Root human delivery](2026-10-08-root-delivery-execution-exclusion.md) combines offline reservation with resident maintenance; command sequencing and durable operation recording remain incomplete. This decision does not complete human writer controls or cross-process execution leases.
+An offline operation cannot be overlapped by a supported in-process Agent activation on its selected writers. It does not lock external processes, Git hooks, files, or shared-directory agents. It ends with the operation and supplies no authority for a later call. [Root human delivery](2026-10-08-root-delivery-execution-exclusion.md) combines offline reservation with resident maintenance; its [delivery journal](2026-10-08-root-delivery-journal.md) separately owns durable authorization and correlated completion. This decision does not complete manual delivery reconciliation, human writer controls, or cross-process execution leases.
 
 The existing writer review and integration notes remain active because they own attribution, revision authorization, batch publication, and UI semantics. The new reservation partially strengthens their stopped-writer guarantee without superseding those decisions. [Initiator scope](2026-07-15-agent-initiator-scope.md) and [Session preparation](2026-08-05-session-preparation.md) likewise retain their independent lifecycle rationale.
 

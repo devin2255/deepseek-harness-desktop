@@ -17,6 +17,7 @@ import type {
   RecordTaskCommitRequest,
   RecordTaskDiscardRequest,
   ReviewTaskRequest,
+  StartTaskDeliveryRequest,
   TaskErrorCode,
   TaskListChange,
   TaskListSnapshot,
@@ -56,6 +57,14 @@ class StubTaskService extends TaskService {
   }
 
   async review(_sessionId: SessionId, _request: ReviewTaskRequest): Promise<TaskSnapshot> {
+    throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
+  }
+
+  async startDelivery(_sessionId: SessionId, _request: StartTaskDeliveryRequest): Promise<TaskSnapshot> {
+    throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
+  }
+
+  async retryDeliveryCheckpoint(): Promise<TaskSnapshot> {
     throw new TaskError('not implemented', 'TASK_UNAVAILABLE')
   }
 

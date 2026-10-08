@@ -271,6 +271,12 @@ class HarnessClient:
             "expectedSeq": expected_seq,
         }, TaskSnapshot)
 
+    def retry_task_delivery_checkpoint(self, session_id: str, operation_id: str) -> TaskSnapshot:
+        """Save an existing live receipt without repeating Git; replaced Sessions reject."""
+        return self._task_request("task/retryDeliveryCheckpoint", {
+            "sessionId": session_id, "operationId": operation_id,
+        }, TaskSnapshot)
+
     def _task_request(
         self, method: str, params: JsonObject, response_model: type[ModelT]
     ) -> ModelT:

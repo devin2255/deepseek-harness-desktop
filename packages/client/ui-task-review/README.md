@@ -12,6 +12,10 @@ Integration history remains visible even when the selected review has no changed
 
 Request Changes, Create Commit, Apply to Project, and Discard Worktree are separate actions. Every action has a confirmation step. Commit explains that it changes only the task worktree. Apply explains the clean-source, unchanged-HEAD, and three-way preflight requirements. Discard distinguishes unrecoverable uncommitted content from commits retained on the task branch. Successful actions display the Task's durable receipt rather than inferring completion from local UI state.
 
+Outstanding root delivery displays `delivery-unconfirmed` attention with its operation id and disables all four root actions, including Request Changes. Success receipts stay hidden while their durability is unconfirmed. Read-only source selection, diff inspection, and Refresh remain available; Refresh neither adopts a Git result nor clears uncertainty.
+
+Retry Saving Delivery Receipt appears only for the root's advertised live checkpoint. It saves the existing receipt without another Commit, Apply, or Discard and remains available when Discard has removed the review directory. Disconnected Tasks and concurrent operations disable it; save errors stay visible. A missing receipt offers no retry action.
+
 ## Model Experience
 
 None, as this browser-side Task review and delivery surface registers no model input or interaction responses.
@@ -26,3 +30,4 @@ None; this package neither assembles nor sends model requests.
 - Verification evidence displays durable Session and sequence references; direct navigation to the referenced transcript is not available.
 - Diff search and side-by-side presentation are not available.
 - Child commit, batch integration, and conflict resolution actions are not available in this workspace.
+- Manual delivery reconciliation is not available when the exact live receipt is missing.

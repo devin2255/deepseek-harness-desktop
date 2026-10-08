@@ -223,7 +223,8 @@ export function TaskOverview({
                         <li key={entry.item.id}>
                           <button type="button" className={css.pendingAction}
                             onClick={() => {
-                              if (entry.item.kind === 'merge-conflict' && row.task.executionWorkspace !== undefined) run(() => openReview(row.task.taskId))
+                              if ((entry.item.kind === 'merge-conflict' || entry.item.kind === 'delivery-unconfirmed')
+                                && row.task.executionWorkspace !== undefined) run(() => openReview(row.task.taskId))
                               else open(entry.item.ownerSessionId)
                             }}>
                             {attentionOwnerTitle(entry, row.attention)} — {t(`attention.${entry.item.kind}`)}: {entry.item.summary}

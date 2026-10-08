@@ -208,6 +208,9 @@ export class FakeApiClient implements IApiClient {
     discard: (payload: unknown) => this.record('task.discard', payload, Promise.resolve(err({
       code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
     }))),
+    retryDeliveryCheckpoint: (payload: unknown) => this.record('task.retryDeliveryCheckpoint', payload, Promise.resolve(err({
+      code: 'task-unavailable', message: 'Task mutations are not configured in the connection fake.', details: {},
+    }))),
   }
 
   // Payloads stay `unknown` (lint-lane note above); response rows are the real

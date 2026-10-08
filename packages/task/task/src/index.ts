@@ -3,6 +3,7 @@
 import type {
   TaskCriterion,
   TaskDefinition,
+  TaskDeliveryIntent,
   TaskReviewDecision,
   TaskRisk,
 } from './types.ts'
@@ -40,6 +41,11 @@ declare module '@deepseek-ai/dsh-session/types' {
      * @param data - complete post-change decision.
      */
     'task/review-decided': { readonly decision: TaskReviewDecision }
+    /**
+     * Records exact delivery authorization before the first Git mutation.
+     * @param data - operation identity and authorized request; a matching receipt closes it.
+     */
+    'task/delivery-started': { readonly intent: TaskDeliveryIntent }
     /**
      * Records the complete receipt returned after committing reviewed Task changes.
      * @param data - provider-produced commit receipt.

@@ -175,6 +175,13 @@ export function aggregateTasks(input: TaskAggregationInput): TaskListSnapshot {
     const fold = root.events === undefined ? undefined : foldTask(root.events)
     const live = liveByRoot.get(root.header.id) ?? []
     const attention = tree.flatMap(session => durableAttention(root.header.id, session))
+    if (fold?.pendingDelivery !== undefined) {
+      const { intent, startedAt } = fold.pendingDelivery
+      attention.push({ id: AttentionItemId(`${root.header.id}:delivery:${intent.operationId}`), taskId: root.header.id,
+        ownerSessionId: root.header.id, kind: 'delivery-unconfirmed', severity: 'error',
+        summary: `${intent.kind} delivery has no confirmed result. It may still be running; inspect Git before retrying.`,
+        createdAt: startedAt, sourceId: intent.operationId, actionable: true })
+    }
     const integrations = projectIntegrations(root, fold?.assignment, children,
       input.freshness !== 'disconnected' && input.freshness !== 'unavailable'
         && live.some(fact => fact.kind === 'activity' && fact.ownerSessionId === root.header.id && fact.state === 'running'))

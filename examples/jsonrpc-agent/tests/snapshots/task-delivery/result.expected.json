@@ -1,0 +1,42 @@
+{
+  "operations": [
+    "commit",
+    "apply",
+    "discard",
+    "commit",
+    "commit"
+  ],
+  "correlatedReceipts": [
+    "commit",
+    "apply",
+    "discard",
+    "commit"
+  ],
+  "status": "settled",
+  "sourceHeadPreserved": true,
+  "sourceContentApplied": true,
+  "worktreeRemoved": true,
+  "branchRetained": true,
+  "unconfirmed": {
+    "status": "needs-attention",
+    "attention": [
+      "delivery-unconfirmed"
+    ],
+    "operationIdRetained": true,
+    "receiptAbsent": true,
+    "retryRejected": true,
+    "gitCommitPreserved": true
+  },
+  "checkpointRetry": {
+    "advertised": true,
+    "operationIdMatched": true,
+    "attentionCleared": true,
+    "noEventAppended": true,
+    "gitCommitPreserved": true,
+    "coldReceiptRetained": true
+  },
+  "missingReceiptRetryRejected": {
+    "live": true,
+    "cold": true
+  }
+}

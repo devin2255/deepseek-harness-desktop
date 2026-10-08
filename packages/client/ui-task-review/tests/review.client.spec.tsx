@@ -79,10 +79,41 @@ function harness(over: Partial<TaskReviewState> = {}, taskOver: Partial<TaskSnap
     setSourcesOpen: vi.fn(),
     requestChanges: vi.fn(async () => ({})), commit: vi.fn(async () => ({})),
     apply: vi.fn(async () => ({})), discard: vi.fn(async () => ({})), t,
+    retryDeliveryCheckpoint: vi.fn(async () => ({})),
   }
 }
 
 describe('TaskReview', () => {
+  it.each(['live', 'disconnected'] as const)('offers receipt-only saving with %s Task freshness despite an unavailable review', (freshness) => {
+    const operationId = '00000000-0000-4000-8000-000000000001' as NonNullable<TaskSnapshot['retryableDeliveryCheckpoint']>
+    const p = harness({ state: 'error', summary: null }, { freshness, retryableDeliveryCheckpoint: operationId,
+      status: 'needs-attention', attention: [{ id: 'delivery' as never, taskId, ownerSessionId: taskId,
+        kind: 'delivery-unconfirmed', severity: 'error', summary: 'Save failed', createdAt: 1, sourceId: operationId, actionable: true }] })
+    const view = render(<TaskReview {...p} />)
+    const button = view.getByRole('button', { name: 'Retry saving delivery receipt' }) as HTMLButtonElement
+    expect(button.disabled).toBe(freshness !== 'live')
+    fireEvent.click(button)
+    expect(p.retryDeliveryCheckpoint).toHaveBeenCalledTimes(freshness === 'live' ? 1 : 0)
+    if (freshness === 'live') expect(p.retryDeliveryCheckpoint).toHaveBeenCalledWith(operationId)
+    expect(p.commit).not.toHaveBeenCalled()
+    expect(p.apply).not.toHaveBeenCalled()
+    expect(p.discard).not.toHaveBeenCalled()
+  })
+  it('shows unconfirmed delivery identity and prevents every mutation while allowing read-only refresh', () => {
+    const p = harness({}, { status: 'needs-attention', attention: [{ id: 'delivery' as never, taskId,
+      ownerSessionId: taskId, kind: 'delivery-unconfirmed', severity: 'error', summary: 'No confirmed result',
+      createdAt: 1, sourceId: '00000000-0000-4000-8000-000000000001', actionable: true }] })
+    const view = render(<TaskReview {...p} />)
+    expect(view.getByRole('alert').textContent).toContain('Delivery result unconfirmed')
+    expect(view.getByText('00000000-0000-4000-8000-000000000001')).toBeTruthy()
+    for (const name of ['Request Changes', 'Create Commit', 'Apply to Project', 'Discard Worktree']) {
+      expect((view.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
+    }
+    fireEvent.click(view.getByRole('button', { name: 'Refresh' }))
+    expect(p.refresh).toHaveBeenCalledOnce()
+    expect(p.commit).not.toHaveBeenCalled()
+  })
+
   it('keeps conflict history visible without root file changes and blocks delivery until all contributors are integrated', () => {
     const result = { kind: 'conflict' as const, operationId: 'operation' as never, taskId, workspaceId: 'workspace' as never,
       reviewRevision: revision, headBefore: '0'.repeat(40), contributors: [
@@ -218,7 +249,8 @@ describe('TaskReview', () => {
       taskId, workspaceId: 'workspace' as never, revision, path: 'assets/logo.png', binary: true, truncated: true, patch: '',
     } })
     view.rerender(<TaskReview {...p} />)
-    expect(view.getByText(/Disconnected/)).toBeTruthy()
+    expect(view.getByText('This review may be out of date.')).toBeTruthy()
+    expect(view.queryByText(/Disconnected/)).toBeNull()
     expect(view.getAllByText(/truncated/).length).toBeGreaterThan(0)
     expect(view.getByText(/Binary files/)).toBeTruthy()
     expect(view.getByText(/Source workspace had uncommitted/)).toBeTruthy()

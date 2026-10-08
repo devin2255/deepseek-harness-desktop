@@ -63,7 +63,7 @@ export type { GoalsApi, GoalId, GoalRef } from './goals.ts'
 export type {
   AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
   TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskListChange, TaskListSnapshot,
-  TaskReviewDecision, TaskReviewFile, TaskReviewSummary, TaskRisk, TaskSnapshot, TasksApi,
+  TaskReviewDecision, TaskReviewFile, TaskReviewOperationId, TaskReviewSummary, TaskRisk, TaskSnapshot, TasksApi,
 } from './tasks.ts'
 export type { SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSecretView } from './settings.ts'
 export type { CredentialsApi, CredentialView } from './credentials.ts'

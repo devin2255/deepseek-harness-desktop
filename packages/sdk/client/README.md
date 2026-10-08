@@ -37,6 +37,8 @@ Optional `integrations` preserves ordered attempts and all five outcome kinds wi
 
 `HarnessClientOptions.env` replaces the child environment entirely when given (`undefined` inherits the parent's); callers own credential policy — `scrubbedParentEnv` from `dsh-subprocess` is the shared scrub base for isolation-minded launches.
 
+Both client layers expose `retryTaskDeliveryCheckpoint(sessionId, operationId)` for the advertised `retryableDeliveryCheckpoint`. This saves an existing live receipt without a review revision, another event, or any Git execution; missing or replaced receipts reject. A lost Provider result cannot be recovered with this method.
+
 ## Model Experience
 
 None, as this is a client-process library; the model runs in the spawned runtime, whose experience is owned by the plugins its `cordis.yml` composes.

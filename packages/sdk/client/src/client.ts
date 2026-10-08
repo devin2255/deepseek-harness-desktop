@@ -399,6 +399,16 @@ export class HarnessClient {
   }
 
   /**
+   * Save an existing live receipt without appending events or running Git.
+   * @param sessionId - root Session.
+   * @param operationId - advertised retryable checkpoint.
+   * @returns the confirmed Task; a missing receipt or failed save rejects.
+   */
+  async retryTaskDeliveryCheckpoint(sessionId: string, operationId: string): Promise<TaskSnapshot> {
+    return decodeTaskSnapshot(await this.request('task/retryDeliveryCheckpoint', { sessionId, operationId }))
+  }
+
+  /**
    * Send one JSON-RPC request and await its result.
    * @param method - the wire method name.
    * @param params - the params object; omitted params send `{}`.
@@ -604,6 +614,11 @@ function decodeTaskSnapshot(value: unknown): TaskSnapshot {
     throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
   }
   if (value.discardReceipt !== undefined && !isDiscardReceipt(value.discardReceipt, value.taskId, value.workspaceId)) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
+  if (value.retryableDeliveryCheckpoint !== undefined && (!isUuid(value.retryableDeliveryCheckpoint)
+    || !value.attention.some(item => isRecord(item) && item.kind === 'delivery-unconfirmed'
+      && item.ownerSessionId === value.taskId && item.sourceId === value.retryableDeliveryCheckpoint))) {
     throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
   }
   if (value.integrations !== undefined && !isIntegrationHistory(

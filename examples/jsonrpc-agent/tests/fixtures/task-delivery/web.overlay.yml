@@ -1,0 +1,8 @@
+# Exercise the desktop Task composition without Electron's capability guard.
+- id: api-gateway
+  inject: [tasks]
+- insert:
+    - id: task-session
+      name: '@deepseek-ai/dsh-task-session'
+    - id: ui-task-overview
+      name: '@deepseek-ai/dsh-client-ui-task-overview'

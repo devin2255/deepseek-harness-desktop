@@ -212,6 +212,17 @@ export class DeepSeekHarness implements AsyncDisposable {
   }
 
   /**
+   * Save an existing live receipt without appending events or running Git.
+   * @param sessionId - root Session.
+   * @param operationId - advertised retryable checkpoint.
+   * @returns the confirmed Task; a missing receipt or failed save rejects.
+   */
+  async retryTaskDeliveryCheckpoint(sessionId: string, operationId: string): Promise<TaskSnapshot> {
+    await this.start()
+    return this.client.retryTaskDeliveryCheckpoint(sessionId, operationId)
+  }
+
+  /**
    * Shut down and reap the runtime subprocess. Idempotent and terminal —
    * a closed harness no longer retries a failed handshake.
    * @returns settlement of the complete teardown.

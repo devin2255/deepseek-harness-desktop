@@ -37,6 +37,8 @@ console.log(result.finalResponse)
 
 `HarnessClientOptions.env` 给定时整体替换子进程环境（`undefined` 原样继承父进程环境）；凭据策略归调用方——`dsh-subprocess` 的 `scrubbedParentEnv` 是面向隔离启动的共享擦除基底。
 
+两层客户端都提供 `retryTaskDeliveryCheckpoint(sessionId, operationId)`，用于提供给调用方的 `retryableDeliveryCheckpoint`。该操作保存现有实时回执，不要求审查 revision，不追加事件，也不执行 Git；回执缺失或被替换时会拒绝。此方法不能恢复丢失的 Provider 结果。
+
 ## 模型体验
 
 无，因为这是一个客户端进程库；模型运行在 spawn 出的运行时中，其体验由该运行时的 `cordis.yml` 所组合的插件决定。

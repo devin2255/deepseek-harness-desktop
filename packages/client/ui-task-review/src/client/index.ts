@@ -1,6 +1,7 @@
 /** Task Review workspace composition over the runtime-owned review object. */
 import type { ClientContext, SessionId, TaskReviewState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { TaskReviewOperationId } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { en, zh, type TaskReviewKey } from './locales.ts'
@@ -24,6 +25,7 @@ export interface TaskReviewInjected {
   commit(message: string, expectedSeq: number): Promise<unknown>
   apply(commit: string, expectedSeq: number): Promise<unknown>
   discard(confirmedUncommittedLoss: boolean, expectedSeq: number): Promise<unknown>
+  retryDeliveryCheckpoint(operationId: TaskReviewOperationId): Promise<unknown>
   hooks: { taskReview: HostObservable<TaskReviewState> }
 }
 
@@ -50,6 +52,7 @@ export function apply(ctx: ClientContext): void {
       commit: (message, expectedSeq) => ctx.tasks.commitReview(message, expectedSeq),
       apply: (commit, expectedSeq) => ctx.tasks.applyReview(commit, expectedSeq),
       discard: (confirmedUncommittedLoss, expectedSeq) => ctx.tasks.discardReview(confirmedUncommittedLoss, expectedSeq),
+      retryDeliveryCheckpoint: operationId => ctx.tasks.retryDeliveryCheckpoint(operationId),
       hooks: { taskReview: ctx.tasks.reviewState },
     }),
   }, TaskReview))

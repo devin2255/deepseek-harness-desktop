@@ -23,6 +23,7 @@ import type {
   TaskApplyReceipt,
   TaskCommitReceipt,
   TaskDiscardReceipt,
+  TaskDeliveryAuthorization,
   TaskFileDiff,
   TaskIntegrationResult,
   TaskReviewErrorCode,
@@ -47,6 +48,10 @@ import { integrateTaskReview } from './integration.ts'
 
 export * from './config.ts'
 export { parseNameStatus, parseNumstat } from './git.ts'
+
+function resolveOperationId(authorization: TaskDeliveryAuthorization | undefined): TaskReviewOperationId {
+  return authorization === undefined ? TaskReviewOperationId(randomUUID()) : authorization.operationId
+}
 
 /** User configuration accepted by the local Task review Provider. */
 export interface Config {
@@ -513,6 +518,7 @@ export class LocalTaskReview extends TaskReviewService {
   }
 
   async commit(request: CommitTaskReviewRequest, signal?: AbortSignal): Promise<TaskCommitReceipt> {
+    const operationId = resolveOperationId(request.authorization)
     return this.serialize(request.assignment, signal, async () => {
       if (request.message.trim().length === 0 || request.message.includes('\0')) {
         throw failure('The commit message must contain non-NUL text.', 'REVIEW_INVALID_MESSAGE')
@@ -536,6 +542,8 @@ export class LocalTaskReview extends TaskReviewService {
       if (identity.exitCode !== 0) {
         throw failure('Git author identity is not configured for this Task worktree.', 'REVIEW_IDENTITY_MISSING')
       }
+      await request.authorization?.authorize()
+      signal?.throwIfAborted()
       await this.command(executable, request.assignment.path, ['add', '-A', '--'], signal)
       const staged = await this.state(request.assignment, signal)
       if (staged.summary.revision !== request.expectedRevision) {
@@ -559,7 +567,7 @@ export class LocalTaskReview extends TaskReviewService {
       }
       return Object.freeze({
         kind: 'commit' as const,
-        operationId: TaskReviewOperationId(randomUUID()),
+        operationId,
         taskId: request.assignment.taskId,
         workspaceId: request.assignment.workspaceId,
         reviewRevision: request.expectedRevision,
@@ -572,6 +580,7 @@ export class LocalTaskReview extends TaskReviewService {
   }
 
   async apply(request: ApplyTaskReviewRequest, signal?: AbortSignal): Promise<TaskApplyReceipt> {
+    const operationId = resolveOperationId(request.authorization)
     return this.serialize(request.assignment, signal, async () => {
       if (!COMMIT.test(request.commit) || !COMMIT.test(request.expectedSourceHead)) {
         throw failure('Apply requires exact Git commit identities.', 'REVIEW_GIT_FAILED')
@@ -666,6 +675,8 @@ export class LocalTaskReview extends TaskReviewService {
       if (confirmedStatus.stdout.length > 0) {
         throw failure('The source checkout changed during Apply preflight.', 'REVIEW_SOURCE_DIRTY')
       }
+      await request.authorization?.authorize()
+      signal?.throwIfAborted()
       await this.command(
         executable,
         request.assignment.sourcePath,
@@ -679,7 +690,7 @@ export class LocalTaskReview extends TaskReviewService {
       ).stdout.trim()
       return Object.freeze({
         kind: 'apply' as const,
-        operationId: TaskReviewOperationId(randomUUID()),
+        operationId,
         taskId: request.assignment.taskId,
         workspaceId: request.assignment.workspaceId,
         reviewRevision: request.expectedRevision,
@@ -703,6 +714,7 @@ export class LocalTaskReview extends TaskReviewService {
   }
 
   async discard(request: DiscardTaskReviewRequest, signal?: AbortSignal): Promise<TaskDiscardReceipt> {
+    const operationId = resolveOperationId(request.authorization)
     return this.serialize(request.assignment, signal, async () => {
       const reviewed = await this.state(request.assignment, signal)
       if (reviewed.summary.revision !== request.expectedRevision) {
@@ -728,6 +740,8 @@ export class LocalTaskReview extends TaskReviewService {
       const recoverableCommit = reviewed.summary.headCommit === request.assignment.baseCommit
         ? undefined
         : reviewed.summary.headCommit
+      await request.authorization?.authorize()
+      signal?.throwIfAborted()
       await this.command(
         executable,
         request.assignment.sourcePath,
@@ -760,7 +774,7 @@ export class LocalTaskReview extends TaskReviewService {
       }
       return Object.freeze({
         kind: 'discard' as const,
-        operationId: TaskReviewOperationId(randomUUID()),
+        operationId,
         taskId: request.assignment.taskId,
         workspaceId: request.assignment.workspaceId,
         reviewRevision: request.expectedRevision,

@@ -10,6 +10,7 @@ import type {
 } from '@deepseek-ai/dsh-task/types'
 import type {
   TaskFileDiff,
+  TaskReviewOperationId,
   TaskReviewSummary,
 } from '@deepseek-ai/dsh-task-review/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -19,6 +20,11 @@ import type { RpcRequest, RpcResponse } from './rpc.ts'
 export interface TasksApi {
   /** Read the complete ordered baseline for the current task generation. */
   list(request: RpcRequest<Record<string, never>>): Promise<RpcResponse<TaskListSnapshot>>
+  /** Save one existing live delivery receipt again without repeating Git or requiring an available worktree. */
+  retryDeliveryCheckpoint(request: RpcRequest<{
+    sessionId: SessionId
+    operationId: TaskReviewOperationId
+  }>): Promise<RpcResponse<TaskSnapshot>>
   /** Define or replace one root task. */
   define(request: RpcRequest<{
     sessionId: SessionId
@@ -97,5 +103,6 @@ export type {
   TaskDiscardReceipt,
   TaskFileDiff,
   TaskReviewFile,
+  TaskReviewOperationId,
   TaskReviewSummary,
 } from '@deepseek-ai/dsh-task-review/types'

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-08-root-delivery-execution-exclusion.md
-2026-10-08-root-delivery-execution-exclusion.md: 84194b74b85c7b34d2d2b983b9210e828a262b18
-2026-10-08-root-delivery-execution-exclusion.zh.md: ebed95bb6a3bc12ff1bd650af4a0d1def1d8556d
+2026-10-08-root-delivery-execution-exclusion.md: 4f33e8e5324f14c27ce17ddfa52799f615422917
+2026-10-08-root-delivery-execution-exclusion.zh.md: cdd859305923a0379aac7d231a3a6ca8a9487bee

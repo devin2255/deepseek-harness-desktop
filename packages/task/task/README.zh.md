@@ -6,6 +6,10 @@
 
 可选的 `TaskSnapshot.integrations` 包含根级工具调用的有序尝试，不新增 Task 事件。结果区分运行中、未确认、失败、已集成和冲突；`resolvedBy` 标识覆盖全部所选写入者的后续批次，不改写历史冲突。[Session Provider](../task-session/README.md#projection-rules) 负责重建和冲突注意事项。
 
+人工交付先持久化 `task/delivery-started`。`TaskDeliveryIntent` 记录操作 id、审查 revision、类型及确切变更输入。完成要求匹配的 Provider 回执，而非最初的 Session 序列。待完成交付阻止 Task 元数据更改，并产生 `delivery-unconfirmed` 注意事项；无关 Session 事件仍被允许。只有回执的预发布日志会被拒绝。参见[交付日志决策](../../../.agents/notes/implemented/architecture/2026-10-08-root-delivery-journal.md)。
+
+`retryDeliveryCheckpoint` 保存已追加的实时回执，不执行 Git，也不追加另一条事件。只有原 Session 仍持有该回执时，`TaskSnapshot.retryableDeliveryCheckpoint` 才提供其确切操作 id。回执缺失、Session 被替换或分离时会拒绝；保存失败保留待核实状态。
+
 ## 模型体验
 
 无直接影响，因为任务事件仅作为日志事实存在，不进入模型请求或模型可见的 Session 表面。
@@ -17,5 +21,5 @@
 ## 已知限制与待完成工作
 
 - Host 创建 Worktree 并通过此服务记录分配；此包不执行 Git 操作。
-- Host 先执行 Git 交付操作，再通过此服务记录其成功收据。
+- Git 与 Session 持久化不具备原子性；未确认交付需要检查 Git，尚无人工结算操作。
 - 此包校验证据引用的结构；Provider 负责验证每个被引用事件都属于同一根任务树。

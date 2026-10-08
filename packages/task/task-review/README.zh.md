@@ -10,6 +10,8 @@ Task 所有的 worktree 变更审查与交付服务定义。Provider 提供有�
 
 集成选择确切且已提交的子级审查版本和一个根审查版本。冲突返回贡献者身份和冲突路径，不改变分支或工作树。成功只推进根执行分支，并保留贡献者分支；绝不向用户原始检出应用更改。[写入者工具](../../subagent/tool-subagent-control/README.md#isolated-writer-results) 将集成回执保留在普通持久化工具结果中，与根交付回执相互独立。
 
+Commit、Apply 和 Discard 接受可选的进程内 `TaskDeliveryAuthorization`。其回调在预检后、首次变更前持久化调用方拥有的授权；拒绝会阻止该变更。返回回执使用其操作 id。人工 Host 与 SDK 交付提供此授权；未提供的普通工具消费方保留 Provider 生成的 id 和工具结果日志。回调不是协议值。
+
 ## 模型体验
 
 ### 审查能力

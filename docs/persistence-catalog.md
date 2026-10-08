@@ -753,7 +753,7 @@ Source: [`packages/subagent/subagent-spawn-in-process/src/worktree.ts:23`](../pa
 'task/criterion-updated': { readonly criterion: TaskCriterion }
 ```
 
-Source: [`packages/task/task/src/index.ts:32`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:33`](../packages/task/task/src/index.ts)
 
 <a id="taskdefined--log-only"></a>
 
@@ -767,7 +767,21 @@ Source: [`packages/task/task/src/index.ts:32`](../packages/task/task/src/index.t
 'task/defined': { readonly definition: TaskDefinition }
 ```
 
-Source: [`packages/task/task/src/index.ts:27`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:28`](../packages/task/task/src/index.ts)
+
+<a id="taskdelivery-started--log-only"></a>
+
+#### `task/delivery-started` — log-only
+
+```ts persistence-catalog
+/**
+ * Records exact delivery authorization before the first Git mutation.
+ * @param data - operation identity and authorized request; a matching receipt closes it.
+ */
+'task/delivery-started': { readonly intent: TaskDeliveryIntent }
+```
+
+Source: [`packages/task/task/src/index.ts:48`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-applied--log-only"></a>
 
@@ -781,7 +795,7 @@ Source: [`packages/task/task/src/index.ts:27`](../packages/task/task/src/index.t
 'task/review-applied': { readonly receipt: TaskApplyReceipt }
 ```
 
-Source: [`packages/task/task/src/index.ts:52`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:58`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-committed--log-only"></a>
 
@@ -795,7 +809,7 @@ Source: [`packages/task/task/src/index.ts:52`](../packages/task/task/src/index.t
 'task/review-committed': { readonly receipt: TaskCommitReceipt }
 ```
 
-Source: [`packages/task/task/src/index.ts:47`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:53`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-decided--log-only"></a>
 
@@ -809,7 +823,7 @@ Source: [`packages/task/task/src/index.ts:47`](../packages/task/task/src/index.t
 'task/review-decided': { readonly decision: TaskReviewDecision }
 ```
 
-Source: [`packages/task/task/src/index.ts:42`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:43`](../packages/task/task/src/index.ts)
 
 <a id="taskreview-discarded--log-only"></a>
 
@@ -823,7 +837,7 @@ Source: [`packages/task/task/src/index.ts:42`](../packages/task/task/src/index.t
 'task/review-discarded': { readonly receipt: TaskDiscardReceipt }
 ```
 
-Source: [`packages/task/task/src/index.ts:57`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:63`](../packages/task/task/src/index.ts)
 
 <a id="taskrisk-recorded--log-only"></a>
 
@@ -837,7 +851,7 @@ Source: [`packages/task/task/src/index.ts:57`](../packages/task/task/src/index.t
 'task/risk-recorded': { readonly risk: TaskRisk }
 ```
 
-Source: [`packages/task/task/src/index.ts:37`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:38`](../packages/task/task/src/index.ts)
 
 <a id="taskworktree-assigned--log-only"></a>
 
@@ -851,7 +865,7 @@ Source: [`packages/task/task/src/index.ts:37`](../packages/task/task/src/index.t
 'task/worktree-assigned': { readonly assignment: TaskWorktreeAssignment }
 ```
 
-Source: [`packages/task/task/src/index.ts:22`](../packages/task/task/src/index.ts)
+Source: [`packages/task/task/src/index.ts:23`](../packages/task/task/src/index.ts)
 
 ### `todo/*`
 

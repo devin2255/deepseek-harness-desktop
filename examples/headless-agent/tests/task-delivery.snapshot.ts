@@ -16,8 +16,10 @@ it('excludes root execution through real commit, apply, and discard before relea
     binScript, libBinScript: binScript, configPath, binArgs: [configPath], tsconfigPath, processTimeoutMs })
   expect(result.stderr).toBe('')
   expect(result.stdout.trimEnd().split('\n').map(line => JSON.parse(line) as object)).toEqual(
-    ['cold', 'resident'].map(stage => ({ stage, blocked: ['commit', 'apply', 'discard'], receipts: ['commit', 'apply', 'discard'],
+    [...['cold', 'resident'].map(stage => ({ stage, blocked: ['commit', 'apply', 'discard'], durable: ['commit', 'apply', 'discard'],
+      metadataBlocked: ['commit', 'apply', 'discard'], interleavedInput: stage === 'resident', receipts: ['commit', 'apply', 'discard'],
       branchRetained: true, sourceHeadPreserved: true, sourceContentApplied: true, reservationReleased: true })),
+    { stage: 'unconfirmed', intentRetained: true, executionBlocked: true, receiptAbsent: true, retryRejected: true, gitCommitExists: true }],
   )
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expectedPath, result.stdout)
   expect(result.stdout).toBe(await readFile(expectedPath, 'utf8'))

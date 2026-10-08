@@ -3,7 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   DefineTaskCriterion, IApiClient, RpcResult, SessionId, TaskCriterion,
-  TaskReviewDecision, TaskRisk, TaskSnapshot,
+  TaskReviewDecision, TaskRisk, TaskSnapshot, TaskReviewOperationId,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '../contract/store.ts'
 import { createSnapshotStore } from '../contract/store.ts'
@@ -86,6 +86,10 @@ export class TaskRuntime implements ITasks {
    */
   discardReview(confirmedUncommittedLoss: boolean, expectedSeq: number): Promise<RpcResult<TaskSnapshot>> {
     return this.reviewManager.discard(confirmedUncommittedLoss, expectedSeq)
+  }
+  /** Retry receipt persistence only. @param operationId - exact advertised checkpoint. @returns command result. */
+  retryDeliveryCheckpoint(operationId: TaskReviewOperationId): Promise<RpcResult<TaskSnapshot>> {
+    return this.reviewManager.retryDeliveryCheckpoint(operationId)
   }
   /**
    * Route one Host frame into the Task mirror.

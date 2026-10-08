@@ -14,7 +14,7 @@ import {
 import type {
   AssignTaskWorktreeRequest, DefineTaskRequest, LiveTaskFact, RecordTaskApplyRequest, RecordTaskCommitRequest,
   RecordTaskDiscardRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListChange,
-  TaskListSnapshot, TaskSnapshot, UpdateTaskCriterionRequest,
+  StartTaskDeliveryRequest, TaskListSnapshot, TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
 import TaskReviewService, {
@@ -40,7 +40,7 @@ import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import {
   taskApplyRequestSchema, taskCommitRequestSchema, taskDefineRequestSchema, taskDiscardRequestSchema,
   taskListChangeSchema, taskReviewDiffRequestSchema, taskReviewSummaryRequestSchema, taskSnapshotSchema,
-  taskUpdateCriterionRequestSchema,
+  taskUpdateCriterionRequestSchema, taskRetryDeliveryCheckpointRequestSchema,
 } from '../src/api/tasks.schema.ts'
 
 const rootId = SessionId('root')
@@ -181,6 +181,14 @@ class FakeTasks extends TaskService {
     return this.result('review', sessionId, request)
   }
 
+  startDelivery(sessionId: SessionId, request: StartTaskDeliveryRequest): Promise<TaskSnapshot> {
+    return this.result('startDelivery', sessionId, request)
+  }
+
+  retryDeliveryCheckpoint(sessionId: SessionId, operationId: TaskReviewOperationId): Promise<TaskSnapshot> {
+    return this.result('retryDeliveryCheckpoint', sessionId, operationId)
+  }
+
   recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot> {
     return this.result('recordCommit', sessionId, request)
   }
@@ -237,6 +245,56 @@ function deliver(api: ReturnType<typeof createApiProxy>, method: DeliveryMethod,
 }
 
 describe('root delivery execution ownership', () => {
+  it.each(['commit', 'apply', 'discard'] as const)('records %s authorization before accepting its correlated result', async (method) => {
+    const { api, ctx, tasks, review } = await harness()
+    tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+    const start = vi.spyOn(tasks, 'startDelivery')
+    const record = vi.spyOn(tasks, method === 'commit' ? 'recordCommit' : method === 'apply' ? 'recordApply' : 'recordDiscard')
+    const authorize = async <T>(request: CommitTaskReviewRequest | ApplyTaskReviewRequest | DiscardTaskReviewRequest, receipt: T) => {
+      await request.authorization!.authorize()
+      expect(start).toHaveBeenCalledOnce()
+      return { ...receipt, operationId: request.authorization!.operationId }
+    }
+    if (method === 'commit') vi.spyOn(review, 'commit').mockImplementation(request => authorize(request, commitReceipt))
+    if (method === 'apply') vi.spyOn(review, 'apply').mockImplementation(request => authorize(request, applyReceipt))
+    if (method === 'discard') vi.spyOn(review, 'discard').mockImplementation(request => authorize(request, discardReceipt))
+    try {
+      await expect(deliver(api, method, new AbortController().signal)).resolves.toMatchObject({ result: { ok: true } })
+      expect(start.mock.calls[0]?.[1]).toMatchObject({ expectedSeq: reviewRow.asOfSeq, intent: {
+        kind: method, operationId: record.mock.calls[0]?.[1].receipt.operationId,
+      } })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['commit', 'apply', 'discard'] as const)('reports unconfirmed %s after Git, receipt, or cancellation failure', async (method) => {
+    for (const phase of ['git-result', 'receipt', 'cancelled'] as const) {
+      const { api, ctx, tasks, review } = await harness()
+      tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
+      const abort = new AbortController()
+      const authorize = async <T>(request: CommitTaskReviewRequest | ApplyTaskReviewRequest | DiscardTaskReviewRequest, receipt: T) => {
+        await request.authorization!.authorize()
+        if (phase === 'git-result') throw new TaskReviewError('Git response lost', 'REVIEW_STALE')
+        if (phase === 'cancelled') { abort.abort(); abort.signal.throwIfAborted() }
+        tasks.nextError = new TaskError('Receipt checkpoint failed', 'TASK_UNAVAILABLE')
+        return { ...receipt, operationId: request.authorization!.operationId }
+      }
+      if (method === 'commit') vi.spyOn(review, 'commit').mockImplementation(request => authorize(request, commitReceipt))
+      if (method === 'apply') vi.spyOn(review, 'apply').mockImplementation(request => authorize(request, applyReceipt))
+      if (method === 'discard') vi.spyOn(review, 'discard').mockImplementation(request => authorize(request, discardReceipt))
+      try {
+        await expect(deliver(api, method, abort.signal)).resolves.toMatchObject({
+          result: { ok: false, error: { code: 'task-delivery-pending', details: { sessionId: rootId } } },
+        })
+        const session = ctx.sessions.create(rootId)
+        ctx.agents.enter({ id: rootId, session, status: 'idle', ctx } as Agent, undefined)()
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    }
+  })
+
   it.each(['commit', 'apply', 'discard'] as const)('keeps a cold root offline through %s and receipt settlement', async (method) => {
     const { api, ctx, tasks, review } = await harness()
     tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
@@ -592,6 +650,9 @@ describe('Task RPC', () => {
     expect(tasks.last?.[0]).toBe('recordRisk')
     await api.tasks.review(request({ sessionId: rootId, decision: 'ready', expectedSeq: 5 }))
     expect(tasks.last).toEqual(['review', rootId, { decision: 'ready', expectedSeq: 5 }])
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000001')
+    await api.tasks.retryDeliveryCheckpoint(request({ sessionId: rootId, operationId }))
+    expect(tasks.last).toEqual(['retryDeliveryCheckpoint', rootId, operationId])
   })
 
   it('inspects and delivers the exact assigned Task review before recording receipts', async () => {
@@ -612,32 +673,32 @@ describe('Task RPC', () => {
     await api.tasks.commit(request({
       sessionId: rootId, expectedRevision: reviewRevision, message: 'feat: ship', expectedSeq: 2,
     }), signal)
-    expect(review.last).toEqual([
+    expect(review.last).toMatchObject([
       'commit', { assignment: executionWorkspace, expectedRevision: reviewRevision, message: 'feat: ship' }, signal,
     ])
-    expect(tasks.last).toEqual(['recordCommit', rootId, { receipt: commitReceipt, expectedSeq: 2 }])
+    expect(tasks.last).toEqual(['recordCommit', rootId, { receipt: commitReceipt }])
 
     tasks.currentRow = { ...reviewRow, status: 'settled', commitReceipt, asOfSeq: 3 }
     await api.tasks.apply(request({
       sessionId: rootId, expectedRevision: committedRevision, expectedSourceHead: '2'.repeat(40),
       commit: commitReceipt.commit, expectedSeq: 3,
     }), signal)
-    expect(review.last).toEqual(['apply', {
+    expect(review.last).toMatchObject(['apply', {
       assignment: executionWorkspace,
       expectedRevision: committedRevision,
       expectedSourceHead: '2'.repeat(40),
       commit: commitReceipt.commit,
     }, signal])
-    expect(tasks.last).toEqual(['recordApply', rootId, { receipt: applyReceipt, expectedSeq: 3 }])
+    expect(tasks.last).toEqual(['recordApply', rootId, { receipt: applyReceipt }])
 
     tasks.currentRow = { ...tasks.currentRow, applyReceipt, asOfSeq: 4 }
     await api.tasks.discard(request({
       sessionId: rootId, expectedRevision: committedRevision, confirmedUncommittedLoss: false, expectedSeq: 4,
     }), signal)
-    expect(review.last).toEqual(['discard', {
+    expect(review.last).toMatchObject(['discard', {
       assignment: executionWorkspace, expectedRevision: committedRevision, confirmedUncommittedLoss: false,
     }, signal])
-    expect(tasks.last).toEqual(['recordDiscard', rootId, { receipt: discardReceipt, expectedSeq: 4 }])
+    expect(tasks.last).toEqual(['recordDiscard', rootId, { receipt: discardReceipt }])
   })
 
   it('rejects direct-workspace and stale lifecycle requests before Git side effects', async () => {
@@ -707,6 +768,9 @@ describe('Task RPC', () => {
     await ctx.plugin(AgentRegistry)
     const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
     await expect(api.tasks.list(request({}))).resolves.toMatchObject({ result: { ok: false, error: { code: 'task-unavailable' } } })
+    await expect(api.tasks.retryDeliveryCheckpoint(request({ sessionId: rootId,
+      operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000001') })))
+      .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-unavailable' } } })
     await expect(api.tasks.define(request({ sessionId: rootId, goal: 'Ship', criteria: [], expectedSeq: 0 }))).resolves.toMatchObject({ result: { ok: false, error: { code: 'task-unavailable' } } })
     await expect(api.tasks.updateCriterion(request({ sessionId: rootId, criterion: { id: TaskCriterionId('c1'), text: 'Passes', status: 'pending', evidence: [] }, expectedSeq: 0 }))).resolves.toMatchObject({ result: { ok: false, error: { code: 'task-unavailable' } } })
     await expect(api.tasks.recordRisk(request({ sessionId: rootId, risk: { id: TaskRiskId('r1'), severity: 'low', summary: 'Risk' }, expectedSeq: 0 }))).resolves.toMatchObject({ result: { ok: false, error: { code: 'task-unavailable' } } })
@@ -724,6 +788,14 @@ describe('Task RPC', () => {
       rpcId: RpcId('task-test'),
       result: { ok: false, error: { code: 'internal', message: 'Error: provider crashed', details: {} } },
     })
+  })
+
+  it('maps checkpoint failures without requiring TaskReview or an existing worktree', async () => {
+    const { api, tasks } = await harness()
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000001')
+    tasks.nextError = new TaskError('Receipt unavailable', 'TASK_DELIVERY_PENDING')
+    await expect(api.tasks.retryDeliveryCheckpoint(request({ sessionId: rootId, operationId })))
+      .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-delivery-pending' } } })
   })
 
   it('forwards changes on the host stream and disposes the provider subscription', async () => {
@@ -744,6 +816,26 @@ describe('Task RPC', () => {
 })
 
 describe('Task wire schemas', () => {
+  it('requires a retryable checkpoint to match root-owned unconfirmed attention', () => {
+    const operationId = '00000000-0000-4000-8000-000000000001'
+    const item = { id: 'pending', taskId: rootId, ownerSessionId: rootId, kind: 'delivery-unconfirmed',
+      severity: 'error', summary: 'Save receipt', createdAt: 1, sourceId: operationId, actionable: true }
+    const value = { ...row, retryableDeliveryCheckpoint: operationId, attention: [item] }
+    expect(taskSnapshotSchema.safeParse(value).success).toBe(true)
+    for (const invalid of [
+      { ...value, retryableDeliveryCheckpoint: 'invalid' },
+      { ...value, attention: [] },
+      { ...value, attention: [{ ...item, kind: 'review-request' }] },
+      { ...value, attention: [{ ...item, ownerSessionId: 'child' }] },
+      { ...value, attention: [{ ...item, sourceId: 'different' }] },
+    ]) expect(taskSnapshotSchema.safeParse(invalid).success).toBe(false)
+    expect(taskRetryDeliveryCheckpointRequestSchema.safeParse({ sessionId: rootId, operationId }).success).toBe(true)
+    for (const invalid of [
+      { sessionId: rootId, operationId: 'invalid' }, { sessionId: rootId, operationId, extra: true },
+      { sessionId: ' ', operationId },
+    ]) expect(taskRetryDeliveryCheckpointRequestSchema.safeParse(invalid).success).toBe(false)
+  })
+
   it('accepts the SDK history fixture and rejects the same malformed relationships and fields', () => {
     const fixture = new URL('../../../../scripts/snapshots/task-integration-sdk/task.json', import.meta.url)
     const value = JSON.parse(readFileSync(fixture, 'utf8')) as Record<string, unknown>

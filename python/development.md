@@ -36,6 +36,8 @@ uv run --project python/sdk python scripts/smoke-python-runtime.py \
 
 Two scenarios compare committed expected output under `scripts/snapshots/python-sdk-single-exe/`. `minimal/model-visible.json` pins the checked-in minimal composition's assembled system prompts, advertised tool schemas, and model-visible messages, so a plugin that contributes an unintended system section or user message fails the job; it drops the dynamic runtime-context snapshot, which the same composition emits on macOS and not on Linux ([#2488](https://github.com/deepseek-harness/deepseek-harness/issues/2488)). `advanced/` pins the SDK result and the persisted session logs. Rerun the owning scenario with `--update-snapshots` and review that diff before committing it.
 
+The same required job also runs `uv run --project python/sdk python scripts/smoke-python-task-delivery.py` after building the workspace. This companion uses system Node and the real Loader, SDK server, Task services, and Git rather than the single executable. Its `task-delivery/result.json` expected output pins authorization notifications, correlated receipts, source and worktree effects, and retained uncertainty after a lost commit response and cold restart. Use `--update-snapshots` only for an intentional expected-output change.
+
 An interactive smoke test needs `DEEPSEEK_API_KEY` in the environment or repository-root `.env`:
 
 ```python

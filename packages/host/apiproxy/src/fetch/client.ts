@@ -56,6 +56,7 @@ import {
 } from '../api/goals.schema.ts'
 import {
   taskApplyValueSchema, taskCommitValueSchema, taskDefineValueSchema, taskDiscardValueSchema,
+  taskRetryDeliveryCheckpointValueSchema,
   taskListValueSchema, taskRecordRiskValueSchema, taskReviewDiffValueSchema,
   taskReviewSummaryValueSchema, taskReviewValueSchema, taskUpdateCriterionValueSchema,
 } from '../api/tasks.schema.ts'
@@ -163,6 +164,7 @@ export interface IApiClient {
     commit(payload: RequestPayload<'task.commit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.commit'>>>
     apply(payload: RequestPayload<'task.apply'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.apply'>>>
     discard(payload: RequestPayload<'task.discard'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.discard'>>>
+    retryDeliveryCheckpoint(payload: RequestPayload<'task.retryDeliveryCheckpoint'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.retryDeliveryCheckpoint'>>>
   }
   settings: {
     describe(payload: RequestPayload<'settings.describe'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'settings.describe'>>>
@@ -243,6 +245,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'task.commit': taskCommitValueSchema,
   'task.apply': taskApplyValueSchema,
   'task.discard': taskDiscardValueSchema,
+  'task.retryDeliveryCheckpoint': taskRetryDeliveryCheckpointValueSchema,
   'settings.describe': settingsDescribeValueSchema,
   'settings.openDocument': settingsOpenDocumentValueSchema,
   'settings.update': settingsUpdateValueSchema,
@@ -525,6 +528,7 @@ export abstract class AbstractApiClient implements IApiClient {
     commit: (payload, signal) => this.callUnary('task.commit', payload, signal),
     apply: (payload, signal) => this.callUnary('task.apply', payload, signal),
     discard: (payload, signal) => this.callUnary('task.discard', payload, signal),
+    retryDeliveryCheckpoint: (payload, signal) => this.callUnary('task.retryDeliveryCheckpoint', payload, signal),
   }
 
   readonly settings: IApiClient['settings'] = {

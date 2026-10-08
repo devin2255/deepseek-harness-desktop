@@ -212,18 +212,28 @@ describe('aggregateTasks', () => {
     } })
     const ready = event('task/review-decided', 2, 4, { decision: 'ready' })
     const assigned = event('task/worktree-assigned', 0, 1, { assignment })
+    const commitStarted = event('task/delivery-started', 4, 5, { intent: {
+      kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision, message: 'Ship',
+    } })
+    const applyStarted = event('task/delivery-started', 6, 6, { intent: {
+      kind: 'apply', operationId: applyReceipt.operationId, reviewRevision: applyReceipt.reviewRevision,
+      commit: applyReceipt.commit, sourceHead: applyReceipt.sourceHeadBefore,
+    } })
+    const discardStarted = event('task/delivery-started', 8, 7, { intent: {
+      kind: 'discard', operationId: discardReceipt.operationId, reviewRevision: discardReceipt.reviewRevision, confirmedUncommittedLoss: false,
+    } })
     const committed = event('task/review-committed', 4, 6, { receipt: commitReceipt })
     const applied = event('task/review-applied', 5, 7, { receipt: applyReceipt })
     const discarded = event('task/review-discarded', 6, 8, { receipt: discardReceipt })
     for (const events of [
-      [assigned, defined, satisfied, ready, committed],
-      [assigned, defined, satisfied, ready, committed, applied],
-      [assigned, defined, satisfied, ready, committed, applied, discarded],
+      [assigned, defined, satisfied, ready, commitStarted, committed],
+      [assigned, defined, satisfied, ready, commitStarted, committed, applyStarted, applied],
+      [assigned, defined, satisfied, ready, commitStarted, committed, applyStarted, applied, discardStarted, discarded],
     ]) {
       expect(aggregateTasks({ generation: 1, sessions: [input('root', {}, events)] }).tasks[0]?.status).toBe('settled')
     }
     expect(aggregateTasks({ generation: 1, sessions: [input('root', {}, [
-      assigned, defined, satisfied, ready, committed, applied, discarded,
+      assigned, defined, satisfied, ready, commitStarted, committed, applyStarted, applied, discardStarted, discarded,
     ])] }).tasks[0]).toMatchObject({ commitReceipt, applyReceipt, discardReceipt })
   })
 

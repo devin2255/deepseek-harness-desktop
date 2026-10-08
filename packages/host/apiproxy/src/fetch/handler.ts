@@ -59,6 +59,7 @@ import {
 } from '../api/goals.schema.ts'
 import {
   taskApplyRequestSchema, taskCommitRequestSchema, taskDefineRequestSchema, taskDiscardRequestSchema,
+  taskRetryDeliveryCheckpointRequestSchema,
   taskListRequestSchema, taskRecordRiskRequestSchema, taskReviewDiffRequestSchema,
   taskReviewRequestSchema, taskReviewSummaryRequestSchema, taskUpdateCriterionRequestSchema,
 } from '../api/tasks.schema.ts'
@@ -147,6 +148,7 @@ const UNARY_ROUTES: UnaryRoutes = {
   'task.commit': { schema: taskCommitRequestSchema, invoke: (api, r, signal) => api.tasks.commit(r, signal) },
   'task.apply': { schema: taskApplyRequestSchema, invoke: (api, r, signal) => api.tasks.apply(r, signal) },
   'task.discard': { schema: taskDiscardRequestSchema, invoke: (api, r, signal) => api.tasks.discard(r, signal) },
+  'task.retryDeliveryCheckpoint': { schema: taskRetryDeliveryCheckpointRequestSchema, invoke: (api, r) => api.tasks.retryDeliveryCheckpoint(r) },
   'settings.describe': { schema: settingsDescribeRequestSchema, invoke: (api, r) => api.settings.describe(r) },
   'settings.openDocument': { schema: settingsOpenDocumentRequestSchema, invoke: (api, r, signal) => api.settings.openDocument(r, signal) },
   'settings.update': { schema: settingsUpdateRequestSchema, invoke: (api, r) => api.settings.update(r) },

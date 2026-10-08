@@ -2982,6 +2982,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       ),
     },
     tasks: {
+      retryDeliveryCheckpoint: request => err(request, {
+        code: 'task-delivery-pending', message: 'fixture has no live receipt checkpoint',
+        details: { sessionId: request.payload.sessionId },
+      }),
       list: request => ok(request, {
         generation: taskWorktreeAssignments.size,
         tasks: options.taskReviewRoster === true ? reviewTasks() : options.taskOverviewRoster === true ? [
@@ -3390,6 +3394,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'task.commit': return this.api.tasks.commit(request, signal)
       case 'task.apply': return this.api.tasks.apply(request, signal)
       case 'task.discard': return this.api.tasks.discard(request, signal)
+      case 'task.retryDeliveryCheckpoint': return this.api.tasks.retryDeliveryCheckpoint(request)
       case 'settings.describe': return this.api.settings.describe(request)
       case 'settings.openDocument': return this.api.settings.openDocument(request, signal)
       case 'settings.update': return this.api.settings.update(request)

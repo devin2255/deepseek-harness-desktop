@@ -114,6 +114,24 @@ describe('TaskReviewManager reads', () => {
 })
 
 describe('TaskReviewManager actions', () => {
+  it('saves a receipt even when discard made the review unreadable, without invoking Git delivery', async () => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(err({
+      code: 'task-review-rejected', message: 'Worktree was removed', details: { sessionId: taskId, reviewCode: 'REVIEW_WORKTREE_UNAVAILABLE' },
+    }))
+    api.onTaskMutation = () => Promise.resolve(ok(task({ status: 'settled' })))
+    const manager = new TaskReviewManager(api, async () => {})
+    await manager.open(taskId)
+    const operationId = '00000000-0000-4000-8000-000000000001' as NonNullable<TaskSnapshot['retryableDeliveryCheckpoint']>
+    await expect(manager.retryDeliveryCheckpoint(operationId)).resolves.toMatchObject({ ok: true })
+    expect(api.callsOf('task.retryDeliveryCheckpoint')).toEqual([{ sessionId: taskId, operationId }])
+    expect(api.callsOf('task.commit')).toEqual([])
+    expect(api.callsOf('task.apply')).toEqual([])
+    expect(api.callsOf('task.discard')).toEqual([])
+    await manager.open(taskId, 'writer' as SessionId)
+    await expect(manager.retryDeliveryCheckpoint(operationId)).resolves.toMatchObject({ ok: false })
+    expect(api.callsOf('task.retryDeliveryCheckpoint')).toHaveLength(1)
+  })
   it('blocks source switches during delivery and fences a late receipt after disconnect and reselection', async () => {
     const api = new FakeApiClient()
     api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))

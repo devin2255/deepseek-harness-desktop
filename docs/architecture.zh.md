@@ -115,7 +115,7 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 
 ### Task 审查与交付
 
-`dsh-task-review` 定义有界审查读取，以及由 revision 授权的提交、应用、集成和丢弃操作。`dsh-task-review-local` 通过 `ctx.subprocess` 与 Git，针对持久 worktree 分配实现这些操作。`dsh-host-apiproxy` 校验根 Task 所有权与生命周期，调用提供方，并通过 Task 服务记录成功的交付回执。`dsh-client-ui-task-review` 从类型化客户端运行时状态渲染独立审查工作区；Electron 与浏览器均不获得 Git 权限。
+`dsh-task-review` 定义有界审查读取，以及由 revision 授权的提交、应用、集成和丢弃操作。`dsh-task-review-local` 通过 `ctx.subprocess` 与 Git，针对持久 worktree 分配实现这些操作。Host 与 SDK 根交付保留执行归属，在 Git 变更前通过 Task 服务持久化授权，并关联持久化完成回执。待核实交付保持可检查并阻止根执行，不自动重复 Git；[Task 子系统](subsystems/task.md)拥有这些语义。`dsh-client-ui-task-review` 从类型化客户端运行时状态渲染独立审查工作区；Electron 与浏览器均不获得 Git 权限。
 
 审查 revision 标识用户检查过的确切 Task 目录内容。提交在 Task 分支创建 commit，不移动源 checkout。应用按规范仓库串行执行，要求源目录在请求的 `HEAD` 上保持干净，通过临时索引预检完整二进制 patch，再次校验源状态后进行应用，同时保持源 `HEAD` 不变。丢弃只移除经验证的受管 worktree，并报告是否丢失未提交内容，以及已提交分支是否仍可恢复。`task/review-committed`、`task/review-applied` 和 `task/review-discarded` 使成功交付身份持久化并可严格回放。
 

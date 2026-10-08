@@ -24,7 +24,9 @@ Stdout 只承载 JSON-RPC 帧。部署不得组合 stdout logger；诊断应写�
 
 `initialize.serverInfo.name` 的协议稳定值为 `deepseek-harness-sdk-runtime`。可选的正整数 `initialize.maxTokens` 会成为每个 SDK 创建的 agent 及其进程内后代的请求输出上限；非法值会使初始化失败，省略时则不发送 SDK 上限，并应用所选适配器或提供方路由的默认值。`session/prompt` 将一条带标识的用户消息排入队列，并立即返回 `{ messageId }`。服务器将每个持久事实作为 `session.event` 流式发出，并将整个 agent 生命周期的每次状态转换作为 `session.status` 发出；它不会把某条助手消息或 `turn/end` 归属于该提示词。同一会话上的独立请求可以继续排入更多工作。持久化根目录和 persona 由 `cordis.yml` 提供。
 
-`task/list` 返回 Task Provider 的完整基线。四个 Task 定义与审查方法会转发其 `expectedSeq` 比较并设置值，并返回已提交的完整行。`task/reviewSummary` 与 `task/reviewDiff` 从已记录、归应用所有的 Worktree 读取有界值；`task/commit`、`task/apply` 与 `task/discard` 校验准确的 Task 生命周期和 revision，调用 Task Review Provider，再记录其持久回执。直接工作区 Task 绝不会被推断为 Git Worktree。领域拒绝会成为 JSON-RPC 错误，且不会恢复目标会话。
+`task/list` 返回 Task Provider 的完整基线。四个 Task 定义与审查方法会转发其 `expectedSeq` 比较并设置值，并返回已提交的完整行。`task/reviewSummary` 与 `task/reviewDiff` 从已记录、归应用所有的 Worktree 读取有界值。`task/commit`、`task/apply` 与 `task/discard` 在 Git 与回执记录完成前保留根任务维护或离线归属。最终预检后，Provider 等待使用请求 `expectedSeq` 的持久化 `task/delivery-started` 授权；完成时匹配操作 id 和确切授权输入，而非原始序号。授权后失败报告交付结果待核实，保留 `delivery-unconfirmed` 注意事项，不重复执行 Git。直接工作区 Task 绝不会被推断为 Git Worktree。领域拒绝会成为 JSON-RPC 错误，且不会恢复目标会话。参见[交付日志决策](../../../.agents/notes/implemented/architecture/2026-10-08-root-delivery-journal.md)。
+
+`task/retryDeliveryCheckpoint` 把根 Session id 和提供给调用方的操作 id 直接转发给 `ctx.tasks`。它保存现有实时回执，不要求 Review 服务，不恢复 Agent，也不执行 Git。回执缺失、分离或被替换时会拒绝；持久化再次失败会让 Task 保持待核实状态。
 
 ## 模型体验
 

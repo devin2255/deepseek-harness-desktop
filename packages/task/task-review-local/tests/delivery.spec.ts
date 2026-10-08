@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { TaskReviewError } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewError, TaskReviewOperationId, type TaskDeliveryAuthorization } from '@deepseek-ai/dsh-task-review'
 import { cleanupFixtures, git, mount, repository } from './fixture.ts'
 
 afterEach(() => {
@@ -9,6 +9,50 @@ afterEach(() => {
 })
 
 describe('local Task review delivery', () => {
+  it.each(['commit', 'apply', 'discard'] as const)('awaits %s authorization before mutation and preserves its operation identity', async (method) => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    try {
+      const { assignment, ctx } = test
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'authorized change\n')
+      let reviewed = await ctx.taskReview.summarize({ assignment })
+      let commit = ''
+      if (method === 'apply') {
+        commit = (await ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Prepare' })).commit
+        reviewed = await ctx.taskReview.summarize({ assignment })
+      }
+      const sourceBefore = git(fixture.source, ['status', '--porcelain=v1', '-z'])
+      const taskBefore = git(assignment.path, ['status', '--porcelain=v1', '-z'])
+      const invoke = (authorization: TaskDeliveryAuthorization) => method === 'commit'
+        ? ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Ship', authorization })
+        : method === 'apply' ? ctx.taskReview.apply({ assignment, expectedRevision: reviewed.revision,
+          expectedSourceHead: reviewed.sourceHead, commit, authorization })
+          : ctx.taskReview.discard({ assignment, expectedRevision: reviewed.revision, confirmedUncommittedLoss: true, authorization })
+      const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000004')
+      const denied = vi.fn(async () => { throw new Error('Durability checkpoint failed') })
+      await expect(invoke({ operationId, authorize: denied })).rejects.toThrow('Durability checkpoint failed')
+      expect(denied).toHaveBeenCalledOnce()
+      expect(git(fixture.source, ['status', '--porcelain=v1', '-z'])).toBe(sourceBefore)
+      expect(git(assignment.path, ['status', '--porcelain=v1', '-z'])).toBe(taskBefore)
+      const entered = Promise.withResolvers<undefined>()
+      const release = Promise.withResolvers<undefined>()
+      const pending = invoke({ operationId, authorize: async () => {
+        entered.resolve(undefined)
+        await release.promise
+      } })
+      await Promise.race([entered.promise, pending.then(() => { throw new Error('Mutation did not await authorization') })])
+      try {
+        expect(git(fixture.source, ['status', '--porcelain=v1', '-z'])).toBe(sourceBefore)
+        expect(git(assignment.path, ['status', '--porcelain=v1', '-z'])).toBe(taskBefore)
+      } finally {
+        release.resolve(undefined)
+      }
+      expect((await pending).operationId).toBe(operationId)
+    } finally {
+      await test.dispose()
+    }
+  })
+
   it('commits the exact reviewed state on the Task branch without changing the source', async () => {
     const fixture = repository()
     const test = await mount(fixture)

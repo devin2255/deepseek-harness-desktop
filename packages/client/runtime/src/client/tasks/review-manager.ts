@@ -1,13 +1,13 @@
 /** Connection-safe Task review state and delivery command owner. */
 
 import type {
-  IApiClient, RpcError, RpcResult, SessionId, TaskFileDiff, TaskReviewSummary, TaskSnapshot,
+  IApiClient, RpcError, RpcResult, SessionId, TaskFileDiff, TaskReviewOperationId, TaskReviewSummary, TaskSnapshot,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { transportError } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { Notifier } from '../sessions/notifier.ts'
 
 /** Review read and delivery operation currently visible to the user. */
-export type TaskReviewOperation = 'request-changes' | 'commit' | 'apply' | 'discard'
+export type TaskReviewOperation = 'request-changes' | 'commit' | 'apply' | 'discard' | 'save-receipt'
 
 /** Immutable state for the separate Task Review workspace. */
 export interface TaskReviewState {
@@ -185,6 +185,17 @@ export class TaskReviewManager {
     }), false)
   }
 
+  /**
+   * Save an existing receipt without requiring a readable worktree or repeating Git.
+   * @param operationId - exact retryable checkpoint from the Task projection.
+   * @returns the confirmed Task or a retained checkpoint failure.
+   */
+  retryDeliveryCheckpoint(operationId: TaskReviewOperationId): Promise<RpcResult<TaskSnapshot>> {
+    return this.runMutation('save-receipt', taskId => this.api.tasks.retryDeliveryCheckpoint({
+      sessionId: taskId, operationId,
+    }), false)
+  }
+
   /** Retain the visible review as stale and invalidate prior reads. */
   handleDisconnected(): void {
     this.requestGeneration += 1
@@ -244,29 +255,42 @@ export class TaskReviewManager {
     }
   }
 
-  private async mutate(
+  private mutate(
     operation: TaskReviewOperation,
     call: (taskId: SessionId, summary: TaskReviewSummary) => Promise<{ result: RpcResult<TaskSnapshot> }>,
     refreshReview: boolean,
   ): Promise<RpcResult<TaskSnapshot>> {
-    const taskId = this.taskId
     const summary = this.summary
-    if (taskId === undefined || summary === null || this.writerSessionId !== undefined
-      || this.freshness !== 'fresh' || this.state !== 'ready' || this.operation !== null) {
-      const unavailable: RpcResult<TaskSnapshot> = { ok: false, error: {
-        code: 'task-review-unavailable', message: 'Load a fresh root review and finish any active operation before delivery.', details: { sessionId: taskId ?? ('' as SessionId) },
-      } }
-      this.error = unavailable.error
-      this.notifier.markDirty()
-      return unavailable
+    if (summary === null || this.freshness !== 'fresh' || this.state !== 'ready') {
+      return Promise.resolve(this.unavailable())
     }
+    return this.runMutation(operation, taskId => call(taskId, summary), refreshReview)
+  }
+
+  private unavailable(): Extract<RpcResult<never>, { ok: false }> {
+    const result: Extract<RpcResult<never>, { ok: false }> = { ok: false, error: {
+      code: 'task-review-unavailable', message: 'Select a root Task and finish any active operation. Git delivery also requires a fresh review.',
+      details: { sessionId: this.taskId ?? ('' as SessionId) },
+    } }
+    this.error = result.error
+    this.notifier.markDirty()
+    return result
+  }
+
+  private async runMutation(
+    operation: TaskReviewOperation,
+    call: (taskId: SessionId) => Promise<{ result: RpcResult<TaskSnapshot> }>,
+    refreshReview: boolean,
+  ): Promise<RpcResult<TaskSnapshot>> {
+    const taskId = this.taskId
+    if (taskId === undefined || this.writerSessionId !== undefined || this.operation !== null) return this.unavailable()
     this.operation = operation
     const owner = this.requestGeneration
     this.error = null
     this.notifier.markDirty()
     let result: RpcResult<TaskSnapshot>
     try {
-      result = (await call(taskId, summary)).result
+      result = (await call(taskId)).result
     } catch (error: unknown) {
       result = errorResult(error)
     }

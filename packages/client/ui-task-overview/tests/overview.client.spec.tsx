@@ -59,17 +59,18 @@ function props(): TaskOverviewProps {
 }
 
 describe('TaskOverview', () => {
-  it('opens the root review for integration conflicts instead of navigating to a conversation', async () => {
+  it.each(['merge-conflict', 'delivery-unconfirmed'] as const)('opens root review for %s instead of a conversation', async (kind) => {
     const p = props()
     const state = p.useTasks!(value => value)!
     const task = state.byId['root' as SessionId]!
     p.useTasks = selector => selector({ ...state, byId: { ...state.byId, ['root' as SessionId]: { ...task,
-      integrations: [{ id: 'root:integration:1' as never, callSeq: 1, startedAt: 1, writerSessionIds: [], outcome: { kind: 'unconfirmed' } }],
-      attention: [{ ...task.attention[0]!, kind: 'merge-conflict', summary: 'src/shared.ts' }],
+      ...(kind === 'merge-conflict' ? { integrations: [{ id: 'root:integration:1' as never,
+        callSeq: 1, startedAt: 1, writerSessionIds: [], outcome: { kind: 'unconfirmed' as const } }] } : {}),
+      attention: [{ ...task.attention[0]!, kind, summary: 'src/shared.ts' }],
     } } })
     const view = render(<TaskOverview {...p} />)
-    expect(view.getByRole('button', { name: 'Review changes' })).toBeTruthy()
-    fireEvent.click(view.getByRole('button', { name: /Merge conflict: src\/shared.ts/ }))
+    if (kind === 'merge-conflict') expect(view.getByRole('button', { name: 'Review changes' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: new RegExp(`${en[`attention.${kind}`]}: src/shared.ts`) }))
     await waitFor(() => { expect(p.openReview).toHaveBeenCalledExactlyOnceWith('root') })
     expect(p.openTask).not.toHaveBeenCalled()
   })

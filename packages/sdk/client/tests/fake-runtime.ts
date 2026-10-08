@@ -264,6 +264,16 @@ reader.on('line', (line) => {
         if (env.FAKE_TASK_CASE === 'commit-receipt-invalid') task.commitReceipt = {}
         if (env.FAKE_TASK_CASE === 'apply-receipt-invalid') task.applyReceipt = {}
         if (env.FAKE_TASK_CASE === 'discard-receipt-invalid') task.discardReceipt = {}
+        if (env.FAKE_TASK_CASE?.startsWith('checkpoint-')) {
+          const operationId = '00000000-0000-4000-8000-000000000001'
+          task.retryableDeliveryCheckpoint = env.FAKE_TASK_CASE === 'checkpoint-invalid-id' ? 'invalid' : operationId
+          task.attention = env.FAKE_TASK_CASE === 'checkpoint-no-attention' ? [] : [{
+            id: 'pending', taskId: 'task-root', ownerSessionId: env.FAKE_TASK_CASE === 'checkpoint-child-owner' ? 'child' : 'task-root',
+            kind: env.FAKE_TASK_CASE === 'checkpoint-other-kind' ? 'review-request' : 'delivery-unconfirmed',
+            severity: 'error', summary: 'Save receipt', createdAt: 1, actionable: true,
+            sourceId: env.FAKE_TASK_CASE === 'checkpoint-other-operation' ? 'different' : operationId,
+          }]
+        }
         respond({ generation: 4, tasks: [task] })
       }
       return
@@ -352,6 +362,12 @@ reader.on('line', (line) => {
           workspaceId: 'workspace-root', reviewRevision: frame.params?.expectedRevision, commit: frame.params?.commit,
           sourceHeadBefore: frame.params?.expectedSourceHead, sourceHeadAfter: frame.params?.expectedSourceHead, appliedAt: 7,
         },
+      })
+      return
+    case 'task/retryDeliveryCheckpoint':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], updatedAt: 8, asOfSeq: 7,
       })
       return
     case 'task/discard':

@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-Host 在调用 Commit、Apply 或 Discard 前获取根任务执行权，并保留到 Provider 和回执记录都完成。已附加 Agent 使用 `Agent.runMaintenance` 现有的同步空闲获取；没有 Agent 的根任务使用[离线 Session 保留](2026-10-08-offline-session-reservations.md)。这一获取过程中的竞争在 Git 开始前返回 `task-active`；生命周期或序号验证可能更早拒绝。不同根任务保留独立的执行归属。
+Host 与 SDK 在调用 Commit、Apply 或 Discard 前获取根任务执行权，并保留到 Provider 和回执记录都完成。已附加 Agent 使用 `Agent.runMaintenance` 现有的同步空闲获取；没有 Agent 的根任务使用[离线 Session 保留](2026-10-08-offline-session-reservations.md)。Host 在这一获取过程中的竞争于 Git 开始前返回 `task-active`；生命周期或序号验证可能更早拒绝。不同根任务保留独立的执行归属。
 
 驻留操作组合请求与 Agent 取消信号。取消传递至 Provider，但绝不通过竞争其 Promise 来提前释放执行权。成功的 Provider 结果仍交给回执记录器；成功、Provider 失败和记录失败都在完成后释放归属。不为这一进程内获取增加 Agent 状态或 Session 事件。
 
@@ -24,7 +24,7 @@ Host 在调用 Commit、Apply 或 Discard 前获取根任务执行权，并保�
 
 ## 后果
 
-受支持的根任务执行不能与这些 Host 交付操作重叠。维护仍接受排队输入，Task 元数据命令也仍可追加事件。它们改变序号后，可能在 Git 成功后拒绝回执。被中断的变更没有持久化意图记录。因此，这种互斥没有建立原子交付、崩溃核对、子级集成控件、跨进程锁定或完整发布就绪保证。
+受支持的根任务执行不能与这些交付操作重叠。维护仍接受排队输入。[交付日志](2026-10-08-root-delivery-journal.md)独立持久化确切授权，在交付期间阻止 Task 元数据变更，并跨无关 Session 追加关联完成。被中断的交付保留待核实状态，不重复 Git。执行互斥和日志机制不代表 Git 与 Session 持久化的原子性、人工崩溃核对、子级集成控件、跨进程锁定或完整发布就绪。
 
 根任务交付、离线保留、[手动维护](../feature/2026-07-30-queued-manual-compaction.md)、[批量集成](../feature/2026-10-07-batch-writer-integration.md)及[集成历史](../feature/2026-10-08-task-integration-history.md)记录继续保持活跃：本决策加强根任务执行归属，但不替代其独立的权限、发布、回放或输入排序依据。
 

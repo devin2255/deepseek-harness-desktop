@@ -116,6 +116,7 @@ export interface RpcErrorDetailsMap {
   'task-invalid-worktree': { sessionId: SessionId }
   'task-worktree-assigned': { sessionId: SessionId }
   'task-active': { sessionId: SessionId }
+  'task-delivery-pending': { sessionId: SessionId }
   'task-unavailable': { sessionId?: SessionId }
   'internal': {}
 }

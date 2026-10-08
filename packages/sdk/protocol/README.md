@@ -26,6 +26,7 @@ The shared wire protocol for the DeepSeek Harness SDK runtime: one newline-delim
 | client→server | `task/commit` | `TaskCommitParams` → `TaskSnapshot` |
 | client→server | `task/apply` | `TaskApplyParams` → `TaskSnapshot` |
 | client→server | `task/discard` | `TaskDiscardParams` → `TaskSnapshot` |
+| client→server | `task/retryDeliveryCheckpoint` | `TaskDeliveryCheckpointParams` → `TaskSnapshot` |
 | client→server | `shutdown` | no params → `{}` |
 | server→client | `session.event` | `SessionEventNotification` (every session in the runtime, unfiltered) |
 | server→client | `session.status` | `SessionStatusNotification` (whole-agent `running`/`idle` transition) |

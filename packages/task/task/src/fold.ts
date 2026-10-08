@@ -11,6 +11,7 @@ import {
   type TaskCriterion,
   type TaskCriterionStatus,
   type TaskDefinition,
+  type TaskDeliveryIntent,
   type TaskEvidenceRef,
   type TaskReviewDecision,
   type TaskRisk,
@@ -32,6 +33,7 @@ export interface TaskFoldState {
   readonly commitReceipt: TaskCommitReceipt | undefined
   readonly applyReceipt: TaskApplyReceipt | undefined
   readonly discardReceipt: TaskDiscardReceipt | undefined
+  readonly pendingDelivery: { readonly intent: TaskDeliveryIntent; readonly startedAt: number } | undefined
   readonly updatedAt: number | undefined
 }
 
@@ -66,6 +68,7 @@ export function emptyTaskFoldState(): TaskFoldState {
     commitReceipt: undefined,
     applyReceipt: undefined,
     discardReceipt: undefined,
+    pendingDelivery: undefined,
     updatedAt: undefined,
   }
 }
@@ -188,6 +191,72 @@ function decodeDecision(value: unknown): TaskReviewDecision {
   return value as TaskReviewDecision
 }
 
+function decodeDeliveryIntent(value: unknown): TaskDeliveryIntent {
+  if (!isRecord(value)) throw new Error('delivery intent must be a record')
+  const common = ['kind', 'operationId', 'reviewRevision']
+  const identity = {
+    operationId: operationId(value['operationId'], 'delivery operationId') as TaskDeliveryIntent['operationId'],
+    reviewRevision: sha256Digest(value['reviewRevision'], 'delivery reviewRevision') as TaskDeliveryIntent['reviewRevision'],
+  }
+  switch (value['kind']) {
+    case 'commit': {
+      const record = exactRecord(value, [...common, 'message'], 'commit intent')
+      const message = record['message']
+      if (typeof message !== 'string' || message.trim().length === 0 || message.includes('\0')) {
+        throw new Error('commit intent message must contain non-NUL text')
+      }
+      return { ...identity, kind: 'commit', message }
+    }
+    case 'apply': {
+      const record = exactRecord(value, [...common, 'commit', 'sourceHead'], 'apply intent')
+      return { ...identity, kind: 'apply', commit: gitObjectId(record['commit'], 'apply intent commit'),
+        sourceHead: gitObjectId(record['sourceHead'], 'apply intent sourceHead') }
+    }
+    case 'discard': {
+      const record = exactRecord(value, [...common, 'confirmedUncommittedLoss'], 'discard intent')
+      if (typeof record['confirmedUncommittedLoss'] !== 'boolean') throw new Error('discard intent confirmation must be boolean')
+      return { ...identity, kind: 'discard', confirmedUncommittedLoss: record['confirmedUncommittedLoss'] }
+    }
+    default:
+      throw new Error('delivery intent kind is invalid')
+  }
+}
+
+function validateDeliveryIntent(state: TaskFoldState, intent: TaskDeliveryIntent): void {
+  if (state.assignment === undefined) throw new Error('delivery requires an assigned worktree')
+  if (state.discardReceipt !== undefined) throw new Error('delivery cannot follow discard')
+  if ([state.commitReceipt, state.applyReceipt].some(receipt => receipt?.operationId === intent.operationId)) {
+    throw new Error('delivery operationId has already completed')
+  }
+  if (intent.kind === 'commit') {
+    if (state.commitReceipt !== undefined || state.reviewDecision !== 'ready') throw new Error('commit intent requires a ready undelivered Task')
+    validateReview(state, 'ready')
+  } else if (intent.kind === 'apply') {
+    if (state.commitReceipt === undefined || state.applyReceipt !== undefined
+      || state.commitReceipt.commit !== intent.commit || state.commitReceipt.committedRevision !== intent.reviewRevision) {
+      throw new Error('apply intent requires the exact recorded Task commit without a prior application')
+    }
+  } else if (state.reviewDecision !== 'ready' && state.commitReceipt === undefined) {
+    throw new Error('discard intent requires a ready or delivered Task')
+  }
+}
+
+function validateDeliveryReceipt(state: TaskFoldState, receipt: TaskCommitReceipt | TaskApplyReceipt | TaskDiscardReceipt): void {
+  const intent = state.pendingDelivery?.intent
+  if (intent === undefined || intent.operationId !== receipt.operationId || intent.kind !== receipt.kind
+    || intent.reviewRevision !== receipt.reviewRevision) {
+    throw new Error('delivery receipt must match the outstanding intent identity, kind, and revision')
+  }
+  if (intent.kind === 'apply' && receipt.kind === 'apply'
+    && (intent.commit !== receipt.commit || intent.sourceHead !== receipt.sourceHeadBefore)) {
+    throw new Error('apply receipt must match the authorized commit and source HEAD')
+  }
+  if (intent.kind === 'discard' && receipt.kind === 'discard'
+    && receipt.uncommittedChangesDiscarded && !intent.confirmedUncommittedLoss) {
+    throw new Error('discard receipt reports unconfirmed loss of uncommitted changes')
+  }
+}
+
 function assertReceiptOwner(
   state: TaskFoldState,
   receipt: { readonly taskId: SessionId; readonly workspaceId: WorkspaceId },
@@ -303,6 +372,10 @@ function validateReview(state: TaskFoldState, decision: TaskReviewDecision): voi
  */
 export function applyTaskEvent(state: TaskFoldState, event: SessionEvent): TaskFoldState {
   try {
+    if (state.pendingDelivery !== undefined && event.type.startsWith('task/')
+      && !['task/review-committed', 'task/review-applied', 'task/review-discarded'].includes(event.type)) {
+      throw new Error('Task mutations are blocked until the outstanding delivery is confirmed')
+    }
     switch (event.type) {
       case 'task/worktree-assigned': {
         const data = exactRecord(event.data, ['assignment'], 'task/worktree-assigned data')
@@ -342,6 +415,12 @@ export function applyTaskEvent(state: TaskFoldState, event: SessionEvent): TaskF
         validateReview(state, decision)
         return { ...state, reviewDecision: decision, updatedAt: event.time }
       }
+      case 'task/delivery-started': {
+        const data = exactRecord(event.data, ['intent'], 'task/delivery-started data')
+        const intent = decodeDeliveryIntent(data['intent'])
+        validateDeliveryIntent(state, intent)
+        return { ...state, pendingDelivery: { intent, startedAt: event.time }, updatedAt: event.time }
+      }
       case 'task/review-committed': {
         const data = exactRecord(event.data, ['receipt'], 'task/review-committed data')
         if (state.commitReceipt !== undefined) throw new Error('commit receipt already exists')
@@ -350,7 +429,8 @@ export function applyTaskEvent(state: TaskFoldState, event: SessionEvent): TaskF
         const receipt = decodeCommitReceipt(data['receipt'])
         const assignment = assertReceiptOwner(state, receipt, 'commit')
         if (receipt.branch !== assignment.branch) throw new Error('commit receipt branch does not match the worktree assignment')
-        return { ...state, commitReceipt: receipt, updatedAt: event.time }
+        validateDeliveryReceipt(state, receipt)
+        return { ...state, commitReceipt: receipt, pendingDelivery: undefined, updatedAt: event.time }
       }
       case 'task/review-applied': {
         const data = exactRecord(event.data, ['receipt'], 'task/review-applied data')
@@ -364,7 +444,8 @@ export function applyTaskEvent(state: TaskFoldState, event: SessionEvent): TaskF
           throw new Error('apply receipt reviewRevision does not match the committed revision')
         }
         if (receipt.sourceHeadBefore !== receipt.sourceHeadAfter) throw new Error('apply receipt must not change source HEAD')
-        return { ...state, applyReceipt: receipt, updatedAt: event.time }
+        validateDeliveryReceipt(state, receipt)
+        return { ...state, applyReceipt: receipt, pendingDelivery: undefined, updatedAt: event.time }
       }
       case 'task/review-discarded': {
         const data = exactRecord(event.data, ['receipt'], 'task/review-discarded data')
@@ -383,7 +464,8 @@ export function applyTaskEvent(state: TaskFoldState, event: SessionEvent): TaskF
             throw new Error('discard receipt recoverableCommit does not match the recorded commit')
           }
         }
-        return { ...state, discardReceipt: receipt, updatedAt: event.time }
+        validateDeliveryReceipt(state, receipt)
+        return { ...state, discardReceipt: receipt, pendingDelivery: undefined, updatedAt: event.time }
       }
       default:
         return state

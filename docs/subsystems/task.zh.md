@@ -6,7 +6,9 @@ Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个�
 
 ## 持久事实
 
-八种全值 Session 事件定义持久记录：`task/worktree-assigned`、`task/defined`、`task/criterion-updated`、`task/risk-recorded`、`task/review-decided`、`task/review-committed`、`task/review-applied` 和 `task/review-discarded`。Worktree 事件只记录一次不可变的源 Workspace、基础提交、源状态摘要、应用分支和执行目录。人工评审决策只能请求修改或声明准备交付；提交、应用和丢弃事件携带 Git Provider 返回的完整收据，包括准确的评审版本、操作标识、Git 对象 id 和恢复事实。严格折叠会拒绝重复分配、畸形标识、Task 或 Workspace 归属不匹配、额外字段、未规范化的空文本、重复标识、非法证据序号、缺失条件、禁止的状态变化，以及跳过必需阶段的交付事件。[持久化目录](../persistence-catalog.md#taskdefined--log-only)记录其确切声明。
+九种全值 Session 事件定义持久记录：`task/worktree-assigned`、`task/defined`、`task/criterion-updated`、`task/risk-recorded`、`task/review-decided`、`task/delivery-started`、`task/review-committed`、`task/review-applied` 和 `task/review-discarded`。Worktree 事件只记录一次不可变的源 Workspace、基础提交、源状态摘要、应用分支和执行目录。人工评审决策只能请求修改或声明准备交付；提交、应用和丢弃事件携带 Git Provider 返回的完整收据，包括准确的评审版本、操作标识、Git 对象 id 和恢复事实。严格折叠会拒绝重复分配、畸形标识、Task 或 Workspace 归属不匹配、额外字段、未规范化的空文本、重复标识、非法证据序号、缺失条件、禁止的状态变化，以及跳过必需阶段的交付事件。[持久化目录](../persistence-catalog.md#taskdefined--log-only)记录其确切声明。
+
+`TaskDeliveryIntent` 保留操作 id 和确切审查 revision，以及 `commit` 的提交消息、`apply` 的提交和源 HEAD，或 `discard` 的显式未提交内容损失确认。`StartTaskDeliveryRequest` 增加授权的 `expectedSeq`。未匹配的意图产生 `delivery-unconfirmed` 注意事项；完成要求相同 id、类型、revision 和操作特定输入。只有回执的历史被拒绝。无关 Session 事件可以穿插，但 Task 元数据、重叠交付和根模型步骤仍被阻止。Git 与 Session 持久化不是原子事务；回放和只读刷新都不会重试或结算待核实操作。
 
 证据指向一个确切的 `(sessionId, seq)` 事件。此包校验其序列化字段；Session Provider 在接受变更前校验该事件存在于同一根任务树中。
 
@@ -133,7 +135,9 @@ interface TaskIntegrationNode {
 
 ## 服务行为
 
-[`TaskService`](../../packages/task/task/src/service.ts) 是 Host API 使用、由 Session Provider 实现的服务定义。`assignWorktree` 还会校验分配指向目标根 Task、源 Workspace 仍然存在且源路径与该 Workspace 一致。`recordCommit`、`recordApply` 和 `recordDiscard` 只接受完整 Provider 收据，并在 Task 树仍有活动工作时拒绝操作。每个持久变更都携带 `expectedSeq`；Provider 在追加一个经过校验的事件前，立即将其与根 Session 的下一序号比较。Provider 必须向订阅者发送分离的全行变更，并隔离各订阅者的故障。
+`TaskSnapshot.retryableDeliveryCheckpoint` 标识原附加 Session 持有的现有回执。`retryDeliveryCheckpoint` 只保存该回执：不执行 Git，不追加事件，也不要求可读取的 worktree。回执缺失或被替换时会拒绝；再次保存失败保留待核实状态。冷态回放没有实时重试所有者，只依据持久日志事实。
+
+[`TaskService`](../../packages/task/task/src/service.ts) 是 Host 与 SDK API 使用、由 Session Provider 实现的服务定义。`assignWorktree` 还会校验分配指向目标根 Task、源 Workspace 仍然存在且源路径与该 Workspace 一致。元数据命令和 `startDelivery` 在追加一个经过校验的事件前，将 `expectedSeq` 与根 Session 的下一序号比较；授权还会拒绝活动 Task 树。`recordCommit`、`recordApply` 和 `recordDiscard` 只接受匹配待完成意图的完整回执，并在当前序号追加。授权和完成等待实时 Session flush 参与者或冷持久化确认；实时检查点缺失或失败会保留待核实注意事项。Provider 必须向订阅者发送分离的全行变更，并隔离各订阅者的故障。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -277,33 +281,51 @@ abstract recordRisk(sessionId: SessionId, request: RecordTaskRiskRequest): Promi
 abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot>
 
 /**
+ * Authorize one delivery and await its durable Session checkpoint before Git may change.
+ * Rejects concurrent delivery or Task metadata changes until a matching result is recorded.
+ * @param sessionId - owning root Session identity.
+ * @param request - exact mutation and expected authorization sequence.
+ * @returns the committed task row after persistence settles; failure never permits Git mutation.
+ */
+abstract startDelivery(sessionId: SessionId, request: StartTaskDeliveryRequest): Promise<TaskSnapshot>
+
+/**
+ * Retry persistence of an existing live delivery receipt without appending events or running Git.
+ * Rejects missing receipts, mismatched operations, and replaced or detached Session instances.
+ * @param sessionId - owning root Session identity.
+ * @param operationId - exact operation advertised by retryableDeliveryCheckpoint.
+ * @returns the confirmed Task row; failure retains the unconfirmed delivery.
+ */
+abstract retryDeliveryCheckpoint(sessionId: SessionId, operationId: TaskReviewOperationId): Promise<TaskSnapshot>
+
+/**
  * Record facts returned by a completed Task commit operation.
  * @param sessionId - root Session identity.
- * @param request - whole commit receipt and expected next sequence.
- * @returns the committed task row.
+ * @param request - whole commit receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
  */
 abstract recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot>
 
 /**
  * Record facts returned by a completed source application.
  * @param sessionId - root Session identity.
- * @param request - whole apply receipt and expected next sequence.
- * @returns the committed task row.
+ * @param request - whole apply receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
  */
 abstract recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot>
 
 /**
  * Record facts returned by a completed worktree discard.
  * @param sessionId - root Session identity.
- * @param request - whole discard receipt and expected next sequence.
- * @returns the committed task row.
+ * @param request - whole discard receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
  */
 abstract recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot>
 ```
 
 Types: [SessionId](core.md)
 
-Source: [`packages/task/task/src/service.ts:66`](../../packages/task/task/src/service.ts)
+Source: [`packages/task/task/src/service.ts:69`](../../packages/task/task/src/service.ts)
 
 <a id="ctxtaskworktrees--taskworktreeservice-abstract-seam"></a>
 

@@ -1,4 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
+import { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import { describe, expect, it, vi } from 'vitest'
 import SessionStore, { Session, SessionId, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
 import {
@@ -74,8 +75,32 @@ async function harness(initial: readonly { header: SessionHeader; events: readon
   await ctx.plugin(SessionStore)
   const persisted = persistence(initial)
   ctx.provide('sessionPersistence', persisted.service as never)
+  const flush = vi.fn(async (session: Session) => {
+    persisted.logs.set(session.id, { meta: session.header, events: [...session.events] })
+  })
+  const stopFlush = ctx.on('session/flush', flush, { global: true })
   const fiber = await ctx.plugin(TaskSessionProvider)
-  return { ctx, fiber, persisted, tasks: ctx.tasks as TaskSessionProvider }
+  return { ctx, fiber, persisted, flush, stopFlush, tasks: ctx.tasks as TaskSessionProvider }
+}
+
+function readyRoot(root: Session): void {
+  root.append('task/worktree-assigned', { assignment: assignment(root.id) })
+  root.append('task/defined', { definition: { goal: 'Ship', criteria: [
+    { id: TaskCriterionId('done'), text: 'Works', status: 'pending', evidence: [] },
+  ] } })
+  root.append('task/criterion-updated', { criterion: {
+    id: TaskCriterionId('done'), text: 'Works', status: 'waived', evidence: [],
+  } })
+  root.append('task/review-decided', { decision: 'ready' })
+}
+
+const commitIntent = () => ({ kind: 'commit' as const, operationId: commitReceipt().operationId,
+  reviewRevision: commitReceipt().reviewRevision, message: 'Ship' })
+
+function preStep(ctx: Context, root: Session) {
+  return agentEvents(ctx, { session: root } as Agent).waterfall('agent/pre-step', {
+    messages: [], turn: 1, step: 1, signal: new AbortController().signal,
+  }, () => Promise.resolve({ kind: 'reject' as const }))
 }
 
 const question = (generation: number, sourceId: string): { generation: number; facts: LiveTaskFact[] } => ({
@@ -259,7 +284,7 @@ describe('TaskSessionProvider', () => {
     })).rejects.toMatchObject({ code: 'TASK_INVALID_RISK' })
   })
 
-  it('records delivery receipts through dedicated compare-and-set mutations', async () => {
+  it('flushes delivery authorization and records correlated receipts after intervening Session events', async () => {
     const test = await harness()
     const root = test.ctx.sessions.create(sid('root'))
     root.append('task/worktree-assigned', { assignment: assignment() })
@@ -271,22 +296,40 @@ describe('TaskSessionProvider', () => {
     } })
     root.append('task/review-decided', { decision: 'ready' })
 
-    const committed = await test.tasks.recordCommit(root.id, { receipt: commitReceipt(), expectedSeq: 4 })
-    const applied = await test.tasks.recordApply(root.id, { receipt: applyReceipt(), expectedSeq: 5 })
-    const discarded = await test.tasks.recordDiscard(root.id, { receipt: discardReceipt(), expectedSeq: 6 })
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: {
+      kind: 'commit', operationId: commitReceipt().operationId, reviewRevision: commitReceipt().reviewRevision, message: 'Ship',
+    } })
+    expect(test.persisted.logs.get(root.id)?.events.at(-1)?.type).toBe('task/delivery-started')
+    root.append('turn/start', { turn: 1 })
+    await expect(test.tasks.review(root.id, { decision: 'changes-requested', expectedSeq: root.seq }))
+      .rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    const committed = await test.tasks.recordCommit(root.id, { receipt: commitReceipt() })
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: {
+      kind: 'apply', operationId: applyReceipt().operationId, reviewRevision: applyReceipt().reviewRevision,
+      commit: applyReceipt().commit, sourceHead: applyReceipt().sourceHeadBefore,
+    } })
+    const applied = await test.tasks.recordApply(root.id, { receipt: applyReceipt() })
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: {
+      kind: 'discard', operationId: discardReceipt().operationId, reviewRevision: discardReceipt().reviewRevision,
+      confirmedUncommittedLoss: false,
+    } })
+    const discarded = await test.tasks.recordDiscard(root.id, { receipt: discardReceipt() })
 
     expect(root.events.map(current => current.type)).toEqual([
       'task/worktree-assigned', 'task/defined', 'task/criterion-updated', 'task/review-decided',
-      'task/review-committed', 'task/review-applied', 'task/review-discarded',
+      'task/delivery-started', 'turn/start', 'task/review-committed', 'task/delivery-started', 'task/review-applied',
+      'task/delivery-started', 'task/review-discarded',
     ])
     expect(committed.commitReceipt).toEqual(commitReceipt())
     expect(applied.applyReceipt).toEqual(applyReceipt())
-    expect(discarded).toMatchObject({ status: 'settled', discardReceipt: discardReceipt(), asOfSeq: 7 })
-    await expect(test.tasks.recordCommit(root.id, { receipt: commitReceipt(), expectedSeq: 6 }))
-      .rejects.toMatchObject({ code: 'TASK_STALE_SEQUENCE' })
+    expect(discarded).toMatchObject({ status: 'settled', discardReceipt: discardReceipt(), asOfSeq: 11 })
+    expect(test.flush).toHaveBeenCalledTimes(6)
+    expect(test.persisted.logs.get(root.id)?.events).toEqual(root.events)
+    await expect(test.tasks.recordCommit(root.id, { receipt: commitReceipt() }))
+      .rejects.toMatchObject({ code: 'TASK_INVALID_COMMIT' })
   })
 
-  it('rejects subagent command targets and every delivery mutation while work is active', async () => {
+  it('rejects subagent command targets and delivery authorization while work is active', async () => {
     const test = await harness()
     const root = test.ctx.sessions.create(sid('root'))
     const child = test.ctx.sessions.create(sid('child'), { meta: { origin: 'subagent', parentSession: root.id } })
@@ -298,12 +341,186 @@ describe('TaskSessionProvider', () => {
     }])
     await expect(test.tasks.review(root.id, { decision: 'ready', expectedSeq: 1 }))
       .rejects.toMatchObject({ code: 'TASK_ACTIVE' })
-    for (const operation of [
-      () => test.tasks.recordCommit(root.id, { receipt: commitReceipt(), expectedSeq: 1 }),
-      () => test.tasks.recordApply(root.id, { receipt: applyReceipt(), expectedSeq: 1 }),
-      () => test.tasks.recordDiscard(root.id, { receipt: discardReceipt(), expectedSeq: 1 }),
-    ]) await expect(operation()).rejects.toMatchObject({ code: 'TASK_ACTIVE' })
+    await expect(test.tasks.startDelivery(root.id, { expectedSeq: 1, intent: {
+      kind: 'commit', operationId: commitReceipt().operationId, reviewRevision: commitReceipt().reviewRevision, message: 'Ship',
+    } })).rejects.toMatchObject({ code: 'TASK_ACTIVE' })
     expect(root.events).toHaveLength(1)
+  })
+
+  it.each(['absent', 'failed'] as const)('retains an unconfirmed intent when the authorization checkpoint is %s', async (failure) => {
+    const test = await harness()
+    const root = test.ctx.sessions.create(sid('root'))
+    readyRoot(root)
+    if (failure === 'absent') test.stopFlush()
+    else test.flush.mockRejectedValueOnce(new Error('Disk unavailable'))
+
+    await expect(test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() }))
+      .rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
+    expect(test.tasks.snapshot().tasks[0]).toMatchObject({
+      status: 'needs-attention', attention: [{ kind: 'delivery-unconfirmed', sourceId: commitIntent().operationId }],
+    })
+    await expect(test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() }))
+      .rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    await expect(preStep(test.ctx, root)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    expect(root.events.filter(event => event.type === 'task/delivery-started')).toHaveLength(1)
+  })
+
+  it('keeps delivery unconfirmed until the live receipt checkpoint finishes', async () => {
+    const test = await harness()
+    const root = test.ctx.sessions.create(sid('root'))
+    readyRoot(root)
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() })
+    let release!: () => void
+    let entered!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const reached = new Promise<void>((resolve) => { entered = resolve })
+    test.flush.mockImplementationOnce(async () => { entered(); await held })
+    const completed = test.tasks.recordCommit(root.id, { receipt: commitReceipt() })
+    try {
+      await reached
+      expect(test.tasks.snapshot().tasks[0]?.attention).toContainEqual(expect.objectContaining({ kind: 'delivery-unconfirmed' }))
+      await expect(preStep(test.ctx, root)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    } finally {
+      release()
+    }
+    const result = await completed
+    expect(result.attention.some(item => item.kind === 'delivery-unconfirmed')).toBe(false)
+    const delegated = vi.fn(async () => ({ kind: 'reject' as const }))
+    test.ctx.on('agent/pre-step', delegated, { global: true })
+    await expect(preStep(test.ctx, root)).resolves.toEqual({ kind: 'reject' })
+    expect(delegated).toHaveBeenCalledOnce()
+  })
+
+  it.each(['absent', 'failed'] as const)('blocks execution and Task changes after a %s receipt checkpoint', async (failure) => {
+    const test = await harness()
+    const root = test.ctx.sessions.create(sid('root'))
+    readyRoot(root)
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() })
+    if (failure === 'absent') test.stopFlush()
+    else test.flush.mockRejectedValueOnce(new Error('Disk unavailable'))
+    await expect(test.tasks.recordCommit(root.id, { receipt: commitReceipt() }))
+      .rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
+
+    test.tasks.replaceLiveGeneration(2, [])
+    expect(test.tasks.snapshot().tasks[0]?.attention).toContainEqual(expect.objectContaining({
+      kind: 'delivery-unconfirmed', sourceId: commitIntent().operationId,
+    }))
+    await expect(test.tasks.review(root.id, { decision: 'changes-requested', expectedSeq: root.seq }))
+      .rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    await expect(preStep(test.ctx, root)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    const persisted = test.persisted.logs.get(root.id)!
+    const cold = await harness([{ header: persisted.meta, events: persisted.events }])
+    expect(cold.tasks.snapshot().tasks[0]?.commitReceipt).toBeUndefined()
+    expect(cold.tasks.snapshot().tasks[0]?.attention).toContainEqual(expect.objectContaining({ kind: 'delivery-unconfirmed' }))
+  })
+
+  it('records cold delivery results after an unrelated Session event without another sequence authorization', async () => {
+    const root = Session.create(sid('root'))
+    readyRoot(root)
+    const test = await harness([{ header: root.header, events: root.events }])
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() })
+    const persisted = test.persisted.logs.get(root.id)!
+    persisted.events.push({ type: 'turn/start', data: { turn: 1 }, seq: persisted.events.length, time: 20 })
+    await test.fiber.dispose()
+    await test.ctx.plugin(TaskSessionProvider)
+    const result = await test.ctx.tasks.recordCommit(root.id, { receipt: commitReceipt() })
+    expect(result.commitReceipt).toEqual(commitReceipt())
+    expect(result.attention.some(item => item.kind === 'delivery-unconfirmed')).toBe(false)
+    expect(persisted.events.at(-1)?.type).toBe('task/review-committed')
+    expect(test.flush).not.toHaveBeenCalled()
+  })
+
+  it('retries each existing delivery receipt checkpoint without appending another event', async () => {
+    const test = await harness()
+    const root = test.ctx.sessions.create(sid('root'))
+    readyRoot(root)
+    const operations = [
+      { intent: commitIntent(), record: () => test.tasks.recordCommit(root.id, { receipt: commitReceipt() }) },
+      { intent: { kind: 'apply' as const, operationId: applyReceipt().operationId,
+        reviewRevision: applyReceipt().reviewRevision, commit: applyReceipt().commit, sourceHead: applyReceipt().sourceHeadBefore },
+      record: () => test.tasks.recordApply(root.id, { receipt: applyReceipt() }) },
+      { intent: { kind: 'discard' as const, operationId: discardReceipt().operationId,
+        reviewRevision: discardReceipt().reviewRevision, confirmedUncommittedLoss: false },
+      record: () => test.tasks.recordDiscard(root.id, { receipt: discardReceipt() }) },
+    ]
+    for (const { intent, record } of operations) {
+      await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent })
+      test.flush.mockRejectedValueOnce(new Error('Disk unavailable'))
+      await expect(record()).rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
+      expect(test.tasks.snapshot().tasks[0]?.retryableDeliveryCheckpoint).toBe(intent.operationId)
+      await expect(test.tasks.retryDeliveryCheckpoint(root.id, TaskReviewOperationId('00000000-0000-4000-8000-000000000099')))
+        .rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+      test.flush.mockRejectedValueOnce(new Error('Still unavailable'))
+      await expect(test.tasks.retryDeliveryCheckpoint(root.id, intent.operationId)).rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
+      expect(test.tasks.snapshot().tasks[0]?.retryableDeliveryCheckpoint).toBe(intent.operationId)
+      const events = root.events
+      const result = await test.tasks.retryDeliveryCheckpoint(root.id, intent.operationId)
+      expect(result.retryableDeliveryCheckpoint).toBeUndefined()
+      expect(result.attention.some(item => item.kind === 'delivery-unconfirmed')).toBe(false)
+      expect(root.events).toBe(events)
+      expect(test.persisted.logs.get(root.id)?.events).toEqual(events)
+      await expect(test.tasks.retryDeliveryCheckpoint(root.id, intent.operationId)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    }
+    expect(test.persisted.logs.get(root.id)?.events.filter(event => event.type === 'task/review-discarded')).toHaveLength(1)
+    await expect(preStep(test.ctx, root)).resolves.toEqual({ kind: 'reject' })
+  })
+
+  it('does not save a lost receipt or transfer retry authority to a replacement Session', async () => {
+    const test = await harness()
+    const root = test.ctx.sessions.prepare(sid('root'))
+    const detach = test.ctx.sessions.enter(root)
+    test.ctx.sessions.announce(root)
+    readyRoot(root)
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() })
+    const authorization = root.events
+    await expect(test.tasks.retryDeliveryCheckpoint(root.id, commitIntent().operationId))
+      .rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    test.flush.mockRejectedValueOnce(new Error('Disk unavailable'))
+    await expect(test.tasks.recordCommit(root.id, { receipt: commitReceipt() })).rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
+    detach()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const replacement = test.ctx.sessions.create(root.id, { seed: authorization })
+    const calls = test.flush.mock.calls.length
+    expect(test.tasks.snapshot().tasks[0]?.retryableDeliveryCheckpoint).toBeUndefined()
+    await expect(test.tasks.retryDeliveryCheckpoint(root.id, commitIntent().operationId))
+      .rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+    expect(test.flush).toHaveBeenCalledTimes(calls)
+    await expect(preStep(test.ctx, replacement)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+  })
+
+  it('retains uncertainty if a Session detaches while its receipt is being saved', async () => {
+    const test = await harness()
+    const root = test.ctx.sessions.prepare(sid('root'))
+    const detach = test.ctx.sessions.enter(root)
+    test.ctx.sessions.announce(root)
+    readyRoot(root)
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() })
+    test.flush.mockImplementationOnce(async () => { detach() })
+    await expect(test.tasks.recordCommit(root.id, { receipt: commitReceipt() }))
+      .rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
+    expect(test.tasks.snapshot().tasks[0]?.retryableDeliveryCheckpoint).toBeUndefined()
+    expect(test.tasks.snapshot().tasks[0]?.attention).toContainEqual(expect.objectContaining({ kind: 'delivery-unconfirmed' }))
+  })
+
+  it('retains checkpoint ownership when a disposed Session becomes unreadable', async () => {
+    const test = await harness()
+    const root = test.ctx.sessions.create(sid('root'))
+    readyRoot(root)
+    await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: commitIntent() })
+    test.flush.mockRejectedValueOnce(new Error('Disk unavailable'))
+    await expect(test.tasks.recordCommit(root.id, { receipt: commitReceipt() }))
+      .rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
+
+    test.persisted.logs.delete(root.id)
+    test.ctx.emit('session/disposed', root)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(test.tasks.snapshot().tasks).toEqual([])
+
+    test.ctx.emit('session/created', root)
+    expect(test.tasks.snapshot().tasks[0]?.attention).toContainEqual(expect.objectContaining({
+      kind: 'delivery-unconfirmed', sourceId: commitIntent().operationId,
+    }))
+    await expect(preStep(test.ctx, root)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
   })
 
   it('classifies malformed definitions as stable Task errors', async () => {

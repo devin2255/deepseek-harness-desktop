@@ -54,6 +54,12 @@ export interface TaskDiscardParams {
   readonly expectedSeq: number
 }
 
+/** Parameters for saving an existing live delivery receipt without repeating Git. */
+export interface TaskDeliveryCheckpointParams {
+  readonly sessionId: string
+  readonly operationId: string
+}
+
 /** Parameters for the process-wide SDK handshake. */
 export interface InitializeParams {
   /** Working directory recorded on every SDK-created session's header. */
@@ -144,6 +150,7 @@ export interface HarnessSdkRequestMap {
   'initialize': { params: InitializeParams; result: InitializeResult }
   'session/prompt': { params: SessionPromptParams; result: SessionPromptResult }
   'task/list': { params: Record<string, never>; result: TaskListSnapshot }
+  'task/retryDeliveryCheckpoint': { params: TaskDeliveryCheckpointParams; result: TaskSnapshot }
   'task/define': { params: DefineTaskRequest & { sessionId: string }; result: TaskSnapshot }
   'task/updateCriterion': { params: UpdateTaskCriterionRequest & { sessionId: string }; result: TaskSnapshot }
   'task/recordRisk': { params: RecordTaskRiskRequest & { sessionId: string }; result: TaskSnapshot }

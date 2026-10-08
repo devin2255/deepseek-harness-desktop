@@ -2,7 +2,7 @@
 
 import type {
   DefineTaskCriterion, RpcResult, SessionId, TaskCriterion, TaskReviewDecision,
-  TaskRisk, TaskSnapshot,
+  TaskRisk, TaskSnapshot, TaskReviewOperationId,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ObservableSnapshot } from './store.ts'
 import type { TaskListState } from '../tasks/manager.ts'
@@ -56,4 +56,6 @@ export interface ITasks {
    * @returns Command result.
    */
   discardReview(confirmedUncommittedLoss: boolean, expectedSeq: number): Promise<RpcResult<TaskSnapshot>>
+  /** Retry receipt persistence only. @param operationId - exact advertised checkpoint. @returns command result. */
+  retryDeliveryCheckpoint(operationId: TaskReviewOperationId): Promise<RpcResult<TaskSnapshot>>
 }

@@ -10,6 +10,7 @@ describe('TaskRuntime', () => {
     api.onTaskList = () => Promise.resolve(ok({ generation: 7, tasks: [] }))
     const tasks = new TaskRuntime(ctx, api)
     expect(ctx.get('tasks')).toBe(tasks)
+    await expect(tasks.retryDeliveryCheckpoint('00000000-0000-4000-8000-000000000001' as never)).resolves.toMatchObject({ ok: false })
     await tasks.refresh()
     expect(tasks.list.getSnapshot()).toMatchObject({ phase: 'ready', generation: 7, freshness: 'fresh' })
     tasks.handleDisconnected()

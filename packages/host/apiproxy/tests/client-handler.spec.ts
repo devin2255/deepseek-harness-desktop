@@ -124,6 +124,7 @@ function scriptedApi(overrides: {
       commit: err,
       apply: err,
       discard: err,
+      retryDeliveryCheckpoint: err,
       ...overrides.tasks,
     },
     settings: {

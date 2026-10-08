@@ -2,6 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { TaskReviewOperationId } from '@deepseek-ai/dsh-task-review/types'
 import type {
   AssignTaskWorktreeRequest,
   DefineTaskRequest,
@@ -11,6 +12,7 @@ import type {
   RecordTaskDiscardRequest,
   RecordTaskRiskRequest,
   ReviewTaskRequest,
+  StartTaskDeliveryRequest,
   TaskListChange,
   TaskListSnapshot,
   TaskSnapshot,
@@ -33,6 +35,7 @@ export type TaskErrorCode =
   | 'TASK_INVALID_WORKTREE'
   | 'TASK_WORKTREE_ASSIGNED'
   | 'TASK_ACTIVE'
+  | 'TASK_DELIVERY_PENDING'
   | 'TASK_UNAVAILABLE'
 
 /** Machine-routable Task service failure. */
@@ -135,26 +138,44 @@ export abstract class TaskService extends Service {
   abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot>
 
   /**
+   * Authorize one delivery and await its durable Session checkpoint before Git may change.
+   * Rejects concurrent delivery or Task metadata changes until a matching result is recorded.
+   * @param sessionId - owning root Session identity.
+   * @param request - exact mutation and expected authorization sequence.
+   * @returns the committed task row after persistence settles; failure never permits Git mutation.
+   */
+  abstract startDelivery(sessionId: SessionId, request: StartTaskDeliveryRequest): Promise<TaskSnapshot>
+
+  /**
+   * Retry persistence of an existing live delivery receipt without appending events or running Git.
+   * Rejects missing receipts, mismatched operations, and replaced or detached Session instances.
+   * @param sessionId - owning root Session identity.
+   * @param operationId - exact operation advertised by retryableDeliveryCheckpoint.
+   * @returns the confirmed Task row; failure retains the unconfirmed delivery.
+   */
+  abstract retryDeliveryCheckpoint(sessionId: SessionId, operationId: TaskReviewOperationId): Promise<TaskSnapshot>
+
+  /**
    * Record facts returned by a completed Task commit operation.
    * @param sessionId - root Session identity.
-   * @param request - whole commit receipt and expected next sequence.
-   * @returns the committed task row.
+   * @param request - whole commit receipt matching the outstanding intent.
+   * @returns the committed task row after its durable checkpoint.
    */
   abstract recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot>
 
   /**
    * Record facts returned by a completed source application.
    * @param sessionId - root Session identity.
-   * @param request - whole apply receipt and expected next sequence.
-   * @returns the committed task row.
+   * @param request - whole apply receipt matching the outstanding intent.
+   * @returns the committed task row after its durable checkpoint.
    */
   abstract recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot>
 
   /**
    * Record facts returned by a completed worktree discard.
    * @param sessionId - root Session identity.
-   * @param request - whole discard receipt and expected next sequence.
-   * @returns the committed task row.
+   * @param request - whole discard receipt matching the outstanding intent.
+   * @returns the committed task row after its durable checkpoint.
    */
   abstract recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot>
 }
