@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { AgentOfflineReservationError } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -636,6 +637,32 @@ describe('SubagentRuntime.followup residency routing', () => {
     expect(userTexts(loaded.events)).toEqual(['child task', 'continue please'])
     // One descriptor only: cold resume never re-seeds it.
     expect(loaded.events.filter(event => event.type === 'subagent/descriptor')).toHaveLength(1)
+  })
+
+  it('refuses a reserved cold child delivery without accepting its message and retries after release', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('after release')])
+    try {
+      const started = await ctx.subagents.startContinuable(startSpec(parent))
+      await waitNoActivation(ctx, started.childId)
+      const before = await ctx.sessionPersistence.inspect(started.childId)
+      let created = 0
+      ctx.on('agent/created', ({ agent }) => { if (agent.id === started.childId) created += 1 })
+      await ctx.agents.withOfflineSessions([started.childId], async () => {
+        await expect(followup(ctx, parent, started.childId, message('not accepted')))
+          .rejects.toSatisfy((error: unknown) => error instanceof SubagentError
+            && error.code === 'NOT_RESUMABLE' && error.cause instanceof AgentOfflineReservationError)
+        expect(ctx.agents.get(started.childId)).toBeUndefined()
+        expect((await ctx.sessionPersistence.inspect(started.childId)).events).toEqual(before.events)
+      })
+      expect(created).toBe(0)
+      await expect(followup(ctx, parent, started.childId, message('after release'))).resolves.toBeTypeOf('string')
+      await waitNoActivation(ctx, started.childId)
+      expect(created).toBe(1)
+      const loaded = await ctx.sessionPersistence.inspect(started.childId)
+      expect(userTexts(loaded.events)).toEqual(['child task', 'after release'])
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('cold-resumes after the initial provider unregisters', async () => {
