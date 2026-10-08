@@ -45,7 +45,7 @@ A registered `shell` backend constrains how a terminal starts; it does not const
 
 Sandboxing confines local process effects but does not make arbitrary shell input safe: network calls and other external side effects remain governed by deployment policy. Tool descriptions state that PTY sessions are less auditable than one-shot tools and should be used only when persistence or interactive stdin is necessary.
 
-The local subprocess terminal primitive uses only public `node-pty` capabilities: child PID, `data` and `exit` notifications, `write`, and `kill`. It does not assume access to the native master fd or call `waitpid` from TypeScript. Platform process inspectors below that primitive derive foreground process groups and parent/child identity from `/proc` on Linux and `ps` on macOS. The [portable execution-world decision](../architecture/2026-07-28-portable-execution-world-consumers.md) owns this process/consumer split.
+The POSIX local subprocess terminal primitive uses only public `node-pty` capabilities: child PID, `data` and `exit` notifications, `write`, and `kill`. It does not assume access to the native master fd or call `waitpid` from TypeScript. Platform process inspectors below that primitive derive foreground process groups and parent/child identity from `/proc` on Linux and `ps` on macOS. Windows allocation and cleanup use [ConPTY Job ownership](../architecture/2026-10-08-windows-conpty-job-ownership.md), without POSIX foreground identities. The [portable execution-world decision](../architecture/2026-07-28-portable-execution-world-consumers.md) owns this process/consumer split.
 
 ### Six model-facing tools
 
@@ -136,7 +136,7 @@ The package ships concise tool guidance explaining persistent state, owner isola
 - Declarative per-agent startup requires an agent-setup composition point; plugin-load global sessions remain prohibited.
 - Session restoration across harness-process loss requires an out-of-process owner and a versioned protocol.
 - Network-egress policy and rollback of external side effects are broader than PTY and remain separate security work.
-- Windows/ConPTY support requires a backend with Windows-native process ownership and signaling semantics.
+- Windows persistent-shell support requires a Consumer with Windows-native readiness and interruption semantics over the existing ConPTY process primitive.
 
 ## Alternatives considered
 
@@ -162,7 +162,7 @@ The package ships concise tool guidance explaining persistent state, owner isola
 - Subprocess process fixtures cover non-leader and non-main-thread stdin waits, zombie quiescence, unreadable process state, supported syscall tables, unsupported architectures, and false-positive rejection; macOS inspector logic is injected into the same unit suite.
 - Real `node-pty` and PTY-consumer tests jointly exercise shell state, shared sandbox policy, environment scrubbing, raw-mode foreground `SIGINT`, a TERM-ignoring descendant, and immediate post-disposal quiescence on supported hosts.
 - A Loader-driven `cordis.yml` test mounts the real three-package composition. ACP and headless snapshots pin the six schemas, bounded results, and errors through opt-in overlays; TUI snapshots pin terminal and generic card presentation.
-- The headless terminal-readiness transcript uses the real backend and tools with only the OS terminal transport controlled; it distinguishes unavailable foreground facts from restored ownership. Portable parser, configuration, and lifecycle tests run on Windows; only the real POSIX-PTY suite is excluded there. This does not provide Windows process ownership or signaling.
+- The headless terminal-readiness transcript uses the real backend and tools with only the OS terminal transport controlled; it distinguishes unavailable foreground facts from restored ownership. Portable parser, configuration, and lifecycle tests run on Windows; only the real POSIX-PTY suite is excluded there. Windows process ownership has separate native acceptance; POSIX foreground signaling remains unsupported there.
 - Package contracts, the architecture map, subsystem pages, generated catalogs, and the website API describe the same shipped surface.
 
 ## Consequences

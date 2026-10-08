@@ -26,6 +26,12 @@ import type { LocalSubprocessHandle, SpawnInternals } from './spawn.ts'
 import { createProcessInspector } from './process-inspector.ts'
 import type { ProcessInspector } from './process-inspector.ts'
 import { LocalTerminalHandle } from './terminal.ts'
+import { createWindowsPty, WindowsPtyAllocationCleanupError } from './windows-pty.ts'
+import { WindowsTerminalHandle } from './windows-terminal.ts'
+
+interface OwnedTerminal extends SubprocessTerminalHandle {
+  terminateForHostExit(): void
+}
 
 /**
  * Local subprocess service: detached process trees, Node-shaped stdio
@@ -38,7 +44,9 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   /** Live handles retained for normal disposal and synchronous host-exit finalization. */
   private live = new Set<LocalSubprocessHandle>()
   /** Live terminals retained through normal quiescence or host-exit finalization. */
-  private terminals = new Set<LocalTerminalHandle>()
+  private terminals = new Set<OwnedTerminal>()
+  private readonly terminalAllocations = new Map<AbortController, Promise<OwnedTerminal>>()
+  private disposing = false
   /** Test hook: spill and platform knobs forwarded to spawnSubprocess. */
   internals: SpawnInternals = {}
   /** Test hook for platform process inspection; production resolves lazily on terminal spawn. */
@@ -77,6 +85,12 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   }
 
   private async disposeManagedProcesses(): Promise<void> {
+    this.disposing = true
+    for (const controller of this.terminalAllocations.keys()) controller.abort(new Error('subprocess provider is disposing'))
+    const allocations = await Promise.allSettled([...this.terminalAllocations.values()])
+    this.terminalAllocations.clear()
+    const failures = allocations.flatMap<unknown>(outcome => outcome.status === 'rejected'
+      && outcome.reason instanceof WindowsPtyAllocationCleanupError ? [outcome.reason] : [])
     // Terminate (escalating), then await WHOLE-TREE exit — not just the
     // direct child's settlement — so even a TERM-trapping descendant cannot
     // outlive the fiber. Keep both sets authoritative while these waits are
@@ -91,9 +105,9 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       pending.push(terminal.terminate())
     }
     const outcomes = await Promise.allSettled(pending)
-    const failures = outcomes.flatMap<unknown>(outcome => outcome.status === 'rejected'
+    failures.push(...outcomes.flatMap<unknown>(outcome => outcome.status === 'rejected'
       ? [outcome.reason as unknown]
-      : [])
+      : []))
     if (failures.length > 0) this.terminateForHostExit()
     this.live.clear()
     this.terminals.clear()
@@ -156,14 +170,38 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     return handle
   }
 
-  // Local PTY allocation is synchronous, but the provider contract permits remote asynchronous allocation.
-  // oxlint-disable-next-line typescript/require-await -- Preserve promise rejection semantics at the async provider contract.
   async spawnTerminal(spec: SubprocessTerminalSpawnSpec): Promise<SubprocessTerminalHandle> {
     const file = spec.argv[0]
     if (file === undefined || file.length === 0) {
       throw new Error('subprocess-local: terminal argv must contain a program')
     }
     spec.signal?.throwIfAborted()
+    if (this.disposing) throw new Error('subprocess provider is disposing')
+    if ((this.internals.platform ?? process.platform) === 'win32' && this.terminalInspector === undefined) {
+      const controller = new AbortController()
+      const signal = spec.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, spec.signal])
+      const allocation = this.allocateWindowsTerminal({ ...spec, signal })
+      this.terminalAllocations.set(controller, allocation)
+      let cleanupFailed = false
+      try {
+        const handle = await allocation
+        if (signal.aborted) {
+          try {
+            await handle.terminate()
+          } catch (_unpublishedTerminalCleanupFailed) {
+            // The live set retains failed cleanup for disposal; preserve the cancellation reason.
+          }
+          signal.throwIfAborted()
+        }
+        return handle
+      } catch (error) {
+        cleanupFailed = error instanceof WindowsPtyAllocationCleanupError
+        if (spec.signal?.aborted) throw spec.signal.reason
+        throw error
+      } finally {
+        if (!cleanupFailed) this.terminalAllocations.delete(controller)
+      }
+    }
     const options: IPtyForkOptions = {
       name: 'dumb',
       rows: spec.rows,
@@ -174,6 +212,15 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
     const inspector = this.terminalInspector ?? createProcessInspector()
     const terminal = nodePty.spawn(file, [...spec.argv.slice(1)], options)
     const handle = new LocalTerminalHandle(terminal, inspector, spec.graceMs)
+    return this.ownTerminal(handle)
+  }
+
+  private async allocateWindowsTerminal(spec: SubprocessTerminalSpawnSpec): Promise<OwnedTerminal> {
+    const native = await createWindowsPty(spec, childEnv(spec.env))
+    return this.ownTerminal(new WindowsTerminalHandle(native, spec.graceMs))
+  }
+
+  private ownTerminal(handle: OwnedTerminal): OwnedTerminal {
     this.terminals.add(handle)
     const release = async (): Promise<void> => {
       await handle.terminate()

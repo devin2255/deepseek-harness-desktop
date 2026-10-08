@@ -17,7 +17,7 @@ The public subprocess seam correctly promises awaited quiescence during normal d
 The listener uses local-only final operations that are absent from the public `SubprocessHandle` and `SubprocessTerminalHandle` interfaces:
 
 - An ordinary handle immediately sends SIGKILL to its detached POSIX process group or runs synchronous `taskkill /PID <pid> /T /F` on Windows.
-- A terminal handle synchronously signals every captured and currently observable descendant with SIGKILL, kills the PTY root, then rescans once for members that became observable during that boundary.
+- A POSIX terminal handle synchronously signals every captured and currently observable descendant with SIGKILL, kills the PTY root, then rescans once for members that became observable during that boundary. A Windows terminal closes its exact kill-on-close Job handle.
 - The service contains each target's failure and continues with the remaining handles. The callback creates no promise or timer, writes no diagnostic, and does not change the original exit code or error.
 
 Normal disposal remains the [subprocess seam's](../architecture/2026-07-26-subprocess-seam.md) terminate-and-join path: ordinary trees receive TERM, the configured grace, then KILL, and every ordinary or terminal cleanup is awaited to quiescence. The synchronous path requests final termination but does not publish a completion result or claim the OS tree is already gone when the callback returns. Remote providers retain their own sandbox ownership and do not inherit a local Node listener.
@@ -50,4 +50,4 @@ Unit evidence pins synchronous POSIX group and Windows taskkill delivery, termin
 
 Each active local subprocess service contributes one process-global exit listener, removed with the service effect. Fatal exit gives up grace, output draining, and an in-process quiescence proof in exchange for issuing the strongest available local termination before the host disappears. Normal disposal keeps those guarantees and costs unchanged.
 
-The listener cannot cover failures that do not execute JavaScript, and it cannot discover a terminal descendant that escaped before the provider ever observed it; that separate ownership gap remains tracked by Issue #1726.
+The listener cannot cover failures that do not execute JavaScript, and it cannot discover a POSIX terminal descendant that escaped before the provider ever observed it; that separate ownership gap remains tracked by Issue #1726. [Windows ConPTY Job ownership](../architecture/2026-10-08-windows-conpty-job-ownership.md) supplies an OS-owned lifetime independently of this callback.

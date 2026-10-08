@@ -45,7 +45,7 @@ agent scope dispose（资源释放）时先撤销注册，再等待全部所属 
 
 沙箱限制本地进程副作用，但不会让任意 shell 输入自动安全：网络调用和其他外部副作用仍由部署策略治理。工具描述会说明 PTY 会话比一次性工具更难审计，只应在确实需要持久状态或交互式 stdin 时使用。
 
-本地子进程终端原语只使用 `node-pty` 的公开能力：子进程 PID、`data` 与 `exit` 通知、`write` 和 `kill`。它不假设能访问原生 master fd，也不从 TypeScript 调用 `waitpid`。该原语下的平台进程检查器在 Linux 上通过 `/proc`、在 macOS 上通过 `ps` 推导前台进程组和父子进程身份。[可移植执行环境决策](../architecture/2026-07-28-portable-execution-world-consumers.md)负责定义这种进程／消费方拆分。
+POSIX 本地子进程终端原语只使用 `node-pty` 的公开能力：子进程 PID、`data` 与 `exit` 通知、`write` 和 `kill`。它不假设能访问原生 master fd，也不从 TypeScript 调用 `waitpid`。该原语下的平台进程检查器在 Linux 上通过 `/proc`、在 macOS 上通过 `ps` 推导前台进程组和父子进程身份。Windows 分配与清理使用 [ConPTY Job 所有权](../architecture/2026-10-08-windows-conpty-job-ownership.md)，不具有 POSIX 前台身份。[可移植执行环境决策](../architecture/2026-07-28-portable-execution-world-consumers.md)负责定义这种进程／消费方拆分。
 
 ### 6 个面向模型的工具
 
@@ -136,7 +136,7 @@ plugins:
 - 声明式 per-agent 启动需要 agent-setup 组合点；仍然禁止插件加载期全局会话。
 - harness 进程丢失后的会话恢复需要进程外 owner 和版本化协议。
 - 网络出口策略与外部副作用回滚超出 PTY 范围，继续作为独立安全工作。
-- Windows/ConPTY 支持需要具备 Windows 原生进程所有权与信号语义的后端。
+- Windows 持久 shell 支持需要消费方在已有 ConPTY 进程原语之上提供 Windows 原生就绪与中断语义。
 
 ## 备选方案
 
@@ -162,7 +162,7 @@ plugins:
 - 子进程 fixture（测试前置数据）覆盖非 leader 与非主线程的 stdin 等待、僵尸进程完全停稳、不可读进程状态、受支持的 syscall 表、不支持的架构和误报拒绝；同一单元测试套件通过注入覆盖 macOS 检查器逻辑。
 - 真实 `node-pty` 与 PTY 消费方测试共同在受支持宿主上覆盖 shell 状态、共享沙箱策略、环境清洗、raw mode 前台 `SIGINT`、忽略 `SIGTERM` 的后代进程，以及 dispose 返回后立即完全停稳。
 - Loader 驱动的 `cordis.yml` 测试挂载真实三包组合。ACP 与 headless 快照通过 opt-in overlay 固定 6 个 schema、有界结果和错误；TUI 快照固定 terminal 与 generic 卡片展示。
-- headless 终端就绪 transcript（文本记录）使用真实后端和工具，仅控制操作系统终端传输；它区分前台事实不可用与归属恢复。可移植的解析器、配置和生命周期测试在 Windows 上执行，仅真实 POSIX PTY 套件被排除。这不提供 Windows 进程归属管理或信号发送能力。
+- headless 终端就绪 transcript（文本记录）使用真实后端和工具，仅控制操作系统终端传输；它区分前台事实不可用与归属恢复。可移植的解析器、配置和生命周期测试在 Windows 上执行，仅真实 POSIX PTY 套件被排除。Windows 进程所有权有独立的原生验收；该平台仍不支持 POSIX 前台信号。
 - 包约定、架构图、子系统页面、生成目录和 website API 描述同一个已发布接口。
 
 ## 后果

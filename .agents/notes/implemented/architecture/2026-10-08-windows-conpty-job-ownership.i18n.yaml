@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-08-windows-conpty-job-ownership.md
+2026-10-08-windows-conpty-job-ownership.md: 601a717df53d54b095714de26c36c2908b0ba380
+2026-10-08-windows-conpty-job-ownership.zh.md: 61becc08123cdc844351c00a94b6307f6dbf1d92

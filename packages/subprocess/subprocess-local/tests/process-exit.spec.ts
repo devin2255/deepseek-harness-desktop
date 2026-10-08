@@ -86,7 +86,7 @@ function cleanupTree(state: TreeState | undefined, identities: ProcessIdentity[]
   }
 }
 
-async function runScenario(kind: ManagedKind, trigger: ExitTrigger, publication?: 'partial') {
+async function runScenario(kind: ManagedKind, trigger: ExitTrigger, publication?: 'partial', killHost = false) {
   const root = await mkdtemp(join(tmpdir(), `dsh-subprocess-host-exit-${kind}-${trigger}-`))
   const launch = resolveExampleLaunch({
     srcBin: hostScript,
@@ -119,7 +119,14 @@ async function runScenario(kind: ManagedKind, trigger: ExitTrigger, publication?
       timeout: scenarioTimeoutMs,
     })
     if (process.platform !== 'win32') identities = await captureIdentities(createProcessInspector(), state)
-    await writeFile(join(root, 'proceed'), 'proceed')
+    if (killHost) {
+      if (child.pid === undefined) throw new Error('fixture host has no process id')
+      // Direct process termination runs no JavaScript exit listener. Windows Job
+      // ownership, not the provider's final callback, must reap this tree.
+      process.kill(child.pid, 'SIGKILL')
+    } else {
+      await writeFile(join(root, 'proceed'), 'proceed')
+    }
     const outcome = await child
     settled = true
     await waitForGone(state)
@@ -168,7 +175,7 @@ describe('synchronous cleanup on host exit', () => {
     if (diagnostic !== undefined) expect(outcome.stderr).toContain(diagnostic)
   })
 
-  it.skipIf(process.platform === 'win32')(
+  it(
     'removes a terminal root and descendant after direct exit',
     { timeout: 45_000 },
     async () => {
@@ -183,5 +190,19 @@ describe('synchronous cleanup on host exit', () => {
     expect(outcome.exitCode).toBe(0)
     expect(disposeCounts?.listenersAfterLoad).toBe((disposeCounts?.listenersBefore ?? 0) + 1)
     expect(disposeCounts?.listenersAfterDispose).toBe(disposeCounts?.listenersBefore)
+  })
+
+  it.skipIf(process.platform !== 'win32')('reaps a native terminal Job when the host cannot execute JavaScript', { timeout: 45_000 }, async () => {
+    const { outcome } = await runScenario('terminal', 'direct', undefined, true)
+    expect(outcome.failed).toBe(true)
+  })
+
+  it.skipIf(process.platform !== 'win32').each([
+    { trigger: 'dispose' as const, expectedCode: 0 },
+    { trigger: 'uncaught-exception' as const, expectedCode: 1 },
+    { trigger: 'unhandled-rejection' as const, expectedCode: 1 },
+  ])('reaps a native terminal Job after $trigger', { timeout: 45_000 }, async ({ trigger, expectedCode }) => {
+    const { outcome } = await runScenario('terminal', trigger)
+    expect(outcome.exitCode).toBe(expectedCode)
   })
 })
