@@ -16,6 +16,7 @@ const DESCENDANT_QUESTION = 'Should the desktop open this child Agent?'
 const DESCENDANT_QUESTION_NAME = /Should the desktop open this child Agent\?/u
 const WRITER_PARENT_PROMPT = 'desktop isolated writer review parent'
 const WRITER_CHILD_PROMPT = 'desktop isolated writer review child'
+const WRITER_CONTROL_PROMPT = 'desktop reviewed writer control'
 const WRITER_FILE_CONTENT = 'isolated desktop writer result\n'
 
 interface TaskIdentitySnapshot {
@@ -73,6 +74,7 @@ interface TaskIdentitySnapshot {
 
 interface TaskReviewSummarySnapshot {
   readonly revision: string
+  readonly headCommit: string
   readonly sourceHead: string
   readonly dirty: boolean
   readonly files: readonly { readonly path: string; readonly binary: boolean }[]
@@ -123,6 +125,8 @@ describe('desktop Electron acceptance', () => {
       '        provider: desktop-writer',
       '        toolName: desktop_writer',
       '        backgroundMode: one-shot',
+      '    - id: desktop-test-writer-integration',
+      "      name: '@deepseek-ai/dsh-tool-subagent-control/integrate'",
       '',
     ].join('\n'))
     const pendingProviderResponses: ServerResponse[] = []
@@ -130,12 +134,20 @@ describe('desktop Electron acceptance', () => {
     let observedChildPrompt = false
     let descendantQuestionDispatchCount = 0
     let providerReleased = false
+    let writerControl: { readonly tool: string; readonly args: Record<string, unknown> } | undefined
     const finishProviderResponse = (response: ServerResponse): void => {
       sendProviderEvents(response, textCompletionEvents('desktop task complete'))
     }
     provider = createServer((request, response) => {
       void readProviderRequest(request).then((body) => {
         const conversation = providerMessageText(body)
+        if (writerControl !== undefined && conversation.includes(WRITER_CONTROL_PROMPT)) {
+          const control = writerControl
+          writerControl = undefined
+          if (!providerHasTool(body, control.tool)) throw new Error(`Missing desktop writer tool: ${control.tool}`)
+          sendProviderEvents(response, toolCallEvents(`desktop-${control.tool}`, control.tool, control.args))
+          return
+        }
         if (conversation.includes(WRITER_CHILD_PROMPT)) {
           sendProviderEvents(response, providerHasTool(body, 'write') && !providerHasToolResult(body)
             ? toolCallEvents('desktop-writer-file', 'write', { file_path: 'writer-result.txt', content: WRITER_FILE_CONTENT })
@@ -550,6 +562,63 @@ describe('desktop Electron acceptance', () => {
     await reviewSource.selectOption('')
     await expect.poll(() => review.getByRole('button', { name: /^(Discard Worktree|丢弃工作树)$/u }).isEnabled(),
       { timeout: 15_000 }).toBe(true)
+
+    const writerBeforeCommit = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+      sessionId: writerRoot.sessionId, writerSessionId: writerId,
+    })
+    writerControl = { tool: 'commit_agent_changes', args: {
+      subagent_id: writerId, revision: writerBeforeCommit.revision, message: 'Commit reviewed desktop writer',
+    } }
+    await pageRpc(page, 'session.prompt', {
+      sessionId: writerRoot.sessionId, mode: 'queue', content: [{ type: 'text', text: WRITER_CONTROL_PROMPT }],
+    })
+    let committedWriter: TaskReviewSummarySnapshot | undefined
+    await expect.poll(async () => {
+      committedWriter = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+        sessionId: writerRoot.sessionId, writerSessionId: writerId,
+      })
+      return committedWriter.headCommit !== writerBeforeCommit.headCommit
+    }, { timeout: 25_000 }).toBe(true).catch(async (error: unknown) => {
+      await writeFile(join(screenshots, 'writer-commit-failure.json'), JSON.stringify({
+        writerControl, committedWriter,
+        history: await pageRpc(page, 'session.history', { sessionId: writerRoot.sessionId, maxMessages: 30 }),
+      }, null, 2))
+      throw error
+    })
+    if (committedWriter === undefined) throw new Error('The desktop writer commit did not publish')
+    await expect.poll(async () => (await pageRpc<TaskIdentitySnapshot>(page, 'task.list', {})).tasks
+      .find(task => task.taskId === writerRoot.sessionId)?.status, { timeout: 15_000 }).not.toBe('running')
+    const rootBeforeIntegration = await pageRpc<TaskReviewSummarySnapshot>(page, 'task.reviewSummary', {
+      sessionId: writerRoot.sessionId,
+    })
+    writerControl = { tool: 'integrate_agents', args: {
+      root_revision: rootBeforeIntegration.revision, message: 'Integrate reviewed desktop writer',
+      writers: [{ subagent_id: writerId, revision: committedWriter.revision, commit: committedWriter.headCommit }],
+    } }
+    await pageRpc(page, 'session.prompt', {
+      sessionId: writerRoot.sessionId, mode: 'queue', content: [{ type: 'text', text: WRITER_CONTROL_PROMPT }],
+    })
+    const integrationHistory = review.getByRole('region', { name: /^(Agent result integration|Agent 成果集成)$/u })
+    await integrationHistory.getByText(/^(Merged into root task|已合入根任务)$/u).waitFor({ timeout: 25_000 })
+    await review.getByRole('button', { name: /^(Refresh|刷新)$/u }).click()
+    await expect.poll(() => review.locator('pre[aria-label="writer-result.txt"]').innerText(),
+      { timeout: 15_000 }).toContain(`+${WRITER_FILE_CONTENT.trimEnd()}`)
+    await integrationHistory.locator('summary').click()
+    const inspectIntegratedWriter = integrationHistory.getByRole('button', { name: /^(Inspect Agent:|检查 Agent：)/u })
+    expect(await inspectIntegratedWriter.isEnabled()).toBe(true)
+    expect(await integrationHistory.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= window.innerHeight
+    })).toBe(true)
+    await page.screenshot({ path: join(screenshots, 'writer-integration-history-electron.png') })
+    await inspectIntegratedWriter.click()
+    await expect.poll(() => reviewSource.inputValue(), { timeout: 15_000 }).toBe(writerId)
+    expect(await review.getByRole('button', { name: /^(Apply to Project|应用到项目)$/u }).isDisabled()).toBe(true)
+    await reviewSource.selectOption('')
+    expect(await readFile(join(writerRoot.executionWorkspace.path, 'writer-result.txt'), 'utf8')).toBe(WRITER_FILE_CONTENT)
+    expect(git(writerRoot.executionWorkspace.path, ['status', '--porcelain=v1']).trim()).toBe('')
+    expect(existsSync(join(writerSource, 'writer-result.txt'))).toBe(false)
+    expect(git(writerSource, ['status', '--porcelain=v1']).trim()).toBe('')
     await review.getByRole('button', { name: /^(?:← )?(?:Back to Tasks|返回任务)$/u }).click()
     await overview.waitFor({ state: 'visible' })
 

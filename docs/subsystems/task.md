@@ -2,7 +2,7 @@
 
 English | [中文](task.zh.md)
 
-The task capability turns a root Session and its uninterrupted subagent descendants into one desktop work item. Its application-owned execution worktree, acceptance criteria, evidence, risks, review decisions, and Git delivery receipts remain in the root Session log. Runtime activity and attention are generation-scoped inputs and are never reconstructed as durable facts.
+The task capability turns a root Session and its uninterrupted subagent descendants into one desktop work item. Its application-owned execution worktree, acceptance criteria, evidence, risks, review decisions, and Git delivery receipts remain in the root Session log. Live activity and interactive attention are generation-scoped overlays; durable approvals, failures, and integration conflicts are derived separately from logs.
 
 ## Durable facts
 
@@ -31,7 +31,7 @@ The [local Provider](../../packages/task/task-worktree-local/README.md) rejects 
 
 ## Writer integration
 
-The optional [writer tools](../../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) consume batch integration independently of root delivery. Exact reviewed commits merge only into the managed root; ordinary durable tool results retain success or non-mutating conflict receipts. These values are not yet Task projection fields or conflict attention events.
+The optional [writer tools](../../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) consume batch integration independently of root delivery. Exact reviewed commits merge only into the managed root; ordinary durable tool results retain success or non-mutating conflict receipts. The [Session Provider](../../packages/task/task-session/README.md#projection-rules) reconstructs explicit attempts and unresolved conflict attention from those results.
 
 ```ts type-equiv
 /** One exact committed writer result selected for integration. */
@@ -105,6 +105,31 @@ type TaskIntegrationResult = TaskIntegrationReceipt | TaskIntegrationConflict
 The current status precedence is `needs-attention`, `failed`, `running`, a durable delivery receipt producing `settled`, `reviewing`, explicitly proven `ready`, then idle `settled`. Idle state alone never implies readiness. A disconnected or unavailable runtime remains explicit through `freshness` instead of being presented as current information.
 
 Cold Session repair closes an unfinished turn with an `interrupted` reason and synthetic results for unmatched tool calls. The Task projection presents that marker as a non-actionable run failure owned by the exact Session; process-local question attention is not reconstructed and the tool call is not replayed.
+
+Optional `TaskSnapshot.integrations` contains ordered `TaskIntegrationNode` values with opaque ids derived from the owning root and call sequence. `resolvedBy` names the last later successful batch covering every selected writer; it preserves the original conflict outcome. Missing, spilled, or unverifiable receipts remain unconfirmed, including after loss of live execution ownership. These records are reconstructed from tool events rather than new Task events.
+
+```ts type-equiv
+/** Recorded integration outcome; missing or unverifiable receipts never imply Git success. */
+type TaskIntegrationOutcome =
+  | { readonly kind: 'running' | 'unconfirmed' }
+  | { readonly kind: 'failed'; readonly message: string }
+  | { readonly kind: 'integrated'; readonly result: TaskIntegrationReceipt }
+  | { readonly kind: 'conflict'; readonly result: TaskIntegrationConflict }
+```
+
+```ts type-equiv
+/** One integration attempt reconstructed from native or Code Mode tool events. */
+interface TaskIntegrationNode {
+  readonly id: TaskIntegrationNodeId
+  readonly callSeq: number
+  readonly startedAt: number
+  readonly writerSessionIds: readonly SessionId[]
+  readonly outcome: TaskIntegrationOutcome
+  readonly finishedAt?: number
+  /** Later successful batches cover every writer selected by this conflict, including revised commits. */
+  readonly resolvedBy?: TaskIntegrationNodeId
+}
+```
 
 ## Service behavior
 

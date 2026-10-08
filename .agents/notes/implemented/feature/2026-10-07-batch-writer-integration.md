@@ -30,7 +30,7 @@ Writer creation accepts a clean committed root even when its HEAD differs from t
 
 ## Consequences
 
-Explicitly composed agents can review, commit, and integrate stopped isolated writers and start another writer wave. The execution and root-delivery notes remain active because their ownership and recovery rationale still apply; this note owns batch publication only. Desktop defaults remain read-only. Explicit Integration nodes, durable conflict attention and resolution UI, cross-process leases, orphan recovery, and full desktop acceptance remain incomplete mission-control requirements.
+Explicitly composed agents can review, commit, and integrate stopped isolated writers and start another writer wave. The execution and root-delivery notes remain active because their ownership and recovery rationale still apply; this note owns batch publication only. [Integration history](2026-10-08-task-integration-history.md) owns explicit nodes and durable conflict attention. Desktop defaults remain read-only. Human integration and conflict-resolution controls, cross-process leases, orphan recovery, and full desktop acceptance remain incomplete mission-control requirements.
 
 ## Verification
 

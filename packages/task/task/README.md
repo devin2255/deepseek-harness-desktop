@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 The durable vocabulary and Service Definition for root tasks, application-owned execution worktrees, acceptance criteria, evidence, risks, review decisions, Git delivery receipts, and unified attention rows. Task facts use whole-value Session events with strict replay validation, so recovery never depends on process-local state. A worktree assignment records the source Workspace, creation commit, source-dirty digest, branch, and execution path exactly once. Evidence identifies an exact event sequence in the root task tree. Human review can only request changes or declare readiness; commit, apply, and discard state requires a complete Provider receipt.
 
+Optional `TaskSnapshot.integrations` contains ordered root-owned tool attempts, not additional Task events. Outcomes distinguish running, unconfirmed, failed, integrated, and conflict; `resolvedBy` identifies later batches covering all selected writers without rewriting a historical conflict. The [Session Provider](../task-session/README.md#projection-rules) owns reconstruction and conflict attention.
+
 ## Model Experience
 
 None, as task events are log-only facts and do not enter model requests or the model-visible Session surface.

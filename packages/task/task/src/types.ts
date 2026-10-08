@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
-import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskIntegrationConflict, TaskIntegrationReceipt } from '@deepseek-ai/dsh-task-review/types'
 
 /** Opaque identity of one acceptance criterion. */
 export type TaskCriterionId = Branded<'TaskCriterionId'>
@@ -40,6 +40,37 @@ export type AttentionItemId = Branded<'AttentionItemId'>
  */
 export function AttentionItemId(value: string): AttentionItemId {
   return value as AttentionItemId
+}
+
+/** Stable identity of a root-owned integration attempt, derived from its call event sequence. */
+export type TaskIntegrationNodeId = Branded<'TaskIntegrationNodeId'>
+
+/**
+ * Brand a projection-produced integration identity.
+ * @param value - owning Session and call sequence identity.
+ * @returns the branded identity.
+ */
+export function TaskIntegrationNodeId(value: string): TaskIntegrationNodeId {
+  return value as TaskIntegrationNodeId
+}
+
+/** Recorded integration outcome; missing or unverifiable receipts never imply Git success. */
+export type TaskIntegrationOutcome =
+  | { readonly kind: 'running' | 'unconfirmed' }
+  | { readonly kind: 'failed'; readonly message: string }
+  | { readonly kind: 'integrated'; readonly result: TaskIntegrationReceipt }
+  | { readonly kind: 'conflict'; readonly result: TaskIntegrationConflict }
+
+/** One integration attempt reconstructed from native or Code Mode tool events. */
+export interface TaskIntegrationNode {
+  readonly id: TaskIntegrationNodeId
+  readonly callSeq: number
+  readonly startedAt: number
+  readonly writerSessionIds: readonly SessionId[]
+  readonly outcome: TaskIntegrationOutcome
+  readonly finishedAt?: number
+  /** Later successful batches cover every writer selected by this conflict, including revised commits. */
+  readonly resolvedBy?: TaskIntegrationNodeId
 }
 
 /** Durable state of one acceptance criterion. */
@@ -130,6 +161,8 @@ export interface TaskSnapshot {
   readonly commitReceipt?: TaskCommitReceipt
   readonly applyReceipt?: TaskApplyReceipt
   readonly discardReceipt?: TaskDiscardReceipt
+  /** Absent when the root log contains no integration attempts. */
+  readonly integrations?: readonly TaskIntegrationNode[]
   readonly updatedAt: number
   readonly asOfSeq: number
 }

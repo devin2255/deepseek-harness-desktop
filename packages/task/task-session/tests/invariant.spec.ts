@@ -1,4 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
+import { readFileSync } from 'node:fs'
 import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -29,6 +30,28 @@ async function install(snapshot: TaskListSnapshot) {
 }
 
 describe('task-session invariants', () => {
+  it('validates logged integration ownership and later contributor coverage on published changes', async () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../../../scripts/snapshots/task-integration-sdk/task.json', import.meta.url), 'utf8')) as TaskSnapshot
+    const test = await install({ generation: 0, tasks: [fixture] })
+    await test.fiber
+    const nodes = fixture.integrations!
+    const unresolved = { ...nodes[0]! }
+    delete unresolved.resolvedBy
+    const invalid: TaskSnapshot[] = [
+      { ...fixture, asOfSeq: 1 },
+      { ...fixture, taskId: sid('other') },
+      { ...fixture, descendantSessionIds: [] },
+      { ...fixture, integrations: [nodes[1]!, nodes[0]!] },
+      { ...fixture, integrations: [{ ...nodes[0]!, resolvedBy: nodes[1]!.id }, ...nodes.slice(1)] },
+      { ...fixture, integrations: [{ ...nodes[0]!, writerSessionIds: [sid('writer-b')] }, ...nodes.slice(1)] },
+      { ...fixture, workspaceId: 'foreign' as never },
+      { ...fixture, integrations: [unresolved, ...nodes.slice(1)] },
+    ]
+    for (const value of invalid) expect(() => { test.change({ generation: 1, tasks: [value] }) }).toThrow(InvariantError)
+    expect(() => { test.change({ generation: 2, tasks: [fixture] }) }).not.toThrow()
+    await test.ctx.fiber.dispose()
+  })
+
   it('accepts a unique tree and validates later changes', async () => {
     const test = await install({ generation: 0, tasks: [row()] })
     await expect(test.fiber).resolves.toBeDefined()

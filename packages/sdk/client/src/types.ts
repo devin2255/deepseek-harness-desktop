@@ -90,10 +90,12 @@ export type { ContentBlock }
 export type {
   AttentionItem, DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest,
   TaskCriterion, TaskDefinition, TaskListSnapshot, TaskReviewDecision, TaskRisk,
+  TaskIntegrationNode, TaskIntegrationNodeId, TaskIntegrationOutcome,
   TaskSnapshot, TaskStatus, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
 export type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 export type {
   TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff,
+  TaskIntegrationContributor, TaskIntegrationReceipt, TaskIntegrationConflict,
   TaskReviewFile, TaskReviewFileStatus, TaskReviewRevision, TaskReviewSummary,
 } from '@deepseek-ai/dsh-task-review/types'

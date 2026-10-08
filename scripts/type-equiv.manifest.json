@@ -3,6 +3,16 @@
   "entries": [
     {
       "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationOutcome",
+      "source": "packages/task/task/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationNode",
+      "source": "packages/task/task/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
       "symbol": "TaskIntegrationInput",
       "source": "packages/task/task-review/src/types.ts"
     },

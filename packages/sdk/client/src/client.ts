@@ -606,7 +606,87 @@ function decodeTaskSnapshot(value: unknown): TaskSnapshot {
   if (value.discardReceipt !== undefined && !isDiscardReceipt(value.discardReceipt, value.taskId, value.workspaceId)) {
     throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
   }
+  if (value.integrations !== undefined && !isIntegrationHistory(
+    value.integrations, value.taskId, value.workspaceId, value.descendantSessionIds, Number(value.asOfSeq),
+  )) {
+    throw new SdkProtocolError(`Task response carried a malformed row: ${JSON.stringify(value)}`)
+  }
   return value as unknown as TaskSnapshot
+}
+
+/** Validate complete logged attempts and their later contributor coverage. */
+function isIntegrationHistory(
+  value: unknown, taskId: string, workspaceId: unknown, descendants: unknown[], asOfSeq: number,
+): boolean {
+  if (!Array.isArray(value) || value.length === 0) return false
+  let previousSeq = -1
+  for (const node of value) {
+    if (!isRecord(node) || !onlyKeys(node, ['id', 'callSeq', 'startedAt', 'writerSessionIds', 'outcome', 'finishedAt', 'resolvedBy'])
+      || !isCount(node.callSeq) || node.callSeq <= previousSeq || node.callSeq >= asOfSeq
+      || node.id !== `${taskId}:integration:${node.callSeq}` || !isTimestamp(node.startedAt)
+      || node.finishedAt !== undefined && !isTimestamp(node.finishedAt)
+      || !Array.isArray(node.writerSessionIds) || !node.writerSessionIds.every(isNonBlank)
+      || new Set(node.writerSessionIds).size !== node.writerSessionIds.length
+      || !isRecord(node.outcome)) return false
+    previousSeq = node.callSeq
+    const outcome = node.outcome
+    switch (outcome.kind) {
+      case 'running':
+      case 'unconfirmed':
+        if (!onlyKeys(outcome, ['kind'])) return false
+        break
+      case 'failed':
+        if (!onlyKeys(outcome, ['kind', 'message']) || !isNonBlank(outcome.message)) return false
+        break
+      case 'integrated':
+      case 'conflict':
+        if (!onlyKeys(outcome, ['kind', 'result'])
+          || !isIntegrationResult(outcome.result, outcome.kind, taskId, workspaceId, node.writerSessionIds, descendants)) return false
+        break
+      default:
+        return false
+    }
+    if (node.resolvedBy !== undefined && (outcome.kind !== 'conflict' || !isNonBlank(node.resolvedBy))) return false
+  }
+  // Each row is validated above; this pass only checks the cross-row resolution relationship.
+  const nodes = value as NonNullable<TaskSnapshot['integrations']>
+  return nodes.every((node, index) => {
+    if (node.outcome.kind !== 'conflict') return true
+    const remaining = new Set(node.writerSessionIds)
+    const resolved = nodes.slice(index + 1).find((later) => {
+      if (later.outcome.kind !== 'integrated') return false
+      for (const writer of later.writerSessionIds) remaining.delete(writer)
+      return remaining.size === 0
+    })
+    return node.resolvedBy === resolved?.id
+  })
+}
+
+function isIntegrationResult(
+  value: unknown, kind: 'integrated' | 'conflict', taskId: string, workspaceId: unknown,
+  writers: unknown[], descendants: unknown[],
+): boolean {
+  if (!isRecord(value) || value.kind !== kind || !isReceiptIdentity(value, taskId, workspaceId)
+    || !isRevision(value.reviewRevision) || !isObjectId(value.headBefore)
+    || !Array.isArray(value.contributors) || value.contributors.length === 0 || value.contributors.length !== writers.length
+    || !value.contributors.every((item, index) => isRecord(item)
+      && onlyKeys(item, ['sessionId', 'branch', 'commit', 'reviewRevision'])
+      && item.sessionId === writers[index] && descendants.includes(item.sessionId)
+      && isNonBlank(item.branch) && isObjectId(item.commit) && isRevision(item.reviewRevision))) return false
+  const common = ['kind', 'operationId', 'taskId', 'workspaceId', 'reviewRevision', 'headBefore', 'contributors']
+  return kind === 'integrated'
+    ? onlyKeys(value, [...common, 'headAfter', 'integratedAt']) && isObjectId(value.headAfter) && isTimestamp(value.integratedAt)
+    : onlyKeys(value, [...common, 'conflictingSessionId', 'paths', 'detectedAt'])
+      && writers.includes(value.conflictingSessionId) && Array.isArray(value.paths) && value.paths.length > 0
+      && value.paths.every(path => isReviewPath(path) && !/^[A-Za-z]:/u.test(path)) && isTimestamp(value.detectedAt)
+}
+
+function onlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
+  return Object.keys(value).every(key => keys.includes(key))
+}
+
+function isNonBlank(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value === value.trim()
 }
 
 /** Validate a bounded Task review summary without trusting provider output. */

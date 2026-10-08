@@ -1,5 +1,11 @@
 /** Task Review workspace dictionary. */
 export const zh = {
+  integrations: 'Agent 成果集成', integrationHelp: '合并记录来自任务日志。合入根任务不代表已应用到项目。',
+  'integration.running': '正在集成', 'integration.unconfirmed': '结果未确认', 'integration.failed': '工具执行失败',
+  'integration.integrated': '已合入根任务', 'integration.conflict': '预检发现冲突', integrationResolved: '后续集成已覆盖全部参与者',
+  inspectWriter: '检查 Agent：{id}', integrationHead: '根任务 HEAD',
+  integrationConflictHelp: '本次预检未发布合并结果。检查子 Agent 的冲突文件，修订后重新审查和集成；原始项目保持不变。',
+  integrationUnconfirmedHelp: '没有可验证的完整回执。先检查根任务与子 Agent 的 Git 状态，不要直接重复合并。',
   reviewSource: '审查对象', rootResult: '根任务成果', writerResult: 'Agent 成果：{id}',
   writerReadOnly: '当前只读检查子 Agent 成果，不会提交或合并。仅支持已释放执行权的独立工作树；共享目录子级不能单独审查。根任务交付操作已禁用，切回根任务后再操作。',
   sourcesLoading: '正在加载子 Agent 成果目录…',
@@ -31,6 +37,12 @@ export type TaskReviewKey = keyof typeof zh
 
 /** English Task Review copy. */
 export const en = {
+  integrations: 'Agent result integration', integrationHelp: 'Integration history comes from the task log. Merging into the root does not apply changes to the project.',
+  'integration.running': 'Integrating', 'integration.unconfirmed': 'Outcome unconfirmed', 'integration.failed': 'Tool execution failed',
+  'integration.integrated': 'Merged into root task', 'integration.conflict': 'Preflight conflict', integrationResolved: 'Later integrations cover every contributor',
+  inspectWriter: 'Inspect Agent: {id}', integrationHead: 'Root task HEAD',
+  integrationConflictHelp: 'This preflight published no merge result. Inspect the child Agent conflict files, revise them, then review and integrate again. The original project is unchanged.',
+  integrationUnconfirmedHelp: 'No complete verifiable receipt is available. Inspect the root and child Git states before repeating the merge.',
   reviewSource: 'Review source', rootResult: 'Root task result', writerResult: 'Agent result: {id}',
   writerReadOnly: 'Read-only inspection of a child Agent result; nothing is committed or merged. Only isolated worktrees with released execution can be reviewed; shared-directory children cannot. Root delivery actions are disabled. Return to the root result to deliver it.',
   sourcesLoading: 'Loading child Agent result catalog…',

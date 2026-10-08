@@ -59,6 +59,21 @@ function props(): TaskOverviewProps {
 }
 
 describe('TaskOverview', () => {
+  it('opens the root review for integration conflicts instead of navigating to a conversation', async () => {
+    const p = props()
+    const state = p.useTasks!(value => value)!
+    const task = state.byId['root' as SessionId]!
+    p.useTasks = selector => selector({ ...state, byId: { ...state.byId, ['root' as SessionId]: { ...task,
+      integrations: [{ id: 'root:integration:1' as never, callSeq: 1, startedAt: 1, writerSessionIds: [], outcome: { kind: 'unconfirmed' } }],
+      attention: [{ ...task.attention[0]!, kind: 'merge-conflict', summary: 'src/shared.ts' }],
+    } } })
+    const view = render(<TaskOverview {...p} />)
+    expect(view.getByRole('button', { name: 'Review changes' })).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: /Merge conflict: src\/shared.ts/ }))
+    await waitFor(() => { expect(p.openReview).toHaveBeenCalledExactlyOnceWith('root') })
+    expect(p.openTask).not.toHaveBeenCalled()
+  })
+
   it('opens the selected task runtime from the overview', () => {
     const p = props()
     const view = render(<TaskOverview {...p} />)

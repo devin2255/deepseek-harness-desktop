@@ -4587,6 +4587,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TaskIntegrationInput {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly commit: string;\n}',
   },
   {
+    name: 'TaskIntegrationNode',
+    declaration: 'export interface TaskIntegrationNode {\n    readonly id: TaskIntegrationNodeId;\n    readonly callSeq: number;\n    readonly startedAt: number;\n    readonly writerSessionIds: readonly SessionId[];\n    readonly outcome: TaskIntegrationOutcome;\n    readonly finishedAt?: number;\n    readonly resolvedBy?: TaskIntegrationNodeId;\n}',
+  },
+  {
+    name: 'TaskIntegrationNodeId',
+    declaration: 'export type TaskIntegrationNodeId = Branded<\'TaskIntegrationNodeId\'>;',
+  },
+  {
+    name: 'TaskIntegrationOutcome',
+    declaration: 'export type TaskIntegrationOutcome = {\n    readonly kind: \'running\' | \'unconfirmed\';\n} | {\n    readonly kind: \'failed\';\n    readonly message: string;\n} | {\n    readonly kind: \'integrated\';\n    readonly result: TaskIntegrationReceipt;\n} | {\n    readonly kind: \'conflict\';\n    readonly result: TaskIntegrationConflict;\n};',
+  },
+  {
     name: 'TaskIntegrationReceipt',
     declaration: 'export interface TaskIntegrationReceipt {\n    readonly kind: \'integrated\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly headBefore: string;\n    readonly headAfter: string;\n    readonly contributors: readonly TaskIntegrationContributor[];\n    readonly integratedAt: number;\n}',
   },
@@ -4640,7 +4652,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskSnapshot',
-    declaration: 'export interface TaskSnapshot {\n    readonly taskId: SessionId;\n    readonly workspaceId?: WorkspaceId;\n    readonly executionWorkspace?: TaskWorktreeAssignment;\n    readonly definition?: TaskDefinition;\n    readonly descendantSessionIds: readonly SessionId[];\n    readonly status: TaskStatus;\n    readonly freshness: TaskFreshness;\n    readonly attention: readonly AttentionItem[];\n    readonly risks: readonly TaskRisk[];\n    readonly reviewDecision?: TaskReviewDecision;\n    readonly commitReceipt?: TaskCommitReceipt;\n    readonly applyReceipt?: TaskApplyReceipt;\n    readonly discardReceipt?: TaskDiscardReceipt;\n    readonly updatedAt: number;\n    readonly asOfSeq: number;\n}',
+    declaration: 'export interface TaskSnapshot {\n    readonly taskId: SessionId;\n    readonly workspaceId?: WorkspaceId;\n    readonly executionWorkspace?: TaskWorktreeAssignment;\n    readonly definition?: TaskDefinition;\n    readonly descendantSessionIds: readonly SessionId[];\n    readonly status: TaskStatus;\n    readonly freshness: TaskFreshness;\n    readonly attention: readonly AttentionItem[];\n    readonly risks: readonly TaskRisk[];\n    readonly reviewDecision?: TaskReviewDecision;\n    readonly commitReceipt?: TaskCommitReceipt;\n    readonly applyReceipt?: TaskApplyReceipt;\n    readonly discardReceipt?: TaskDiscardReceipt;\n    readonly integrations?: readonly TaskIntegrationNode[];\n    readonly updatedAt: number;\n    readonly asOfSeq: number;\n}',
   },
   {
     name: 'TaskStatus',

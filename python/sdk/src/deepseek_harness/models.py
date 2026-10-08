@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | dict[str, "JsonValue"] | list["JsonValue"]
@@ -190,6 +190,100 @@ class TaskDiscardReceipt(TaskReceipt):
     discarded_at: int = Field(alias="discardedAt", ge=0)
 
 
+def _integration_text(value: str) -> str:
+    if not value or value != value.strip():
+        raise ValueError("integration text must be nonblank without surrounding whitespace")
+    return value
+
+
+_IntegrationText: TypeAlias = Annotated[str, AfterValidator(_integration_text)]
+
+
+class TaskIntegrationContributor(TaskWireModel):
+    session_id: _IntegrationText = Field(alias="sessionId")
+    branch: _IntegrationText
+    commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    review_revision: str = Field(alias="reviewRevision", pattern=r"^[0-9a-f]{64}$")
+
+
+class TaskIntegrationResult(TaskReceipt):
+    head_before: str = Field(alias="headBefore", pattern=r"^[0-9a-f]{40}$")
+    contributors: list[TaskIntegrationContributor] = Field(min_length=1)
+
+
+class TaskIntegrationReceipt(TaskIntegrationResult):
+    kind: Literal["integrated"]
+    head_after: str = Field(alias="headAfter", pattern=r"^[0-9a-f]{40}$")
+    integrated_at: int = Field(alias="integratedAt", ge=0)
+
+
+class TaskIntegrationConflict(TaskIntegrationResult):
+    kind: Literal["conflict"]
+    conflicting_session_id: _IntegrationText = Field(alias="conflictingSessionId")
+    paths: list[str] = Field(min_length=1)
+    detected_at: int = Field(alias="detectedAt", ge=0)
+
+    @field_validator("paths")
+    @classmethod
+    def validate_paths(cls, paths: list[str]) -> list[str]:
+        for path in paths:
+            TaskReviewFile.validate_review_path(path)
+            if len(path) >= 2 and path[0].isascii() and path[0].isalpha() and path[1] == ":":
+                raise ValueError("integration paths must be repository-relative")
+        return paths
+
+    @model_validator(mode="after")
+    def validate_conflicting_session(self) -> "TaskIntegrationConflict":
+        if self.conflicting_session_id not in [item.session_id for item in self.contributors]:
+            raise ValueError("conflictingSessionId must identify a contributor")
+        return self
+
+
+class TaskIntegrationPending(TaskWireModel):
+    kind: Literal["running", "unconfirmed"]
+
+
+class TaskIntegrationFailed(TaskWireModel):
+    kind: Literal["failed"]
+    message: _IntegrationText
+
+
+class TaskIntegrationIntegrated(TaskWireModel):
+    kind: Literal["integrated"]
+    result: TaskIntegrationReceipt
+
+
+class TaskIntegrationConflicted(TaskWireModel):
+    kind: Literal["conflict"]
+    result: TaskIntegrationConflict
+
+
+TaskIntegrationOutcome: TypeAlias = Annotated[
+    TaskIntegrationPending | TaskIntegrationFailed | TaskIntegrationIntegrated | TaskIntegrationConflicted,
+    Field(discriminator="kind"),
+]
+
+
+class TaskIntegrationNode(TaskWireModel):
+    """One logged integration attempt; an unconfirmed outcome never proves Git publication."""
+
+    id: _IntegrationText
+    call_seq: int = Field(alias="callSeq", ge=0)
+    started_at: int = Field(alias="startedAt", ge=0)
+    writer_session_ids: list[_IntegrationText] = Field(alias="writerSessionIds")
+    outcome: TaskIntegrationOutcome
+    finished_at: int | None = Field(default=None, alias="finishedAt", ge=0)
+    resolved_by: _IntegrationText | None = Field(default=None, alias="resolvedBy")
+
+    @model_validator(mode="after")
+    def validate_selected_writers(self) -> "TaskIntegrationNode":
+        if len(set(self.writer_session_ids)) != len(self.writer_session_ids):
+            raise ValueError("writerSessionIds must be unique")
+        if self.resolved_by is not None and self.outcome.kind != "conflict":
+            raise ValueError("only a conflict can identify a later resolution")
+        return self
+
+
 class TaskSnapshot(TaskWireModel):
     task_id: str = Field(alias="taskId")
     workspace_id: str | None = Field(default=None, alias="workspaceId")
@@ -204,6 +298,7 @@ class TaskSnapshot(TaskWireModel):
     commit_receipt: TaskCommitReceipt | None = Field(default=None, alias="commitReceipt")
     apply_receipt: TaskApplyReceipt | None = Field(default=None, alias="applyReceipt")
     discard_receipt: TaskDiscardReceipt | None = Field(default=None, alias="discardReceipt")
+    integrations: list[TaskIntegrationNode] | None = Field(default=None, min_length=1)
     updated_at: int = Field(alias="updatedAt")
     as_of_seq: int = Field(alias="asOfSeq")
 
@@ -229,6 +324,33 @@ class TaskSnapshot(TaskWireModel):
             self.discard_receipt.review_revision != self.commit_receipt.committed_revision
         ):
             raise ValueError("discardReceipt must identify the committed review revision")
+        previous_seq = -1
+        nodes = self.integrations or []
+        for index, node in enumerate(nodes):
+            if node.id != f"{self.task_id}:integration:{node.call_seq}" or not (
+                previous_seq < node.call_seq < self.as_of_seq
+            ):
+                raise ValueError("integration ids and call sequences must match the owning Task log")
+            previous_seq = node.call_seq
+            if isinstance(node.outcome, (TaskIntegrationIntegrated, TaskIntegrationConflicted)):
+                result = node.outcome.result
+                selected = [item.session_id for item in result.contributors]
+                if result.task_id != self.task_id or result.workspace_id != self.workspace_id or (
+                    selected != node.writer_session_ids
+                    or any(writer not in self.descendant_session_ids for writer in selected)
+                ):
+                    raise ValueError("integration results must match the Task and selected descendants")
+            if node.outcome.kind == "conflict":
+                remaining = set(node.writer_session_ids)
+                resolved_by = None
+                for later in nodes[index + 1:]:
+                    if later.outcome.kind == "integrated":
+                        remaining.difference_update(later.writer_session_ids)
+                        if not remaining:
+                            resolved_by = later.id
+                            break
+                if node.resolved_by != resolved_by:
+                    raise ValueError("resolvedBy must identify complete later contributor coverage")
         return self
 
 

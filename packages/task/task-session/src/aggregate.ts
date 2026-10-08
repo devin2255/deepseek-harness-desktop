@@ -13,6 +13,7 @@ import {
 } from '@deepseek-ai/dsh-task'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {} from '@deepseek-ai/dsh-user-approval'
+import { projectIntegrations } from './integrations.ts'
 
 /** Detached Session input; absent events mean the known log could not be inspected. */
 export interface TaskSessionInput {
@@ -174,6 +175,15 @@ export function aggregateTasks(input: TaskAggregationInput): TaskListSnapshot {
     const fold = root.events === undefined ? undefined : foldTask(root.events)
     const live = liveByRoot.get(root.header.id) ?? []
     const attention = tree.flatMap(session => durableAttention(root.header.id, session))
+    const integrations = projectIntegrations(root, fold?.assignment, children,
+      input.freshness !== 'disconnected' && input.freshness !== 'unavailable'
+        && live.some(fact => fact.kind === 'activity' && fact.ownerSessionId === root.header.id && fact.state === 'running'))
+    for (const node of integrations) {
+      if (node.outcome.kind !== 'conflict' || node.resolvedBy !== undefined || fold?.discardReceipt !== undefined) continue
+      attention.push({ id: AttentionItemId(node.id), taskId: root.header.id, ownerSessionId: root.header.id,
+        kind: 'merge-conflict', severity: 'error', summary: node.outcome.result.paths.join(', '),
+        createdAt: node.finishedAt ?? node.startedAt, sourceId: node.id, actionable: true })
+    }
     for (const fact of live) if (fact.kind === 'attention') attention.push(clone(fact.item))
     const newestEvent = tree.flatMap(session => session.events ?? []).reduce((latest, event) => Math.max(latest, event.time), 0)
     const newestLive = live.reduce((latest, fact) => Math.max(latest,
@@ -219,6 +229,7 @@ export function aggregateTasks(input: TaskAggregationInput): TaskListSnapshot {
       ...fold?.commitReceipt === undefined ? {} : { commitReceipt: clone(fold.commitReceipt) },
       ...fold?.applyReceipt === undefined ? {} : { applyReceipt: clone(fold.applyReceipt) },
       ...fold?.discardReceipt === undefined ? {} : { discardReceipt: clone(fold.discardReceipt) },
+      ...integrations.length === 0 ? {} : { integrations: clone(integrations) },
       updatedAt,
       asOfSeq: root.events?.length ?? 0,
     })

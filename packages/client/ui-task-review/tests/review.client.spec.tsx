@@ -83,6 +83,39 @@ function harness(over: Partial<TaskReviewState> = {}, taskOver: Partial<TaskSnap
 }
 
 describe('TaskReview', () => {
+  it('keeps conflict history visible without root file changes and blocks delivery until all contributors are integrated', () => {
+    const result = { kind: 'conflict' as const, operationId: 'operation' as never, taskId, workspaceId: 'workspace' as never,
+      reviewRevision: revision, headBefore: '0'.repeat(40), contributors: [
+        { sessionId: 'writer' as SessionId, branch: 'writer-branch', commit: '1'.repeat(40), reviewRevision: revision },
+      ], conflictingSessionId: 'writer' as SessionId, paths: ['src/shared.ts'], detectedAt: 2 }
+    const node = { id: 'root:integration:1' as never, callSeq: 1, startedAt: 1, finishedAt: 2,
+      writerSessionIds: ['writer' as SessionId], outcome: { kind: 'conflict' as const, result } }
+    const p = harness({ summary: summary({ files: [], dirty: false }) }, { status: 'needs-attention', integrations: [node] })
+    const view = render(<TaskReview {...p} />)
+    expect(view.getByRole('region', { name: 'Agent result integration' })).toBeTruthy()
+    expect(view.getByText('src/shared.ts')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Inspect Agent: writer' }))
+    expect(p.selectSource).toHaveBeenCalledExactlyOnceWith(taskId, 'writer')
+    expect((view.getByRole('button', { name: 'Create Commit' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((view.getByRole('button', { name: 'Apply to Project' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((view.getByRole('button', { name: 'Request Changes' }) as HTMLButtonElement).disabled).toBe(false)
+    view.rerender(<TaskReview {...harness({}, { integrations: [
+      { ...node, resolvedBy: 'later' as never },
+      { ...node, id: 'later' as never, callSeq: 3, outcome: { kind: 'unconfirmed' } },
+      { ...node, id: 'failure' as never, callSeq: 4, outcome: { kind: 'failed', message: 'Git rejected the operation' } },
+      { ...node, id: 'running' as never, callSeq: 5, outcome: { kind: 'running' } },
+      { ...node, id: 'success' as never, callSeq: 6, outcome: { kind: 'integrated', result: {
+        kind: 'integrated', operationId: result.operationId, taskId, workspaceId: result.workspaceId,
+        reviewRevision: revision, headBefore: result.headBefore, headAfter: '2'.repeat(40), contributors: result.contributors, integratedAt: 7,
+      } } },
+    ] })} />)
+    expect(view.getByText(/Later integrations cover every contributor/)).toBeTruthy()
+    expect(view.getByText('Outcome unconfirmed')).toBeTruthy()
+    expect(view.getByText('Git rejected the operation')).toBeTruthy()
+    expect(view.getByText('Integrating')).toBeTruthy()
+    expect(view.getByText('Merged into root task')).toBeTruthy()
+  })
+
   it('observes the durable child catalog and retains a selected result absent from its latest rows', async () => {
     const p = harness({ writerSessionId: 'unlisted' as SessionId })
     const rows: SessionListState = {

@@ -142,6 +142,11 @@ try {
     commits: events.filter(event => event.data.message.content[0].toolCallId.startsWith('commit_agent_changes:')).length,
     integrations: events.filter(event => event.data.message.content[0].toolCallId.startsWith('integrate_agents:')).length,
     errors: events.filter(event => event.data.message.content[0].isError).length })
+  const projected = runtime.tasks.snapshot().tasks.find(task => task.taskId === integration.taskId)!
+  const projection = { outcomes: projected.integrations?.map(node => node.outcome.kind),
+    writers: projected.integrations?.map(node => node.writerSessionIds.map(id => children.indexOf(id))),
+    conflictRetained: projected.attention.some(item => item.kind === 'merge-conflict'), status: projected.status }
+  output({ stage: 'projection', ...projection })
   runtime.on('agent/pre-step', async ({ agent }, next) => agent === parent.agent ? { kind: 'reject' as const } : next())
   const next = await runtime.subagents.start('writer', { parent: parent.agent, label: 'writer-e', prompt: [{ type: 'text', text: 'writer-e' }], signal: new AbortController().signal })
   const assignment = foldSubagentWorktree(runtime.agents.get(next.id)!.session.events)!.assignment
@@ -149,6 +154,13 @@ try {
   await next.result
   await next.dispose()
   await parent.dispose()
+  await runtime.fiber.dispose()
+  ctx = undefined
+  ctx = await boot('writer-integration-cold-replay', resolveConfigPath(configPath, undefined))
+  const cold = ctx.tasks.snapshot().tasks.find(task => task.taskId === integration.taskId)!
+  output({ stage: 'cold-replay', nodesUnchanged: JSON.stringify(cold.integrations) === JSON.stringify(projected.integrations),
+    conflictRetained: cold.attention.some(item => item.kind === 'merge-conflict'),
+    noAgentActivation: ctx.agents.get(integration.taskId) === undefined && children.every(id => ctx!.agents.get(id) === undefined) })
 } catch (error: unknown) {
   barrier.resolve(undefined)
   process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`)

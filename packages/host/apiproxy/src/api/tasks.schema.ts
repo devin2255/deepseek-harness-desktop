@@ -67,6 +67,26 @@ const taskDiscardReceiptSchema = z.strictObject({
   reviewRevision, branch: nonBlank, branchPreserved: z.literal(true), worktreeRemoved: z.literal(true),
   uncommittedChangesDiscarded: z.boolean(), recoverableCommit: gitObjectId.optional(), discardedAt: sequence,
 })
+const integrationContributor = z.strictObject({ sessionId: identity, branch: nonBlank, commit: gitObjectId, reviewRevision })
+const integrationCommon = {
+  operationId, taskId: identity, workspaceId: identity, reviewRevision, headBefore: gitObjectId,
+  contributors: z.array(integrationContributor).min(1),
+}
+const integratedResult = z.strictObject({ ...integrationCommon, kind: z.literal('integrated'), headAfter: gitObjectId, integratedAt: sequence })
+const conflictResult = z.strictObject({ ...integrationCommon, kind: z.literal('conflict'), conflictingSessionId: identity,
+  paths: z.array(reviewPath).min(1), detectedAt: sequence })
+  .refine(value => value.contributors.some(item => item.sessionId === value.conflictingSessionId))
+const integrationNode = z.strictObject({
+  id: identity, callSeq: sequence, startedAt: sequence, writerSessionIds: z.array(identity),
+  outcome: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('running') }), z.strictObject({ kind: z.literal('unconfirmed') }),
+    z.strictObject({ kind: z.literal('failed'), message: nonBlank }),
+    z.strictObject({ kind: z.literal('integrated'), result: integratedResult }),
+    z.strictObject({ kind: z.literal('conflict'), result: conflictResult }),
+  ]),
+  finishedAt: sequence.optional(), resolvedBy: identity.optional(),
+}).refine(value => new Set(value.writerSessionIds).size === value.writerSessionIds.length)
+  .refine(value => value.resolvedBy === undefined || value.outcome.kind === 'conflict')
 
 /** Complete immutable assignment of one application-owned Git worktree. */
 export const taskWorktreeAssignmentSchema = z.strictObject({
@@ -98,6 +118,7 @@ export const taskSnapshotSchema = z.strictObject({
   commitReceipt: taskCommitReceiptSchema.optional(),
   applyReceipt: taskApplyReceiptSchema.optional(),
   discardReceipt: taskDiscardReceiptSchema.optional(),
+  integrations: z.array(integrationNode).min(1).optional(),
   updatedAt: z.number().int(),
   asOfSeq: sequence,
 }).refine(
@@ -105,6 +126,25 @@ export const taskSnapshotSchema = z.strictObject({
     || value.executionWorkspace.taskId === value.taskId
       && value.executionWorkspace.workspaceId === value.workspaceId,
   'executionWorkspace must match the Task and Workspace identities',
+).refine(value => value.integrations === undefined || value.integrations.every((node, index, nodes) => {
+  const previous = nodes[index - 1]
+  if (node.id !== `${value.taskId}:integration:${node.callSeq}` || node.callSeq >= value.asOfSeq
+    || previous !== undefined && previous.callSeq >= node.callSeq) return false
+  const outcome = node.outcome
+  if (outcome.kind !== 'integrated' && outcome.kind !== 'conflict') return true
+  if (outcome.result.taskId !== value.taskId || outcome.result.workspaceId !== value.workspaceId
+    || outcome.result.contributors.length !== node.writerSessionIds.length
+    || !outcome.result.contributors.every((item, writerIndex) => item.sessionId === node.writerSessionIds[writerIndex]
+      && value.descendantSessionIds.includes(item.sessionId))) return false
+  if (outcome.kind !== 'conflict') return true
+  const remaining = new Set(node.writerSessionIds)
+  const resolved = nodes.slice(index + 1).find((later) => {
+    if (later.outcome.kind !== 'integrated') return false
+    for (const writer of later.writerSessionIds) remaining.delete(writer)
+    return remaining.size === 0
+  })
+  return node.resolvedBy === resolved?.id
+}), 'integration nodes must match the owning Task and selected descendants',
 ) as unknown as z.ZodType<Wire<TaskSnapshot>>
 
 /** Complete task-list baseline. */

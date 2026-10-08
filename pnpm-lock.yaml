@@ -7977,6 +7977,10 @@ importers:
         version: link:../../workspace/workspace
 
   packages/task/task-session:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -7999,6 +8003,9 @@ importers:
       '@deepseek-ai/dsh-task-worktree':
         specifier: workspace:^
         version: link:../task-worktree
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
       '@deepseek-ai/dsh-user-approval':
         specifier: workspace:^
         version: link:../../interaction/user-approval

@@ -1589,10 +1589,27 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       id: 'fixture-criterion' as never, text: 'Review the fixture changes', status: 'satisfied',
       evidence: [{ sessionId: deliveryTaskId, seq: 3 }],
     }] },
-    descendantSessionIds: [], status: applyReceipt === undefined && commitReceipt === undefined ? 'ready' : 'settled',
+    descendantSessionIds: [sid('fx-beta.writer')], status: applyReceipt === undefined && commitReceipt === undefined ? 'ready' : 'settled',
     freshness: 'live', attention: [], risks: [], reviewDecision: 'ready',
     ...commitReceipt === undefined ? {} : { commitReceipt },
     ...applyReceipt === undefined ? {} : { applyReceipt },
+    integrations: [{
+      id: 'fx-beta:integration:0' as never, callSeq: 0, startedAt: 1, finishedAt: 2,
+      writerSessionIds: [sid('fx-beta.writer')], resolvedBy: 'fx-beta:integration:1' as never,
+      outcome: { kind: 'conflict', result: {
+        kind: 'conflict', operationId: '00000000-0000-4000-8000-000000000010' as never, taskId: deliveryTaskId,
+        workspaceId: wid('fx-ws-fixture'), reviewRevision: initialReviewRevision, headBefore: '0'.repeat(40),
+        contributors: [{ sessionId: sid('fx-beta.writer'), branch: 'writer', commit: '1'.repeat(40), reviewRevision: initialReviewRevision }],
+        conflictingSessionId: sid('fx-beta.writer'), paths: ['src/delivery.ts'], detectedAt: 2,
+      } },
+    }, {
+      id: 'fx-beta:integration:1' as never, callSeq: 1, startedAt: 3, finishedAt: 4, writerSessionIds: [sid('fx-beta.writer')],
+      outcome: { kind: 'integrated', result: {
+        kind: 'integrated', operationId: '00000000-0000-4000-8000-000000000011' as never, taskId: deliveryTaskId,
+        workspaceId: wid('fx-ws-fixture'), reviewRevision: initialReviewRevision, headBefore: '0'.repeat(40), headAfter: fixtureCommit,
+        contributors: [{ sessionId: sid('fx-beta.writer'), branch: 'writer', commit: fixtureCommit, reviewRevision: initialReviewRevision }], integratedAt: 4,
+      } },
+    }],
     updatedAt: applyReceipt?.appliedAt ?? commitReceipt?.committedAt ?? 5,
     asOfSeq: applyReceipt !== undefined ? 6 : commitReceipt !== undefined ? 5 : 4,
   })

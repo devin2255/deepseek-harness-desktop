@@ -199,7 +199,7 @@ export function TaskOverview({
                     {studioAvailable && <button type="button" className={css.reviewAction}
                       onClick={() => { openStudio(row.task.taskId) }}>{t('inspectRuntime')}</button>}
                     {row.task.executionWorkspace !== undefined
-                      && ['reviewing', 'ready', 'settled'].includes(row.task.status)
+                      && (['reviewing', 'ready', 'settled'].includes(row.task.status) || row.task.integrations !== undefined)
                       && <button type="button" className={css.reviewAction}
                         onClick={() => { run(() => openReview(row.task.taskId)) }}>{t('reviewChanges')}</button>}
                     {row.task.status === 'settled' && row.task.freshness === 'live'
@@ -222,7 +222,10 @@ export function TaskOverview({
                       {row.attention.map(entry => (
                         <li key={entry.item.id}>
                           <button type="button" className={css.pendingAction}
-                            onClick={() => { open(entry.item.ownerSessionId) }}>
+                            onClick={() => {
+                              if (entry.item.kind === 'merge-conflict' && row.task.executionWorkspace !== undefined) run(() => openReview(row.task.taskId))
+                              else open(entry.item.ownerSessionId)
+                            }}>
                             {attentionOwnerTitle(entry, row.attention)} — {t(`attention.${entry.item.kind}`)}: {entry.item.summary}
                           </button>
                         </li>

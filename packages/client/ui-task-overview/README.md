@@ -10,6 +10,8 @@ Each attention item has a navigation action for its exact owner Session. Root Se
 
 New Task accepts an explicit registered Workspace or uses the runtime's current/recent Workspace before entering the existing directory-setup flow. A resolved Workspace requests an application-owned Git worktree by default and opens the new Session only after Host acceptance. An isolation failure remains on the overview with the Host's user-safe diagnostic and the explicit choices **Retry isolation** and **Use project directly**; the client never silently retries in direct mode. Focus enters the recovery panel and returns to New Task after a successful retry. Task rows retain the registered Workspace title and label an assigned execution path as **Worktree**, with the exact path available as hover text. Refresh requests the Task, Session, and Workspace mirrors. Initial loading, synchronized emptiness, refresh failures, stale retained rows, and transport disconnection have distinct messages; disconnected or loading data disables Refresh and New Task. Structured Task command errors remain readable.
 
+Tasks with integration history expose Review even while they need attention. A merge-conflict attention action opens the owning root's Review instead of its conversation, so conflict paths and contributor results remain inspectable together. Opening Review does not resolve the conflict.
+
 ## Model Experience
 
 None, as this plugin only projects client metadata and invokes existing navigation actions; it contributes no model input.

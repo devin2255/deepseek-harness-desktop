@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -493,6 +494,43 @@ describe('Task RPC', () => {
 })
 
 describe('Task wire schemas', () => {
+  it('accepts the SDK history fixture and rejects the same malformed relationships and fields', () => {
+    const fixture = new URL('../../../../scripts/snapshots/task-integration-sdk/task.json', import.meta.url)
+    const value = JSON.parse(readFileSync(fixture, 'utf8')) as Record<string, unknown>
+    const invalid = JSON.parse(readFileSync(new URL('../../../../scripts/snapshots/task-integration-sdk/invalid.json', import.meta.url), 'utf8')) as {
+      name: string
+      path: string
+      value: unknown
+    }[]
+    expect(taskSnapshotSchema.safeParse(value).success).toBe(true)
+    for (const change of invalid) {
+      const modified = structuredClone(value)
+      const keys = change.path.split('/')
+      let target = modified
+      for (const key of keys.slice(0, -1)) target = target[key] as Record<string, unknown>
+      target[keys.at(-1)!] = change.value
+      expect(taskSnapshotSchema.safeParse(modified).success, change.name).toBe(false)
+    }
+  })
+
+  it('validates integration receipts against the owning root, call sequence, and selected descendants', () => {
+    const receipt = { kind: 'integrated', operationId: '00000000-0000-4000-8000-000000000001', taskId: rootId,
+      workspaceId: executionWorkspace.workspaceId, reviewRevision, headBefore: '0'.repeat(40), headAfter: '1'.repeat(40), integratedAt: 2,
+      contributors: [{ sessionId: 'writer', branch: 'writer', commit: '2'.repeat(40), reviewRevision }] }
+    const node = { id: 'root:integration:1', callSeq: 1, startedAt: 1, finishedAt: 2, writerSessionIds: ['writer'],
+      outcome: { kind: 'integrated', result: receipt } }
+    const value = { ...reviewRow, descendantSessionIds: ['writer'], integrations: [node] }
+    expect(taskSnapshotSchema.safeParse(value).success).toBe(true)
+    for (const invalid of [
+      { ...value, integrations: [] }, { ...value, taskId: 'other' }, { ...value, descendantSessionIds: [] },
+      { ...value, integrations: [{ ...node, id: 'other:integration:1' }] },
+      { ...value, integrations: [{ ...node, callSeq: 2 }] },
+      { ...value, integrations: [{ ...node, resolvedBy: 'fake' }] },
+      { ...value, integrations: [{ ...node, outcome: { kind: 'integrated', result: { ...receipt, taskId: 'other' } } }] },
+      { ...value, integrations: [{ ...node, outcome: { kind: 'integrated', result: { ...receipt, unexpected: true } } }] },
+    ]) expect(taskSnapshotSchema.safeParse(invalid).success).toBe(false)
+  })
+
   it('rejects unknown fields, blanks, negative sequences, and duplicate criterion ids', () => {
     expect(taskDefineRequestSchema.safeParse({ sessionId: 'root', goal: 'Ship', criteria: [], expectedSeq: 0, extra: true }).success).toBe(false)
     expect(taskDefineRequestSchema.safeParse({ sessionId: 'root', goal: ' ', criteria: [], expectedSeq: 0 }).success).toBe(false)

@@ -28,6 +28,30 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
           fail(`attention item "${item.id}" names a Session outside its Task tree`)
         }
       }
+      const integrations = task.integrations ?? []
+      for (const [index, node] of integrations.entries()) {
+        const previous = integrations[index - 1]
+        if (node.id !== `${task.taskId}:integration:${node.callSeq}` || node.callSeq >= task.asOfSeq
+          || previous !== undefined && previous.callSeq >= node.callSeq) {
+          fail(`integration node "${node.id}" does not identify an ordered root log call`)
+        }
+        const outcome = node.outcome
+        if (outcome.kind !== 'integrated' && outcome.kind !== 'conflict') continue
+        if (outcome.result.taskId !== task.taskId || outcome.result.workspaceId !== task.workspaceId
+          || outcome.result.contributors.length !== node.writerSessionIds.length
+          || outcome.result.contributors.some((item, writerIndex) => item.sessionId !== node.writerSessionIds[writerIndex]
+            || !task.descendantSessionIds.includes(item.sessionId))) {
+          fail(`integration node "${node.id}" does not match its Task and selected descendants`)
+        }
+        if (outcome.kind !== 'conflict') continue
+        const remaining = new Set(node.writerSessionIds)
+        const resolved = integrations.slice(index + 1).find((later) => {
+          if (later.outcome.kind !== 'integrated') return false
+          for (const writer of later.writerSessionIds) remaining.delete(writer)
+          return remaining.size === 0
+        })
+        if (node.resolvedBy !== resolved?.id) fail(`integration node "${node.id}" has inconsistent later contributor coverage`)
+      }
     }
   }
   validate()

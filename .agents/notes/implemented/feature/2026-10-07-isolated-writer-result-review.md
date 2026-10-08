@@ -26,7 +26,7 @@ The Review selector observes the existing durable direct-child catalog while mou
 
 ## Consequences
 
-Human inspection shares the Provider used by [writer integration tools](2026-10-07-batch-writer-integration.md), without adding model input, Session events, filesystem authority to the Renderer, or a second result database. The preparation, continuation, batch-publication, and [root-delivery](2026-09-13-task-review-delivery.md) notes remain active because each owns a distinct decision. Desktop writers remain opt-in. Child commit and integration controls, conflict attention and resolution, execution leases, orphan recovery, and full desktop writer acceptance remain incomplete.
+Human inspection shares the Provider used by [writer integration tools](2026-10-07-batch-writer-integration.md), without adding model input, Session events, filesystem authority to the Renderer, or a second result database. The preparation, continuation, batch-publication, and [root-delivery](2026-09-13-task-review-delivery.md) notes remain active because each owns a distinct decision. [Integration history](2026-10-08-task-integration-history.md) supplies conflict attention and links to contributor inspection. Desktop writers remain opt-in. Child commit and integration controls, conflict resolution, execution leases, orphan recovery, and full desktop writer acceptance remain incomplete.
 
 ## Verification
 

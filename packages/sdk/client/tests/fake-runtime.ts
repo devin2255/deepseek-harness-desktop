@@ -233,6 +233,10 @@ reader.on('line', (line) => {
       return
     }
     case 'task/list':
+      if (env.FAKE_TASK_INTEGRATION !== undefined) {
+        respond({ generation: 4, tasks: [JSON.parse(readFileSync(env.FAKE_TASK_INTEGRATION, 'utf8'))] })
+        return
+      }
       if (env.FAKE_MALFORMED_TASK !== undefined) {
         respond({ generation: 'wrong', tasks: [{}] })
         return

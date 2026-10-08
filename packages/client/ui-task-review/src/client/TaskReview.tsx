@@ -85,10 +85,11 @@ export function TaskReview({
   const writerSelected = review.writerSessionId !== undefined
   const busy = review.operation !== null
   const fresh = review.freshness === 'fresh' && review.state === 'ready' && !writerSelected
-  const canRequest = fresh && !busy && (task?.status === 'reviewing' || task?.status === 'ready')
-  const canCommit = fresh && !busy && task?.reviewDecision === 'ready'
+  const integrationBlocked = task?.integrations?.some(node => node.outcome.kind === 'conflict' && node.resolvedBy === undefined) === true
+  const canRequest = fresh && !busy && (task?.status === 'reviewing' || task?.status === 'ready' || integrationBlocked)
+  const canCommit = fresh && !busy && !integrationBlocked && task?.reviewDecision === 'ready'
     && task.commitReceipt === undefined && summary?.dirty === true
-  const canApply = fresh && !busy && task?.commitReceipt !== undefined
+  const canApply = fresh && !busy && !integrationBlocked && task?.commitReceipt !== undefined
     && task.applyReceipt === undefined && task.discardReceipt === undefined
   const canDiscard = fresh && !busy && task?.applyReceipt === undefined && task?.discardReceipt === undefined
   const visibleResult = review.result ?? task ?? null
@@ -148,6 +149,32 @@ export function TaskReview({
       </div>}
       {summary?.truncated === true && <div role="status" className={css.warning}>{t('truncated')}</div>}
       {summary?.sourceDirty === true && <div role="status" className={css.warning}>{t('sourceDirty')}</div>}
+
+      {task?.integrations !== undefined && <section className={css.integrations} aria-label={t('integrations')}>
+        <h2>{t('integrations')}</h2>
+        <p>{t('integrationHelp')}</p>
+        <ol>{task.integrations.map(node => <li key={node.id}>
+          <details open={node.outcome.kind === 'conflict' && node.resolvedBy === undefined}>
+            <summary><span className={clsx(css.badge, node.outcome.kind === 'conflict' && node.resolvedBy === undefined && css.high)}>
+              {t(`integration.${node.outcome.kind}`)}</span> · #{node.callSeq}
+            {node.resolvedBy !== undefined && <span> · {t('integrationResolved')}</span>}
+            </summary>
+            <div className={css.contributors}>{node.writerSessionIds.map(id => <button key={id} type="button" className={css.secondary}
+              disabled={busy || catalog?.entries.some(entry => entry.id === id && entry.kind === 'child' && entry.activity === 'running') === true}
+              onClick={() => { if (rootId !== undefined) void selectSource(rootId, id) }}>{t('inspectWriter', { id })}</button>)}</div>
+            {(node.outcome.kind === 'integrated' || node.outcome.kind === 'conflict') && <>
+              <code>{node.outcome.result.operationId}</code>
+              <p>{t('integrationHead')}: <code>{node.outcome.result.headBefore}</code>
+                {node.outcome.kind === 'integrated' && <> → <code>{node.outcome.result.headAfter}</code></>}</p>
+              {node.outcome.kind === 'conflict' && <><p>{t('integrationConflictHelp')}</p><ul>
+                {node.outcome.result.paths.map(path => <li key={path}><code>{path}</code></li>)}
+              </ul></>}
+            </>}
+            {node.outcome.kind === 'unconfirmed' && <p>{t('integrationUnconfirmedHelp')}</p>}
+            {node.outcome.kind === 'failed' && <p>{node.outcome.message}</p>}
+          </details>
+        </li>)}</ol>
+      </section>}
 
       {review.state !== 'loading' && summary !== null && summary.files.length === 0
         ? <div className={css.centerState}>{t('empty')}</div>

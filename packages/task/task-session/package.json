@@ -31,6 +31,9 @@
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
@@ -38,6 +41,7 @@
     "@deepseek-ai/dsh-task": "workspace:^",
     "@deepseek-ai/dsh-task-review": "workspace:^",
     "@deepseek-ai/dsh-task-worktree": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
     "@deepseek-ai/dsh-workspace": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
@@ -49,6 +53,7 @@
     "@deepseek-ai/dsh-task": "workspace:^",
     "@deepseek-ai/dsh-task-review": "workspace:^",
     "@deepseek-ai/dsh-task-worktree": "workspace:^",
+    "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/dsh-user-approval": "workspace:^",
     "@deepseek-ai/dsh-workspace": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"

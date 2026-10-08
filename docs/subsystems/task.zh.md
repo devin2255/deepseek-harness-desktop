@@ -2,7 +2,7 @@
 
 [English](task.md) | 中文
 
-Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个桌面工作项。应用所有的执行 Worktree、验收条件、证据、风险、评审决策和 Git 交付收据保留在根 Session 日志中；运行时活动与注意事项属于 generation 作用域输入，绝不会被重建为持久事实。
+Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个桌面工作项。应用所有的执行 Worktree、验收条件、证据、风险、评审决策和 Git 交付收据保留在根 Session 日志中。实时活动与交互注意事项属于 generation 作用域叠加值；持久审批、失败和集成冲突则分别从日志派生。
 
 ## 持久事实
 
@@ -31,7 +31,7 @@ interface CreateTaskWorktreeRequest {
 
 ## 写入者集成
 
-可选[写入者工具](../../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) 独立于根交付消费批量集成。确切的已审查提交只合并到托管根；普通持久化工具结果保留成功或不改变工作树的冲突回执。这些值尚未成为 Task 投影字段或冲突关注事件。
+可选[写入者工具](../../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) 独立于根交付消费批量集成。确切的已审查提交只合并到托管根；普通持久化工具结果保留成功或不改变工作树的冲突回执。[Session Provider](../../packages/task/task-session/README.md#projection-rules) 从这些结果重建显式尝试和未解决冲突注意事项。
 
 ```ts type-equiv
 /** One exact committed writer result selected for integration. */
@@ -105,6 +105,31 @@ type TaskIntegrationResult = TaskIntegrationReceipt | TaskIntegrationConflict
 当前状态优先级依次为 `needs-attention`、`failed`、`running`、由持久交付收据产生的 `settled`、`reviewing`、经明确证明的 `ready`，最后是空闲 `settled`。仅处于空闲状态绝不代表已经就绪。运行时断开或不可用会通过 `freshness` 明确表达，不会伪装成当前信息。
 
 冷态 Session 修复会用 `interrupted` 原因关闭未完成轮次，并为未配对的工具调用补充合成结果。Task 投影把该标记显示为由确切 Session 所属、不可直接操作的运行故障；进程内的问题注意事项不会被重建，工具调用也不会被重放。
+
+可选的 `TaskSnapshot.integrations` 包含有序的 `TaskIntegrationNode`，其不透明 id 由所属根与调用序号派生。`resolvedBy` 指定最后完成全部所选写入者覆盖的后续成功批次，并保留原冲突结果。缺失、spill 或无法验证的回执保持未确认，包括实时执行所有权丢失之后。这些记录从工具事件重建，不新增 Task 事件。
+
+```ts type-equiv
+/** Recorded integration outcome; missing or unverifiable receipts never imply Git success. */
+type TaskIntegrationOutcome =
+  | { readonly kind: 'running' | 'unconfirmed' }
+  | { readonly kind: 'failed'; readonly message: string }
+  | { readonly kind: 'integrated'; readonly result: TaskIntegrationReceipt }
+  | { readonly kind: 'conflict'; readonly result: TaskIntegrationConflict }
+```
+
+```ts type-equiv
+/** One integration attempt reconstructed from native or Code Mode tool events. */
+interface TaskIntegrationNode {
+  readonly id: TaskIntegrationNodeId
+  readonly callSeq: number
+  readonly startedAt: number
+  readonly writerSessionIds: readonly SessionId[]
+  readonly outcome: TaskIntegrationOutcome
+  readonly finishedAt?: number
+  /** Later successful batches cover every writer selected by this conflict, including revised commits. */
+  readonly resolvedBy?: TaskIntegrationNodeId
+}
+```
 
 ## 服务行为
 

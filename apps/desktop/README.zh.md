@@ -74,6 +74,8 @@ Electron 应用不添加模型可见内容。桌面 profile 的 [`@deepseek-ai/d
 
 “丢弃”始终需要显式确认。界面会把未提交的脏内容说明为不可恢复，并要求用户确认；已提交的 Task 分支在受管 worktree 删除后仍然保留。提交、应用和丢弃回执都是 Session 事件，因此其中确切的 Git 身份与恢复事实可在 Renderer 重载和冷态回放后恢复。
 
+集成尝试与预检冲突显示在根任务审查页中，冷启动 Host 后仍可恢复。未解决的冲突注意事项会打开该审查页，并阻止 Commit 和 Apply；它不代表已经写入冲突标记。[审查工作区](../../packages/client/ui-task-review/README.md) 负责结果展示及仍有的操作限制。
+
 ## Windows 安装程序开发
 
 `pnpm run desktop:package` 构建按用户安装的 x64 辅助安装程序，支持选择目录以及独立的桌面、开始菜单和登录启动选项。打包前会验证生成的 [PowerShell 命令](../../scripts/desktop/generate-installer-powershell.ts)和[卸载文件操作](../../scripts/desktop/generate-installer-file-operations.ts)。快捷方式所有权检查通过 `IShellLinkW` 或有界读取的 Shell Link LinkInfo、RelativePath 字段取得目标，即使目标已不存在；WScript 与 Shell 自动化接口作为回退，只有目标精确等于旧或新应用程序时才允许删除。精确进程查询通过 `Sysnative` 使用 64 位 PowerShell，因为 32 位 NSIS 宿主无法读取运行中 x64 应用的模块路径。文件操作生成器保留 electron-builder 的移动和回滚算法，并使用 Windows 扩展长度路径；上游模板变化时，必须先审查，再通过 `pnpm run desktop:generate-installer-file-operations` 重新生成。所有权与清理规则参见[安装程序决策](../../.agents/notes/implemented/feature/2026-08-24-retryable-desktop-startup-and-uninstall-cleanup.md)。
@@ -113,6 +115,6 @@ finally { Remove-Item Env:DSH_INSTALLER_E2E }
 ## 已知限制
 
 - **安装程序验证** — 分发前必须完成 Windows 生命周期验证，包括从单独构建的较旧签名版本升级；未签名的本地构建可能触发 SmartScreen，生产发布则必须使用受保护的签名环境并作出明确的手动决定。更新器要求已签名的 Windows 包，因此端到端下载与安装仍须通过签名发布验收。macOS Gatekeeper 验收、签名、公证与更新尚未实现。
-- **任务集成** — 任务总览、根任务隔离、审查与交付、子结果只读检查，以及只读 Studio 已可用。隔离子写入者与批量集成工具需要显式组合，桌面默认配置仍禁用它们。Integration 节点、子级提交和集成操作、冲突解决界面、孤立目录恢复，以及完整的逐任务插件配置、权限和工作流快照仍未完成。
+- **任务集成** — 任务总览、根任务隔离、审查与交付、集成历史与冲突注意事项、子结果只读检查，以及只读 Studio 已可用。隔离子写入者与批量集成工具需要显式组合，桌面默认配置仍禁用它们。子级提交和集成操作、冲突解决界面、孤立目录恢复，以及完整的逐任务插件配置、权限和工作流快照仍未完成。
 - **原生集成** — 已提供感知任务的托盘驻留，以及完成或注意事项通知。尚未实现深层链接、外部链接处理和窗口位置持久化。
 - **崩溃恢复** — 运行时退出恢复是显式且仅限本机的。计算机重启或断电后，应用不会自行重新启动；下次正常启动会执行冷态 Session 修复。
