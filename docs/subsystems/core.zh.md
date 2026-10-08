@@ -626,6 +626,19 @@ withInitiator<T>(agent: Agent, operation: () => T): T
 withoutInitiator<T>(operation: () => T): T
 
 /**
+ * Reserve an entire batch of Agent-free Sessions until an offline operation settles.
+ * Acquisition is synchronous and all-or-nothing; competing reservations and Agent
+ * publication fail rather than wait. This does not lock files or other processes.
+ * Ambient initiator attribution is preserved, and service teardown drains the operation.
+ * @param sessionIds - Session identities to keep without a registered Agent; duplicates are coalesced.
+ * @param operation - owned asynchronous work; its value or rejection is preserved.
+ * @returns the operation result after releasing every reservation.
+ * @throws when registry teardown has begun, or rejects with AgentOfflineReservationError
+ *   when a selected Session already has a registered Agent or offline owner.
+ */
+withOfflineSessions<T>(sessionIds: readonly SessionId[], operation: () => Promise<T>): Promise<T>
+
+/**
  * Register the agent-creation factory (the loop calls this on construction,
  * effect-scoped). A traced Cordis service is canonicalized to its concrete
  * target; each create/resume call is then traced through that caller's
@@ -737,7 +750,7 @@ list(): Agent[]
 roots(): Agent[]
 ```
 
-Source: [`packages/core/agent/src/index.ts:256`](../../packages/core/agent/src/index.ts)
+Source: [`packages/core/agent/src/index.ts:265`](../../packages/core/agent/src/index.ts)
 
 <a id="agent-events"></a>
 

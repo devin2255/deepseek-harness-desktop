@@ -3,7 +3,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { AgentOfflineReservationError, type Agent } from '@deepseek-ai/dsh-agent'
 import { boot, installFailLoud, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { LlmAdapter, CallId, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -58,12 +58,17 @@ try {
   let conflictPreserved = false
   let conflict: TaskIntegrationResult | undefined
   let integrated: TaskIntegrationResult | undefined
-  const taskInputs = ['root-integration', 'writer-a', 'writer-b', 'writer-c', 'writer-d', 'writer-e']
+  const taskInputs = ['offline-check', 'root-integration', 'writer-a', 'writer-b', 'writer-c', 'writer-d', 'writer-e']
   class FixtureModel extends LlmAdapter {
     override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
       const input = options.messages.filter(message => message.role === 'user').flatMap(message => message.content)
         .findLast(block => block.type === 'text' && taskInputs.includes(block.text))
       if (input?.type !== 'text') throw new Error('Missing explicit integration task input')
+      if (input.text === 'offline-check') {
+        yield* options.messages.some(message => message.content.some(block => block.type === 'tool-result'))
+          ? response('offline check done') : response('review_agent_changes', { subagent_id: children[0] })
+        return
+      }
       if (input.text !== 'root-integration') {
         await barrier.promise
         const label = input.text
@@ -117,12 +122,37 @@ try {
   const activeReview = await api.tasks.reviewSummary({ sessionId: integration.taskId, writerSessionId: children[0]! })
   barrier.resolve(undefined)
   await Promise.all(runs.map(async (run) => { await run.result; await run.dispose() }))
+  await parent.agent.whenIdle()
+  unpark()
+  const selected = children[0]!
+  let publications = 0
+  const stopObserving = runtime.on('agent/created', ({ agent }) => { if (agent.id === selected) publications += 1 })
+  const offline = await runtime.agents.withOfflineSessions([selected], async () => {
+    const review = await api.tasks.reviewSummary({ sessionId: integration.taskId, writerSessionId: selected })
+    let resumeBlocked = false
+    try {
+      const unexpected = await runtime.agents.resume({ resumeSessionId: selected })
+      await unexpected.dispose()
+    } catch (error: unknown) {
+      if (!(error instanceof AgentOfflineReservationError)) throw error
+      resumeBlocked = true
+    }
+    parent.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'offline-check' }], source: { kind: 'user' } }))
+    await parent.agent.whenIdle()
+    const rejected = parent.agent.session.events.findLast(event => event.type === 'tool/result')
+    const toolBlocked = rejected?.type === 'tool/result' && rejected.data.message.content[0].isError === true
+      && rejected.data.message.content[0].content.some(block => block.type === 'text' && block.text.includes('offline operation'))
+    const reviewBlocked = !review.result.ok && review.result.error.code === 'task-review-rejected'
+      && review.result.error.details.reviewCode === 'REVIEW_STALE'
+    return { reviewBlocked, resumeBlocked, toolBlocked, noPublication: publications === 0 }
+  })
+  const released = await runtime.agents.resume({ resumeSessionId: selected, agentOptions: { provider: 'fixture', model: 'fixture' } })
+  await released.dispose()
+  stopObserving()
   const writerReview = await api.tasks.reviewSummary({ sessionId: integration.taskId, writerSessionId: children[0]! })
   if (!writerReview.result.ok) throw new Error(writerReview.result.error.message)
   const writerDiff = await api.tasks.reviewDiff({ sessionId: integration.taskId, writerSessionId: children[0]!,
     expectedRevision: writerReview.result.value.revision, path: 'same.txt' })
-  await parent.agent.whenIdle()
-  unpark()
   parent.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'root-integration' }], source: { kind: 'user' } }))
   await parent.agent.whenIdle()
   const output = (value: object): void => { process.stdout.write(`${JSON.stringify(value)}\n`) }
@@ -130,6 +160,7 @@ try {
     childIdentity: writerReview.result.value.taskId === children[0],
     diffPresent: writerDiff.result.ok && writerDiff.result.value.patch.includes('+writer-a'),
     noActivation: runtime.agents.get(children[0]!) === undefined })
+  output({ stage: 'offline-reservation', ...offline, resumeAfterRelease: publications === 1 })
   output({ stage: 'conflict', reported: conflict?.kind === 'conflict', paths: conflict?.kind === 'conflict' ? conflict.paths : [], rootUnchanged: conflictPreserved })
   output({ stage: 'integrated', reported: integrated?.kind === 'integrated', contributors: integrated?.contributors.length,
     filesPresent: await readFile(join(integration.path, 'writer-c.txt'), 'utf8') === 'writer-c'

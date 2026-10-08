@@ -48,7 +48,7 @@ Settings 分节中的 `reasoningEffort` 在 agent-default-model 插件配置中�
 
 Host 还会从自己的 Agent 注册表和待回答问题注册表发布一个完整的实时 Task generation。Agent 生命周期变化会替换运行事实，问题注册或结算会替换可操作的问题注意事项，同时保持用于隔离完整行流更新的 generation 不变。
 
-`task.reviewSummary` 和 `task.reviewDiff` 接受可选的 `writerSessionId`，而 `sessionId` 仍指向所属根 Task。Host 读取子级自身事件后缀中的 `subagent/worktree-assigned`，验证直接父级、Workspace、源目录和执行目录归属，并拒绝仍驻留的子级或已丢弃的根任务。读取不会激活任一 Agent，也不接受客户端指定目录。返回的审查身份属于子级；根任务 Commit、Apply 和 Discard 仍是独立方法，不接受写入者选择。参见[隔离写入者审查决策](../../../.agents/notes/implemented/feature/2026-10-07-isolated-writer-result-review.md)。
+`task.reviewSummary` 和 `task.reviewDiff` 接受可选的 `writerSessionId`，而 `sessionId` 仍指向所属根 Task。Host 读取子级自身事件后缀中的 `subagent/worktree-assigned`，验证直接父级、Workspace、源目录和执行目录归属，并拒绝仍驻留的子级或已丢弃的根任务。离线 Session 保留在整个读取期间阻止子级激活和竞争检查；保留冲突报告 `REVIEW_STALE`。读取不会激活任一 Agent，也不接受客户端指定目录。返回的审查身份属于子级；根任务 Commit、Apply 和 Discard 仍是独立方法，不接受写入者选择。参见[隔离写入者审查决策](../../../.agents/notes/implemented/feature/2026-10-07-isolated-writer-result-review.md)。
 
 `session.create` 接受显式 `isolation` 模式。`worktree` 要求指定 Workspace，创建或幂等复用应用所有的 Git Worktree，在隔离路径启动 Session，通过 `ctx.tasks` 记录完整分配，并且绝不把 Session 附加到源 Workspace 基于 cwd 的记账。复用前会验证记录路径仍然具有完全一致的 Git 注册；Worktree 缺失或发生偏移时会拒绝启动 Session。缺少能力或预检失败时返回 `workspace-isolation-unavailable` 且不创建 Session；后续失败会保留已创建的 Worktree 并报告其恢复路径。`direct` 和省略模式保留现有创建及 Workspace 附加行为。
 

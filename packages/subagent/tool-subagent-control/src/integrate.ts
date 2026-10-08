@@ -35,7 +35,6 @@ function rootAssignment(ctx: Context, agent: Agent | undefined, writing: boolean
 async function childAssignment(
   ctx: Context, root: TaskWorktreeAssignment, id: SessionId, signal: AbortSignal,
 ): Promise<TaskWorktreeAssignment> {
-  if (ctx.agents.get(id) !== undefined) throw new Error('Wait until the writer has released its active execution before reviewing its result.')
   const live = ctx.sessions.get(id)
   const inspection = live === undefined ? await ctx.sessionPersistence.inspect(id, signal) : { meta: live.header, events: live.events }
   const recorded = foldSubagentWorktree(inspection.events.slice(inspection.meta.seedLength ?? 0))
@@ -45,7 +44,6 @@ async function childAssignment(
     || inspection.meta.cwd !== recorded.assignment.path) {
     throw new Error('The selected result is not a directly owned isolated writer of this root Task.')
   }
-  if (ctx.agents.get(id) !== undefined) throw new Error('The writer resumed while its result was being inspected; review it after execution stops.')
   signal.throwIfAborted()
   return recorded.assignment
 }
@@ -66,17 +64,19 @@ export function apply(ctx: Context): void {
     output: { schema: reviewSchema, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args, exec) {
       const root = rootAssignment(ctx, exec.agent, false)
-      const assignment = await childAssignment(ctx, root, SessionId(args.subagent_id), exec.signal)
-      const summary = await ctx.taskReview.summarize({ assignment }, exec.signal)
-      const diff = args.path === undefined ? undefined : await ctx.taskReview.diff({
-        assignment, path: args.path, expectedRevision: summary.revision,
-      }, exec.signal)
-      const rootReview = await ctx.taskReview.summarize({ assignment: root }, exec.signal)
-      rootAssignment(ctx, exec.agent, false)
-      return {
-        rootRevision: rootReview.revision, summary: { ...summary, files: [...summary.files] },
-        ...diff === undefined ? {} : { diff },
-      }
+      return ctx.agents.withOfflineSessions([SessionId(args.subagent_id)], async () => {
+        const assignment = await childAssignment(ctx, root, SessionId(args.subagent_id), exec.signal)
+        const summary = await ctx.taskReview.summarize({ assignment }, exec.signal)
+        const diff = args.path === undefined ? undefined : await ctx.taskReview.diff({
+          assignment, path: args.path, expectedRevision: summary.revision,
+        }, exec.signal)
+        const rootReview = await ctx.taskReview.summarize({ assignment: root }, exec.signal)
+        rootAssignment(ctx, exec.agent, false)
+        return {
+          rootRevision: rootReview.revision, summary: { ...summary, files: [...summary.files] },
+          ...diff === undefined ? {} : { diff },
+        }
+      })
     },
   }))
   ctx.tools.register(defineTool({
@@ -89,9 +89,13 @@ export function apply(ctx: Context): void {
     output: { schema: commitSchema, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args, exec) {
       const root = rootAssignment(ctx, exec.agent, true)
-      const assignment = await childAssignment(ctx, root, SessionId(args.subagent_id), exec.signal)
-      rootAssignment(ctx, exec.agent, true)
-      return ctx.taskReview.commit({ assignment, expectedRevision: TaskReviewRevision(args.revision), message: args.message }, exec.signal)
+      return ctx.agents.withOfflineSessions([SessionId(args.subagent_id)], async () => {
+        const assignment = await childAssignment(ctx, root, SessionId(args.subagent_id), exec.signal)
+        rootAssignment(ctx, exec.agent, true)
+        return ctx.taskReview.commit({
+          assignment, expectedRevision: TaskReviewRevision(args.revision), message: args.message,
+        }, exec.signal)
+      })
     },
   }))
   ctx.tools.register(defineTool({
@@ -110,17 +114,19 @@ export function apply(ctx: Context): void {
     output: { schema: integrationSchema, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args, exec) {
       const root = rootAssignment(ctx, exec.agent, true)
-      const inputs = []
-      for (const writer of args.writers) {
-        inputs.push({ assignment: await childAssignment(ctx, root, SessionId(writer.subagent_id), exec.signal),
-          expectedRevision: TaskReviewRevision(writer.revision), commit: writer.commit })
-      }
-      rootAssignment(ctx, exec.agent, true)
-      const result = await ctx.taskReview.integrate({
-        assignment: root, expectedRevision: TaskReviewRevision(args.root_revision), inputs, message: args.message,
-      }, exec.signal)
-      const contributors = [...result.contributors]
-      return result.kind === 'conflict' ? { ...result, contributors, paths: [...result.paths] } : { ...result, contributors }
+      return ctx.agents.withOfflineSessions(args.writers.map(writer => SessionId(writer.subagent_id)), async () => {
+        const inputs = []
+        for (const writer of args.writers) {
+          inputs.push({ assignment: await childAssignment(ctx, root, SessionId(writer.subagent_id), exec.signal),
+            expectedRevision: TaskReviewRevision(writer.revision), commit: writer.commit })
+        }
+        rootAssignment(ctx, exec.agent, true)
+        const result = await ctx.taskReview.integrate({
+          assignment: root, expectedRevision: TaskReviewRevision(args.root_revision), inputs, message: args.message,
+        }, exec.signal)
+        const contributors = [...result.contributors]
+        return result.kind === 'conflict' ? { ...result, contributors, paths: [...result.paths] } : { ...result, contributors }
+      })
     },
   }))
 }

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-07-batch-writer-integration.md
-2026-10-07-batch-writer-integration.md: eb7a232582d17dce3b419094f4b0cd5af21c40f7
-2026-10-07-batch-writer-integration.zh.md: cd9be5be604263259423ff522a4f4ebc8d18bb08
+2026-10-07-batch-writer-integration.md: 5d80b58cd4b91d5447bb74c04db3956ddeb7eb0e
+2026-10-07-batch-writer-integration.zh.md: ea2fafebff0f952bbdf9b20f51cb43a24518b7ee

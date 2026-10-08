@@ -23,6 +23,8 @@ The scoped-registration surface: `Agent.ctx` is the agent's scope context (`dsh-
 - `ctx.agents.list(): Agent[]`
 - `ctx.agents.roots(): Agent[]` — live agents created without an owning agent context; a resumed lineage-bearing session can still be a runtime root.
 
+`withOfflineSessions(ids, operation)` atomically reserves Agent-free Session identities until the returned operation settles. A resident Agent or overlapping reservation rejects the whole batch with `AgentOfflineReservationError`; duplicate ids are coalesced. `create`, `resume`, and authoritative `enter` reject publication while reserved, including setup that began earlier. Fulfillment, rejection, and cooperative cancellation release all identities; service teardown drains the operation while preserving its initiating Agent. The reservation neither activates an Agent nor locks files, hooks, or other processes. See the [offline reservation decision](../../../.agents/notes/implemented/architecture/2026-10-08-offline-session-reservations.md).
+
 #### Initiating Agent scope
 
 `AgentLoop` runs each concrete driver's complete lifetime inside an initiator boundary. Concurrent drivers remain isolated: a child driver's continuations carry the child, while the parent continuation regains the parent as soon as `withInitiator()` returns; drain tracking continues until the child driver's Promise settles. Creation, persistence load, and unpublished setup remain outside the child's boundary, so setup initiated by a parent inherits the parent while `agentCtx.agent` identifies the child explicitly.

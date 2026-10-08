@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { AgentOfflineReservationError } from '@deepseek-ai/dsh-agent'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { CallId } from '@deepseek-ai/dsh-llm'
@@ -80,7 +81,7 @@ it('reviews a member diff, commits the exact revision, and integrates through al
 }, 30_000)
 
 it('rejects missing, stale, non-root, read-only, and active writer authority through the executor', async () => {
-  const { ctx, call, parent, child } = await setup()
+  const { ctx, call, parent, child, detach } = await setup()
   const request = { subagent_id: child.taskId }
   const missing = await ctx.tools.execute({ signal: new AbortController().signal, callId: CallId('no-agent'), name: 'review_agent_changes', arguments: request })
   expect(missing.isError).toBe(true)
@@ -92,24 +93,23 @@ it('rejects missing, stale, non-root, read-only, and active writer authority thr
   expect((await call('commit_agent_changes', { ...request, revision: 'stale', message: 'Do not write' })).isError).toBe(true)
   expect((await call('integrate_agents', { root_revision: 'stale', message: 'Do not write', writers: [] })).isError).toBe(true)
   expect((await call('review_agent_changes', request)).isError).toBe(false)
-  const originalGet = ctx.agents.get.bind(ctx.agents)
-  const busy = vi.spyOn(ctx.agents, 'get').mockImplementation(id => id === child.taskId ? parent : originalGet(id))
+  detach()
+  ctx.agentLoop.create(child.taskId, { provider: 'mock', model: 'mock' }, { cwd: child.path })
   expect((await call('review_agent_changes', request)).isError).toBe(true)
-  busy.mockRestore()
 }, 30_000)
 
-it('checks cold persisted ownership, rejects a resumed writer, and removes all tools on unload', async () => {
-  const { ctx, call, parent, child, session, fiber, detach } = await setup()
+it('checks cold persisted ownership, blocks resumption during inspection, and removes all tools on unload', async () => {
+  const { ctx, call, child, session, fiber, detach } = await setup()
   await ctx.sessions.flush(session)
   detach()
   expect((value(await call('review_agent_changes', { subagent_id: child.taskId })) as { summary: TaskReviewSummary }).summary.taskId).toBe(child.taskId)
   const inspect = ctx.sessionPersistence.inspect.bind(ctx.sessionPersistence)
   const resumed = vi.spyOn(ctx.sessionPersistence, 'inspect').mockImplementation(async (id, signal) => {
     const result = await inspect(id, signal)
-    vi.spyOn(ctx.agents, 'get').mockImplementation(target => target === child.taskId ? parent : target === parent.id ? parent : undefined)
+    await expect(ctx.agents.resume({ resumeSessionId: child.taskId })).rejects.toThrow(AgentOfflineReservationError)
     return result
   })
-  expect((await call('review_agent_changes', { subagent_id: child.taskId })).isError).toBe(true)
+  expect((await call('review_agent_changes', { subagent_id: child.taskId })).isError).toBe(false)
   resumed.mockRestore()
   vi.restoreAllMocks()
   const foreign = vi.spyOn(ctx.sessionPersistence, 'inspect').mockImplementation(async (id, signal) => {
@@ -121,4 +121,79 @@ it('checks cold persisted ownership, rejects a resumed writer, and removes all t
   vi.restoreAllMocks()
   await fiber.dispose()
   for (const name of ['review_agent_changes', 'commit_agent_changes', 'integrate_agents']) expect(ctx.tools.get(name)).toBeUndefined()
+}, 30_000)
+
+it.each(['commit', 'integrate'] as const)('keeps selected writers offline through the real Git %s operation', async (operation) => {
+  const { ctx, call, child, fixture, assignment, session, detach } = await setup()
+  const reviewed = value(await call('review_agent_changes', { subagent_id: child.taskId })) as {
+    rootRevision: string
+    summary: TaskReviewSummary
+  }
+  const committed = operation === 'integrate' ? value(await call('commit_agent_changes', {
+    subagent_id: child.taskId, revision: reviewed.summary.revision, message: 'Writer commit',
+  })) as TaskCommitReceipt : undefined
+  await ctx.sessions.flush(session)
+  detach()
+  const entered = Promise.withResolvers<undefined>()
+  const release = Promise.withResolvers<undefined>()
+  const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+  const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+    const handle = spawn(spec)
+    if (spec.argv.includes(operation === 'commit' ? 'commit' : 'merge-tree')) {
+      entered.resolve(undefined)
+      // Delay only collection of a real Git result while competing Agent activation arrives.
+      return { ...handle, done: handle.done.then(async (result) => { await release.promise; return result }) }
+    }
+    return handle
+  })
+  const pending = operation === 'commit'
+    ? call('commit_agent_changes', { subagent_id: child.taskId, revision: reviewed.summary.revision, message: 'Writer result' })
+    : call('integrate_agents', { root_revision: reviewed.rootRevision, message: 'Integrate', writers: [{
+      subagent_id: child.taskId, revision: committed!.committedRevision, commit: committed!.commit,
+    }] })
+  try {
+    await entered.promise
+    await expect(ctx.agents.resume({ resumeSessionId: child.taskId })).rejects.toThrow(AgentOfflineReservationError)
+    expect((await call('review_agent_changes', { subagent_id: child.taskId })).isError).toBe(true)
+    expect(ctx.agents.get(child.taskId)).toBeUndefined()
+    release.resolve(undefined)
+    expect((await pending).isError).not.toBe(true)
+    const resumed = await ctx.agents.resume({ resumeSessionId: child.taskId, agentOptions: { provider: 'mock', model: 'mock' } })
+    expect(ctx.agents.get(child.taskId)).toBe(resumed.agent)
+    await resumed.dispose()
+    expect(git(fixture.source, ['rev-parse', 'HEAD']).trim()).toBe(assignment.baseCommit)
+  } finally {
+    release.resolve(undefined)
+    await pending
+    intercepted.mockRestore()
+  }
+}, 30_000)
+
+it('rolls an already-preparing resume back when an offline reservation wins publication', async () => {
+  const { ctx, child, session, detach } = await setup()
+  await ctx.sessions.flush(session)
+  detach()
+  const prepared = Promise.withResolvers<undefined>()
+  const release = Promise.withResolvers<undefined>()
+  let rolledBack = false
+  const resumed = ctx.agents.resume({ resumeSessionId: child.taskId, setup: async (scope) => {
+    scope.effect(() => () => { rolledBack = true })
+    prepared.resolve(undefined)
+    await release.promise
+  } })
+  try {
+    await prepared.promise
+    await ctx.agents.withOfflineSessions([child.taskId], async () => {
+      release.resolve(undefined)
+      await expect(resumed).rejects.toThrow(AgentOfflineReservationError)
+      expect(rolledBack).toBe(true)
+      expect(ctx.agents.get(child.taskId)).toBeUndefined()
+      expect(ctx.sessions.get(child.taskId)).toBeUndefined()
+    })
+    const retry = await ctx.agents.resume({ resumeSessionId: child.taskId })
+    await retry.dispose()
+  } finally {
+    release.resolve(undefined)
+    await Promise.allSettled([resumed])
+  }
 }, 30_000)

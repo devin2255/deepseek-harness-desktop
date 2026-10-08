@@ -249,6 +249,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when the initiator scope is closing/disposed, or when `operation` throws.'],
       },
       {
+        signature: 'withOfflineSessions<T>(sessionIds: readonly SessionId[], operation: () => Promise<T>): Promise<T>',
+        description: 'Reserve an entire batch of Agent-free Sessions until an offline operation settles. Acquisition is synchronous and all-or-nothing; competing reservations and Agent publication fail rather than wait. This does not lock files or other processes. Ambient initiator attribution is preserved, and service teardown drains the operation.',
+        parameters: [{ name: 'sessionIds', description: 'Session identities to keep without a registered Agent; duplicates are coalesced.' }, { name: 'operation', description: 'owned asynchronous work; its value or rejection is preserved.' }],
+        returns: 'the operation result after releasing every reservation.',
+        throws: ['when registry teardown has begun, or rejects with AgentOfflineReservationError when a selected Session already has a registered Agent or offline owner.'],
+      },
+      {
         signature: 'setFactory(factory: AgentFactory): () => void',
         description: 'Register the agent-creation factory (the loop calls this on construction, effect-scoped). A traced Cordis service is canonicalized to its concrete target; each create/resume call is then traced through that caller\'s context so ownership follows the caller without stacking proxy layers. Throws if a factory is already registered. Returns the disposer; on dispose the factory slot is cleared.',
         parameters: [{ name: 'factory', description: 'the loop-owned factory {@link create}/{@link resume} delegate to.' }],

@@ -16,7 +16,9 @@
 
 显式启用的 `./integrate` 插件注册 `review_agent_changes`、`commit_agent_changes` 和 `integrate_agents`。它要求 `tools`、`agents`、`sessions`、`sessionPersistence`、`tasks`、`taskReview` 和 `sandboxPolicy`。只有在可用托管 Task worktree 中的确切已注册根 Agent 能使用这些工具。每个子级必须拥有独立记录的隔离分配，并与其不可变直接父级元数据、Workspace、源 worktree 和执行 cwd 相匹配。活跃或驻留子级会被拒绝；冷检查不会激活子级。变更还在执行器中强制检查根级写入权限。
 
-Review 返回有界文件、可选成员 Diff、子级版本与当前提交，以及独立检查的根版本。Commit 要求子级版本，并返回已提交版本与提交。集成选择这些确切子级版本、提交及根版本。[Provider](../../task/task-review-local/README.md) 预检完整批次；冲突返回结构化结果，绝不部分发布或自动解决。这三个工具均使用通用卡片和经 schema 验证的 JSON 文本。普通持久化工具结果保留回执，不宣称人工批准或根交付。[组装示例](../../../examples/headless-agent/writer-integration.cordis.snapshot.yml) 将此显式选项与桌面默认配置分开。检查不是执行租约：另一调用方或进程可能在检查后恢复写入者；本插件不提供跨进程锁定或冲突解决界面。
+Review 返回有界文件、可选成员 Diff、子级版本与当前提交，以及独立检查的根版本。Commit 要求子级版本，并返回已提交版本与提交。集成选择这些确切子级版本、提交及根版本。[Provider](../../task/task-review-local/README.md) 预检完整批次；冲突返回结构化结果，绝不部分发布或自动解决。这三个工具均使用通用卡片和经 schema 验证的 JSON 文本。普通持久化工具结果保留回执，不宣称人工批准或根交付。[组装示例](../../../examples/headless-agent/writer-integration.cordis.snapshot.yml) 将此显式选项与桌面默认配置分开。
+
+执行器在检查所有权前，为所选写入者原子获取[离线 Session 预留](../../../.agents/notes/implemented/architecture/2026-10-08-offline-session-reservations.md)，并持有至整个操作完成。在此期间，当前进程内的激活、竞争审查和交付均被拒绝；失败或取消后释放预留。预留在工具返回结果时结束，不授权后续变更。本插件不提供跨进程锁定或冲突解决界面。
 
 ## 模型体验
 

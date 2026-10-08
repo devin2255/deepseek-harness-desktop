@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { AgentOfflineReservationError } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
@@ -269,7 +269,7 @@ describe('Task RPC', () => {
     await ctx.fiber.dispose()
   })
 
-  it('inspects cold writer ownership with cancellation and rejects a writer that resumes during the read', async () => {
+  it('keeps a cold writer offline throughout inspection and rejects competing reads', async () => {
     const { api, ctx, review, tasks } = await harness()
     tasks.currentRow = reviewRow
     const writerSessionId = SessionId('cold-writer')
@@ -284,16 +284,63 @@ describe('Task RPC', () => {
     expect(review.last?.[1]).toEqual({ assignment })
     expect(ctx.agents.get(writerSessionId)).toBeUndefined()
     delete review.last
-    let remove = () => {}
     inspect.mockImplementation(async () => {
-      const session = ctx.sessions.create(writerSessionId, { meta })
-      remove = ctx.agents.register({ id: writerSessionId, session, status: 'running', ctx } as Agent)
+      const prepared = ctx.sessions.prepare(writerSessionId, { meta })
+      expect(() => ctx.agents.enter({ id: writerSessionId, session: prepared, ctx } as Agent, undefined))
+        .toThrow(AgentOfflineReservationError)
+      await expect(api.tasks.reviewDiff(request({ sessionId: rootId, writerSessionId, path: 'src/app.ts', expectedRevision: reviewRevision }), signal))
+        .resolves.toMatchObject({ result: { ok: false, error: { details: { reviewCode: 'REVIEW_STALE' } } } })
       return { meta, events }
     })
     await expect(api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), signal))
-      .resolves.toMatchObject({ result: { ok: false, error: { details: { reviewCode: 'REVIEW_STALE' } } } })
-    expect(review.last).toBeUndefined()
-    remove()
+      .resolves.toMatchObject({ result: { ok: true } })
+    expect(review.last?.[1]).toEqual({ assignment })
+    expect(ctx.agents.get(writerSessionId)).toBeUndefined()
+    await ctx.fiber.dispose()
+  })
+
+  it.each(['summary', 'diff'] as const)('holds the writer through the complete %s Provider read and releases every outcome', async (method) => {
+    const { api, ctx, review, tasks } = await harness()
+    tasks.currentRow = reviewRow
+    const writerSessionId = SessionId('provider-writer')
+    const assignment = { ...executionWorkspace, taskId: writerSessionId, sourcePath: executionWorkspace.path, path: resolve('provider-writer-test') }
+    const child = ctx.sessions.create(writerSessionId, { meta: { origin: 'subagent', parentSession: rootId, cwd: assignment.path } })
+    child.append('subagent/worktree-assigned', { parentTaskId: rootId, assignment })
+    for (const outcome of ['success', 'failure', 'cancelled'] as const) {
+      const entered = Promise.withResolvers<undefined>()
+      const release = Promise.withResolvers<undefined>()
+      const abort = new AbortController()
+      const gate = async (): Promise<void> => {
+        entered.resolve(undefined)
+        await release.promise
+        abort.signal.throwIfAborted()
+        if (outcome === 'failure') throw new TaskReviewError('Git read failed.', 'REVIEW_GIT_FAILED')
+      }
+      const summary = vi.spyOn(review, 'summarize').mockImplementation(async () => { await gate(); return reviewSummary })
+      const diff = vi.spyOn(review, 'diff').mockImplementation(async () => { await gate(); return fileDiff })
+      const pending = method === 'summary'
+        ? api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), abort.signal)
+        : api.tasks.reviewDiff(request({ sessionId: rootId, writerSessionId, path: 'src/app.ts', expectedRevision: reviewRevision }), abort.signal)
+      try {
+        await entered.promise
+        expect(() => ctx.agents.enter({ id: writerSessionId, session: child, ctx } as Agent, undefined))
+          .toThrow(AgentOfflineReservationError)
+        await expect(api.tasks.reviewSummary(request({ sessionId: rootId, writerSessionId }), new AbortController().signal))
+          .resolves.toMatchObject({ result: { ok: false, error: { details: { reviewCode: 'REVIEW_STALE' } } } })
+        if (outcome === 'cancelled') abort.abort()
+        release.resolve(undefined)
+        const response = await pending
+        expect(response.result.ok).toBe(outcome === 'success')
+        if (outcome === 'cancelled') expect(response).toMatchObject({ result: { error: { code: 'cancelled' } } })
+        const remove = ctx.agents.enter({ id: writerSessionId, session: child, ctx } as Agent, undefined)
+        remove()
+      } finally {
+        release.resolve(undefined)
+        await pending
+        summary.mockRestore()
+        diff.mockRestore()
+      }
+    }
     await ctx.fiber.dispose()
   })
 

@@ -23,6 +23,8 @@ Agent 接口、注册表、进程本地发起方作用域，以及 `agent/*` 事
 - `ctx.agents.list(): Agent[]`
 - `ctx.agents.roots(): Agent[]`：在没有所属 agent 上下文的情况下创建的实时 agent；带谱系的恢复会话仍可能是运行时根。
 
+`withOfflineSessions(ids, operation)` 原子地保留没有 Agent 的 Session 标识，直到返回的操作完成。驻留 Agent 或重叠保留会通过 `AgentOfflineReservationError` 拒绝整个批次；重复 id 合并处理。保留期间，`create`、`resume` 和权威 `enter` 拒绝发布，包括更早开始的 setup。成功、拒绝和协作取消均释放全部标识；服务 teardown 等待操作完成，并保留其发起 Agent。保留既不激活 Agent，也不锁定文件、钩子或其他进程。参见[离线保留决策](../../../.agents/notes/implemented/architecture/2026-10-08-offline-session-reservations.md)。
+
 #### 发起方 Agent 作用域
 
 `AgentLoop` 在发起方边界内运行每个具体驱动器的完整生命周期。并发驱动器彼此隔离：子驱动器的 continuation 携带子 agent，而 `withInitiator()` 返回后，父 continuation 立即重新取得父 agent；drain 跟踪持续到子驱动器的 Promise 结算。创建、持久化加载和未发布 setup 位于子边界之外，因此由父 agent 发起的 setup 会继承父 agent，而 `agentCtx.agent` 显式标识子 agent。
