@@ -154,6 +154,141 @@ class TaskFileDiff(TaskWireModel):
     _validate_path = field_validator("path", "previous_path")(TaskReviewFile.validate_review_path.__func__)
 
 
+_GitObjectId = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
+_DeliveryRevision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+_DeliveryOperationId = Annotated[str, Field(
+    pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+)]
+
+
+class TaskDeliveryIntentBase(TaskWireModel):
+    """Recorded authorization, not client-supplied Git inputs."""
+
+    operation_id: _DeliveryOperationId = Field(alias="operationId")
+    review_revision: _DeliveryRevision = Field(alias="reviewRevision")
+
+
+class TaskCommitIntent(TaskDeliveryIntentBase):
+    kind: Literal["commit"]
+    message: str
+    head_commit: _GitObjectId = Field(alias="headCommit")
+    tree: _GitObjectId
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("commit message must be nonblank without NUL")
+        return value
+
+
+class TaskApplyIntent(TaskDeliveryIntentBase):
+    kind: Literal["apply"]
+    commit: _GitObjectId
+    source_head: _GitObjectId = Field(alias="sourceHead")
+
+
+class TaskDiscardIntent(TaskDeliveryIntentBase):
+    kind: Literal["discard"]
+    confirmed_uncommitted_loss: bool = Field(alias="confirmedUncommittedLoss")
+    head_commit: _GitObjectId = Field(alias="headCommit")
+    uncommitted_changes: bool = Field(alias="uncommittedChanges")
+
+    @model_validator(mode="after")
+    def validate_loss_authorization(self) -> "TaskDiscardIntent":
+        if self.uncommitted_changes and not self.confirmed_uncommitted_loss:
+            raise ValueError("uncommitted loss requires explicit authorization")
+        return self
+
+
+TaskDeliveryIntent: TypeAlias = Annotated[
+    TaskCommitIntent | TaskApplyIntent | TaskDiscardIntent, Field(discriminator="kind"),
+]
+
+
+class TaskCommitEffect(TaskWireModel):
+    kind: Literal["commit"]
+    commit: _GitObjectId
+    committed_revision: _DeliveryRevision = Field(alias="committedRevision")
+    head_before: _GitObjectId = Field(alias="headBefore")
+    tree: _GitObjectId
+    branch: str = Field(min_length=1)
+
+
+class TaskApplyEffect(TaskWireModel):
+    kind: Literal["apply"]
+    commit: _GitObjectId
+    source_head: _GitObjectId = Field(alias="sourceHead")
+    source_tree: _GitObjectId = Field(alias="sourceTree")
+
+
+class TaskDiscardEffect(TaskWireModel):
+    kind: Literal["discard"]
+    branch: str = Field(min_length=1)
+    head_commit: _GitObjectId = Field(alias="headCommit")
+    worktree_removed: Literal[True] = Field(alias="worktreeRemoved")
+    branch_preserved: Literal[True] = Field(alias="branchPreserved")
+    uncommitted_changes_discarded: bool = Field(alias="uncommittedChangesDiscarded")
+    recoverable_commit: _GitObjectId | None = Field(default=None, alias="recoverableCommit")
+
+    @field_validator("worktree_removed", "branch_preserved", mode="before")
+    @classmethod
+    def validate_literal_boolean(cls, value: object) -> object:
+        if type(value) is not bool:
+            raise ValueError("discard facts must be booleans")
+        return value
+
+
+TaskDeliveryEffect: TypeAlias = Annotated[
+    TaskCommitEffect | TaskApplyEffect | TaskDiscardEffect, Field(discriminator="kind"),
+]
+
+
+class TaskDeliveryInspection(TaskWireModel):
+    """Current evidence; absence does not prove no earlier side effects occurred."""
+
+    task_id: str = Field(alias="taskId", min_length=1)
+    workspace_id: str = Field(alias="workspaceId", min_length=1)
+    intent: TaskDeliveryIntent
+    revision: _DeliveryRevision
+    observed_at: int = Field(alias="observedAt", ge=0, le=9007199254740991)
+    status: Literal["completed", "not-completed", "ambiguous"]
+    effect: TaskDeliveryEffect | None = None
+    reason: Literal["task-changed", "source-changed", "discard-incomplete", "state-changed"] | None = None
+
+    @model_validator(mode="after")
+    def validate_authorized_effect(self) -> "TaskDeliveryInspection":
+        for value in (self.task_id, self.workspace_id):
+            if value != value.strip():
+                raise ValueError("inspection identities must be normalized")
+        if self.status == "not-completed":
+            if {"effect", "reason"} & self.model_fields_set:
+                raise ValueError("absent delivery has no effect or reason")
+            return self
+        if self.status == "ambiguous":
+            if self.reason is None or "effect" in self.model_fields_set:
+                raise ValueError("ambiguous delivery requires a reason and no effect")
+            return self
+        if self.effect is None or "reason" in self.model_fields_set:
+            raise ValueError("completed delivery requires an effect and no reason")
+        intent, effect = self.intent, self.effect
+        if isinstance(effect, (TaskCommitEffect, TaskDiscardEffect)) and effect.branch != effect.branch.strip():
+            raise ValueError("observed branch must be normalized")
+        if isinstance(intent, TaskCommitIntent) and isinstance(effect, TaskCommitEffect):
+            matches = effect.head_before == intent.head_commit and effect.tree == intent.tree
+        elif isinstance(intent, TaskApplyIntent) and isinstance(effect, TaskApplyEffect):
+            matches = effect.commit == intent.commit and effect.source_head == intent.source_head
+        elif isinstance(intent, TaskDiscardIntent) and isinstance(effect, TaskDiscardEffect):
+            matches = effect.head_commit == intent.head_commit \
+                and effect.uncommitted_changes_discarded == intent.uncommitted_changes \
+                and ("recoverable_commit" not in effect.model_fields_set or effect.recoverable_commit == intent.head_commit)
+        else:
+            matches = False
+        if not matches:
+            raise ValueError("observed result must match its delivery authorization")
+        return self
+
+
 class TaskReceipt(TaskWireModel):
     operation_id: str = Field(
         alias="operationId",

@@ -28,6 +28,8 @@ The plugin answers `shutdown`, flushes the response, disposes the root context s
 
 `task/retryDeliveryCheckpoint` forwards a root Session id and advertised operation id directly to `ctx.tasks`. It saves the existing live receipt without requiring the Review service, resuming an Agent, or executing Git. Missing, detached, or replaced receipts reject; another persistence failure leaves the Task unconfirmed.
 
+`task/inspectDelivery` accepts only a root Session id and normalized operation id, rejects extra client facts, and resolves pending authorization from the attached or cold log. It retains root maintenance or offline ownership, delegates current Git inspection to `ctx.taskReview`, and rechecks authorization before returning. A cold Agent remains inactive. Missing authorization or a receipt awaiting checkpoint save rejects. Completed, absent, and ambiguous observations never append receipts, clear attention, or authorize retry; observation time is not execution time. See the [inspection decision](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md).
+
 ## Model Experience
 
 ### SDK user message

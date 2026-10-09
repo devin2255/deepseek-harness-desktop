@@ -95,7 +95,7 @@ export type {
 } from '@deepseek-ai/dsh-task/types'
 export type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 export type {
-  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff,
+  TaskApplyReceipt, TaskCommitReceipt, TaskDeliveryEffect, TaskDeliveryInspection, TaskDeliveryIntent, TaskDiscardReceipt, TaskFileDiff,
   TaskIntegrationContributor, TaskIntegrationReceipt, TaskIntegrationConflict,
   TaskReviewFile, TaskReviewFileStatus, TaskReviewRevision, TaskReviewSummary,
 } from '@deepseek-ai/dsh-task-review/types'

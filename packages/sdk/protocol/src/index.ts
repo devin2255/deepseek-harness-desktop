@@ -26,6 +26,7 @@ export type {
   TaskCommitParams,
   TaskDiscardParams,
   TaskDeliveryCheckpointParams,
+  TaskDeliveryInspectionParams,
   TaskReviewDiffParams,
   TaskReviewSummaryParams,
 } from './types.ts'

@@ -149,6 +149,45 @@ def main() -> None:
             assert initial.execution_workspace is not None
             assert git("rev-parse", execution.branch) == discard_summary.head_commit
             assert not Path(initial.execution_workspace.path).exists()
+            index_path = Path(git("-C", pending.execution_workspace.path, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+            source_index_path = Path(git("rev-parse", "--path-format=absolute", "--git-path", "index"))
+            task_index = index_path.read_bytes()
+            source_index = source_index_path.read_bytes()
+            live_observation = harness.inspect_task_delivery("unconfirmed", operation_id)
+            assert live_observation.status == "completed" and live_observation.effect is not None
+            assert live_observation.intent.model_dump(by_alias=True) == intents[4]
+            assert live_observation.effect.commit == lost_commit
+            assert live_observation.effect.head_before == before.head_commit
+            assert live_observation.effect.tree == git("rev-parse", f"{lost_commit}^{{tree}}")
+            assert "committedAt" not in live_observation.effect.model_dump(by_alias=True)
+            assert task(client, "unconfirmed") == pending
+            assert index_path.read_bytes() == task_index and source_index_path.read_bytes() == source_index
+            absent = task(client, "not-completed")
+            absent_summary = client.get_task_review_summary("not-completed")
+            assert "Delivery result is unconfirmed" in reject_commit(client, absent, absent_summary.revision)
+            absent_pending = task(client, "not-completed")
+            absent_id = next(item.source_id for item in absent_pending.attention if item.kind == "delivery-unconfirmed")
+            absence = client.inspect_task_delivery("not-completed", absent_id)
+            assert absence.status == "not-completed"
+            assert absent_pending.execution_workspace is not None
+            assert git("rev-parse", absent_pending.execution_workspace.branch) == absent_summary.head_commit
+            removed = task(client, "discard-unconfirmed")
+            removed_summary = client.get_task_review_summary("discard-unconfirmed")
+            try:
+                client.discard_task("discard-unconfirmed", expected_revision=removed_summary.revision,
+                                    expected_seq=removed.as_of_seq, confirmed_uncommitted_loss=True)
+            except JsonRpcError as error:
+                assert "Delivery result is unconfirmed" in error.message
+            else:
+                raise AssertionError("Lost discard result was accepted")
+            removed_pending = task(client, "discard-unconfirmed")
+            removed_id = next(item.source_id for item in removed_pending.attention if item.kind == "delivery-unconfirmed")
+            assert removed.execution_workspace is not None and not Path(removed.execution_workspace.path).exists()
+            removed_observation = client.inspect_task_delivery("discard-unconfirmed", removed_id)
+            assert removed_observation.status == "completed" and removed_observation.effect is not None
+            assert removed_observation.effect.kind == "discard" and removed_observation.effect.worktree_removed
+            assert removed_observation.effect.branch_preserved and removed_observation.effect.uncommitted_changes_discarded
+            assert removed_observation.effect.head_commit == removed_summary.head_commit
         with HarnessClient(config) as client:
             client.initialize(cwd=str(root), provider="deepseek-official", model="fixture")
             cold = task(client, "unconfirmed")
@@ -165,6 +204,22 @@ def main() -> None:
             assert next(item.source_id for item in cold.attention if item.kind == "delivery-unconfirmed") == operation_id
             reject_checkpoint(client, operation_id)
             reject_commit(client, cold, before.revision)
+            assert git("rev-parse", branch) == lost_commit
+            cold_observation = client.inspect_task_delivery("unconfirmed", operation_id)
+            assert cold_observation.status == "completed"
+            assert cold_observation.intent == live_observation.intent and cold_observation.revision == live_observation.revision
+            assert task(client, "unconfirmed") == cold
+            cold_removed = task(client, "discard-unconfirmed")
+            cold_removed_observation = client.inspect_task_delivery("discard-unconfirmed", removed_id)
+            assert cold_removed_observation.status == "completed"
+            assert cold_removed_observation.revision == removed_observation.revision
+            assert task(client, "discard-unconfirmed") == cold_removed
+            assert client.inspect_task_delivery("not-completed", absent_id).status == "not-completed"
+            (Path(pending.execution_workspace.path) / "tracked.txt").write_text("external edit after delivery\n", encoding="utf-8")
+            ambiguous = client.inspect_task_delivery("unconfirmed", operation_id)
+            assert ambiguous.status == "ambiguous" and ambiguous.reason == "task-changed"
+            assert task(client, "unconfirmed") == cold
+            assert index_path.read_bytes() == task_index and source_index_path.read_bytes() == source_index
             assert git("rev-parse", branch) == lost_commit
             result = {
                 "operations": operations,
@@ -185,6 +240,12 @@ def main() -> None:
                     "coldReceiptRetained": True,
                 },
                 "missingReceiptRetryRejected": {"live": True, "cold": True},
+                "inspection": {
+                    "live": live_observation.status, "cold": cold_observation.status, "absence": absence.status,
+                    "removedWorktree": removed_observation.status, "externalEdit": ambiguous.status,
+                    "authorizedTargetsMatched": True, "observationRevisionRetained": True,
+                    "noReceiptFabricated": True, "pendingRowsUnchanged": True, "indexesUnchanged": True,
+                },
                 "unconfirmed": {
                     "status": cold.status,
                     "attention": [item.kind for item in cold.attention],

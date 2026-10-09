@@ -14,7 +14,7 @@ import { HarnessClient, isRecord, SdkProtocolError } from './client.ts'
 import type {
   ApplyTaskRequest, CommitTaskRequest, ContentBlock, DeepSeekHarnessOptions, DefineTaskRequest,
   DiscardTaskRequest, GetTaskReviewDiffRequest, HarnessClientOptions, HarnessNotification,
-  RecordTaskRiskRequest, ReviewTaskRequest, RunResult, TaskFileDiff, TaskListSnapshot,
+  RecordTaskRiskRequest, ReviewTaskRequest, RunResult, TaskDeliveryInspection, TaskFileDiff, TaskListSnapshot,
   TaskReviewSummary, TaskSnapshot, UpdateTaskCriterionRequest,
 } from './types.ts'
 
@@ -220,6 +220,17 @@ export class DeepSeekHarness implements AsyncDisposable {
   async retryTaskDeliveryCheckpoint(sessionId: string, operationId: string): Promise<TaskSnapshot> {
     await this.start()
     return this.client.retryTaskDeliveryCheckpoint(sessionId, operationId)
+  }
+
+  /**
+   * Observe pending delivery without adopting its result or retrying Git.
+   * @param sessionId - root Session identity.
+   * @param operationId - exact pending authorization identity.
+   * @returns validated current evidence, not a durable delivery receipt.
+   */
+  async inspectTaskDelivery(sessionId: string, operationId: string): Promise<TaskDeliveryInspection> {
+    await this.start()
+    return this.client.inspectTaskDelivery(sessionId, operationId)
   }
 
   /**

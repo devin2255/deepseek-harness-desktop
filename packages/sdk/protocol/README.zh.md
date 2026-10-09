@@ -27,6 +27,7 @@ DeepSeek Harness SDK 运行时的共享协议格式（wire format）：一个按
 | client→server | `task/apply` | `TaskApplyParams` → `TaskSnapshot` |
 | client→server | `task/discard` | `TaskDiscardParams` → `TaskSnapshot` |
 | client→server | `task/retryDeliveryCheckpoint` | `TaskDeliveryCheckpointParams` → `TaskSnapshot` |
+| client→server | `task/inspectDelivery` | `TaskDeliveryInspectionParams` → `TaskDeliveryInspection`（当前证据，不是回执） |
 | client→server | `shutdown` | 无参数 → `{}` |
 | server→client | `session.event` | `SessionEventNotification`（运行时内每个会话，不过滤） |
 | server→client | `session.status` | `SessionStatusNotification`（整个 agent（智能体）的 `running`/`idle` 转换） |

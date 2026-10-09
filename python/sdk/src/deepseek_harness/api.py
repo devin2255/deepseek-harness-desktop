@@ -8,7 +8,7 @@ from typing import Callable, Literal
 from .client import HarnessClient, HarnessConfig
 from .errors import SdkProtocolError
 from .models import (
-    DefineTaskCriterion, JsonObject, Notification, TaskCriterion, TaskFileDiff,
+    DefineTaskCriterion, JsonObject, Notification, TaskCriterion, TaskDeliveryInspection, TaskFileDiff,
     TaskListSnapshot, TaskReviewSummary, TaskRisk, TaskSnapshot,
 )
 
@@ -216,6 +216,11 @@ class DeepSeekHarness:
         """Save the advertised live receipt without appending events or executing Git."""
         self.start()
         return self._client.retry_task_delivery_checkpoint(session_id, operation_id)
+
+    def inspect_task_delivery(self, session_id: str, operation_id: str) -> TaskDeliveryInspection:
+        """Observe pending delivery without adopting its result or repeating Git."""
+        self.start()
+        return self._client.inspect_task_delivery(session_id, operation_id)
 
 
 class Session:

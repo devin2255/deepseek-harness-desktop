@@ -28,6 +28,8 @@ Stdout 只承载 JSON-RPC 帧。部署不得组合 stdout logger；诊断应写�
 
 `task/retryDeliveryCheckpoint` 把根 Session id 和提供给调用方的操作 id 直接转发给 `ctx.tasks`。它保存现有实时回执，不要求 Review 服务，不恢复 Agent，也不执行 Git。回执缺失、分离或被替换时会拒绝；持久化再次失败会让 Task 保持待核实状态。
 
+`task/inspectDelivery` 仅接受根 Session id 和规范化操作 id，拒绝额外的客户端事实，并从已附加或冷态日志解析未完成授权。它保留根任务维护或离线归属，委托 `ctx.taskReview` 核验当前 Git，并在返回前重新检查授权。冷态 Agent 保持未激活。缺少授权或回执等待检查点保存时会拒绝。已完成、缺失和不确定的观察结果绝不追加回执、清除注意事项或授权重试；观察时间不是执行时间。参见[核验决策](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md)。
+
 ## 模型体验
 
 ### SDK 用户消息

@@ -25,7 +25,7 @@ import type {
   DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
   TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
-import type { TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskDeliveryInspection, TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 import { disposeRuntimeProcess } from './dispose.ts'
 import type {
   ApplyTaskRequest, CommitTaskRequest, DiscardTaskRequest, GetTaskReviewDiffRequest,
@@ -409,6 +409,16 @@ export class HarnessClient {
   }
 
   /**
+   * Observe pending delivery without adopting its result or retrying Git.
+   * @param sessionId - root Session identity.
+   * @param operationId - exact pending authorization identity.
+   * @returns validated current evidence; mismatched identities or authorization facts reject.
+   */
+  async inspectTaskDelivery(sessionId: string, operationId: string): Promise<TaskDeliveryInspection> {
+    return decodeTaskDeliveryInspection(await this.request('task/inspectDelivery', { sessionId, operationId }), sessionId, operationId)
+  }
+
+  /**
    * Send one JSON-RPC request and await its result.
    * @param method - the wire method name.
    * @param params - the params object; omitted params send `{}`.
@@ -707,6 +717,70 @@ function onlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 
 function isNonBlank(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim()
+}
+
+/** Validate observations separately from historical execution receipts. */
+function decodeTaskDeliveryInspection(value: unknown, taskId: string, operationId: string): TaskDeliveryInspection {
+  if (!isRecord(value) || value.taskId !== taskId || !isNonBlank(value.taskId) || !isNonBlank(value.workspaceId)
+    || !isRevision(value.revision) || !isTimestamp(value.observedAt)
+    || !isRecord(value.intent) || value.intent.operationId !== operationId || !isUuid(value.intent.operationId)
+    || !isRevision(value.intent.reviewRevision) || !isDeliveryIntent(value.intent)
+    || !isDeliveryObservation(value, value.intent)) {
+    throw new SdkProtocolError(`task/inspectDelivery returned malformed or mismatched evidence: ${JSON.stringify(value)}`)
+  }
+  return value as unknown as TaskDeliveryInspection
+}
+
+function isDeliveryIntent(value: Record<string, unknown>): boolean {
+  const common = ['kind', 'operationId', 'reviewRevision']
+  switch (value.kind) {
+    case 'commit':
+      return onlyKeys(value, [...common, 'message', 'headCommit', 'tree'])
+        && typeof value.message === 'string' && value.message.trim().length > 0 && !value.message.includes('\0')
+        && isObjectId(value.headCommit) && isObjectId(value.tree)
+    case 'apply':
+      return onlyKeys(value, [...common, 'commit', 'sourceHead']) && isObjectId(value.commit) && isObjectId(value.sourceHead)
+    case 'discard':
+      return onlyKeys(value, [...common, 'headCommit', 'uncommittedChanges', 'confirmedUncommittedLoss'])
+        && isObjectId(value.headCommit) && typeof value.uncommittedChanges === 'boolean'
+        && typeof value.confirmedUncommittedLoss === 'boolean' && (!value.uncommittedChanges || value.confirmedUncommittedLoss)
+    default:
+      return false
+  }
+}
+
+function isDeliveryObservation(value: Record<string, unknown>, intent: Record<string, unknown>): boolean {
+  const common = ['status', 'taskId', 'workspaceId', 'revision', 'observedAt', 'intent']
+  switch (value.status) {
+    case 'not-completed':
+      return onlyKeys(value, common)
+    case 'ambiguous':
+      return onlyKeys(value, [...common, 'reason'])
+        && ['task-changed', 'source-changed', 'discard-incomplete', 'state-changed'].includes(String(value.reason))
+    case 'completed': {
+      const effect = value.effect
+      if (!onlyKeys(value, [...common, 'effect']) || !isRecord(effect)) return false
+      switch (effect.kind) {
+        case 'commit':
+          return intent.kind === 'commit' && onlyKeys(effect, ['kind', 'commit', 'committedRevision', 'headBefore', 'tree', 'branch'])
+            && isObjectId(effect.commit) && isRevision(effect.committedRevision) && isNonBlank(effect.branch)
+            && effect.headBefore === intent.headCommit && effect.tree === intent.tree
+        case 'apply':
+          return intent.kind === 'apply' && onlyKeys(effect, ['kind', 'commit', 'sourceHead', 'sourceTree']) && isObjectId(effect.sourceTree)
+            && effect.commit === intent.commit && effect.sourceHead === intent.sourceHead
+        case 'discard':
+          return intent.kind === 'discard' && onlyKeys(effect, ['kind', 'branch', 'headCommit', 'worktreeRemoved', 'branchPreserved', 'uncommittedChangesDiscarded', 'recoverableCommit'])
+            && isNonBlank(effect.branch) && effect.headCommit === intent.headCommit
+            && effect.worktreeRemoved === true && effect.branchPreserved === true
+            && effect.uncommittedChangesDiscarded === intent.uncommittedChanges
+            && (effect.recoverableCommit === undefined || effect.recoverableCommit === intent.headCommit)
+        default:
+          return false
+      }
+    }
+    default:
+      return false
+  }
 }
 
 /** Validate a bounded Task review summary without trusting provider output. */

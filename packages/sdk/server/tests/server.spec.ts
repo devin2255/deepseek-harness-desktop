@@ -8,14 +8,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { AgentOfflineReservationError, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
 
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { AttentionItemId, TaskCriterionId, TaskError } from '@deepseek-ai/dsh-task'
 import type {
   RecordTaskApplyRequest, RecordTaskCommitRequest, RecordTaskDiscardRequest, StartTaskDeliveryRequest, TaskSnapshot,
 } from '@deepseek-ai/dsh-task'
 import type {
-  ApplyTaskReviewRequest, CommitTaskReviewRequest, DiscardTaskReviewRequest, GetTaskFileDiffRequest, TaskReviewRevision,
+  ApplyTaskReviewRequest, CommitTaskReviewRequest, DiscardTaskReviewRequest, GetTaskFileDiffRequest,
 } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewOperationId, TaskReviewRevision } from '@deepseek-ai/dsh-task-review/types'
+import type { InspectTaskDeliveryRequest, TaskDeliveryInspectionRevision } from '@deepseek-ai/dsh-task-review/types'
 import * as agentCore from '@deepseek-ai/dsh-agent-spine-demo'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
@@ -398,6 +400,112 @@ describe('HarnessSdkJsonRpcServer', () => {
       ctx.provide('agents', { get: () => ({ runMaintenance: (job: (signal: AbortSignal) => Promise<unknown>) => job(abort.signal) }) } as never)
       await expect(server.commitTask(request)).rejects.toThrow('Maintenance cancelled')
       expect(review.commit).not.toHaveBeenCalled()
+    } finally {
+      await server.shutdown()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['cold', 'resident'] as const)('inspects %s delivery under root ownership without settling it', async (mode) => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    const id = SessionId('root')
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000001')
+    const assignment: NonNullable<TaskSnapshot['executionWorkspace']> = {
+      kind: 'git-worktree', taskId: id, workspaceId: 'workspace' as never, path: '/tasks/root', sourcePath: '/source',
+      branch: 'dsh/task-0123456789abcdef01234567', baseCommit: '1'.repeat(40), sourceHead: '1'.repeat(40),
+      sourceDirty: false, sourceStatusDigest: 'a'.repeat(64), createdAt: 0,
+    }
+    const intent = { kind: 'commit' as const, operationId, reviewRevision: TaskReviewRevision('b'.repeat(64)),
+      message: 'Reviewed', headCommit: assignment.baseCommit, tree: '2'.repeat(40) }
+    const session = mode === 'resident' ? ctx.sessions.create(id) : Session.create(id)
+    session.append('task/worktree-assigned', { assignment })
+    session.append('task/defined', { definition: { goal: 'Deliver', criteria: [{
+      id: TaskCriterionId('criterion'), text: 'Reviewed', status: 'pending', evidence: [],
+    }] } })
+    session.append('task/criterion-updated', { criterion: {
+      id: TaskCriterionId('criterion'), text: 'Reviewed', status: 'waived', evidence: [],
+    } })
+    session.append('task/review-decided', { decision: 'ready' })
+    session.append('task/delivery-started', { intent })
+    const row = { taskId: id, executionWorkspace: assignment, asOfSeq: session.seq, status: 'needs-attention' } as TaskSnapshot
+    ctx.provide('tasks', { snapshot: () => ({ generation: 1, tasks: [row] }) } as never)
+    let changeDuringInspection = false
+    let authorizationChanged = false
+    const persistence = vi.fn(async () => ({ events: session.events.map(event =>
+      event.type === 'task/delivery-started' && authorizationChanged
+        ? { ...event, data: { intent: { ...intent, message: 'Changed authorization' } } } : event) }))
+    ctx.provide('sessionPersistence', { inspect: persistence } as never)
+    let claimed = false
+    let completeDuringInspection = false
+    const review = { inspectDelivery: vi.fn(async (request: InspectTaskDeliveryRequest) => {
+      if (mode === 'resident') expect(claimed).toBe(true)
+      else expect(() => ctx.agents.enter({ id, session } as Agent, undefined)).toThrow(AgentOfflineReservationError)
+      if (changeDuringInspection) authorizationChanged = true
+      if (completeDuringInspection) session.append('task/review-committed', { receipt: {
+        kind: 'commit', operationId, taskId: id, workspaceId: assignment.workspaceId,
+        reviewRevision: intent.reviewRevision, committedRevision: TaskReviewRevision('c'.repeat(64)),
+        branch: assignment.branch, commit: '3'.repeat(40), committedAt: 1,
+      } })
+      return { taskId: id, workspaceId: assignment.workspaceId, intent: request.intent,
+        status: 'not-completed' as const, revision: 'd'.repeat(64) as TaskDeliveryInspectionRevision, observedAt: 1 }
+    }) }
+    ctx.provide('taskReview', review as never)
+    if (mode === 'resident') ctx.agents.register({ id, session,
+      runMaintenance<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+        claimed = true
+        return operation(new AbortController().signal).finally(() => { claimed = false })
+      },
+    } as Agent)
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    try {
+      const events = JSON.stringify(session.events)
+      await expect(server.handleRequest('task/inspectDelivery', { sessionId: id, operationId }))
+        .resolves.toMatchObject({ status: 'not-completed', intent })
+      expect(review.inspectDelivery).toHaveBeenCalledWith({ assignment, intent }, mode === 'resident' ? expect.any(AbortSignal) : undefined)
+      expect(JSON.stringify(session.events)).toBe(events)
+      expect(claimed).toBe(false)
+      if (mode === 'cold') {
+        expect(ctx.agents.get(id)).toBeUndefined()
+        expect(ctx.sessions.get(id)).toBeUndefined()
+        expect(persistence).toHaveBeenCalledTimes(2)
+      }
+      await expect(server.inspectTaskDelivery(id, '00000000-0000-4000-8000-000000000002'))
+        .rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+      expect(review.inspectDelivery).toHaveBeenCalledTimes(1)
+      if (mode === 'cold') {
+        changeDuringInspection = true
+        await expect(server.inspectTaskDelivery(id, operationId)).rejects.toThrow('authorization changed during inspection')
+        changeDuringInspection = false
+        authorizationChanged = false
+        review.inspectDelivery.mockClear()
+      }
+      completeDuringInspection = true
+      await expect(server.inspectTaskDelivery(id, operationId)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+      await expect(server.inspectTaskDelivery(id, operationId)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+      expect(review.inspectDelivery).toHaveBeenCalledTimes(mode === 'cold' ? 1 : 2)
+      if (mode === 'cold') {
+        persistence.mockResolvedValue(undefined as never)
+        await expect(server.inspectTaskDelivery(id, operationId)).rejects.toMatchObject({ code: 'TASK_DELIVERY_PENDING' })
+      }
+    } finally {
+      await server.shutdown()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each([
+    undefined, {}, { sessionId: '' }, { sessionId: ' root ', operationId: '00000000-0000-4000-8000-000000000001' },
+    { sessionId: 'root', operationId: 'invalid' },
+    { sessionId: 'root', operationId: '00000000-0000-4000-8000-000000000001', sourcePath: '/other' },
+  ])('rejects malformed inspection params before entering Task services: %j', async (params) => {
+    const ctx = new Context()
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    try {
+      await expect(server.handleRequest('task/inspectDelivery', params)).rejects.toThrow('requires only a root sessionId')
+      await expect(server.inspectTaskDelivery('root', '00000000-0000-4000-8000-000000000001'))
+        .rejects.toMatchObject({ code: 'TASK_UNAVAILABLE' })
     } finally {
       await server.shutdown()
       await ctx.fiber.dispose()

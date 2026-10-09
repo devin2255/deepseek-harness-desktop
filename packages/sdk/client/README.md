@@ -39,6 +39,8 @@ Optional `integrations` preserves ordered attempts and all five outcome kinds wi
 
 Both client layers expose `retryTaskDeliveryCheckpoint(sessionId, operationId)` for the advertised `retryableDeliveryCheckpoint`. This saves an existing live receipt without a review revision, another event, or any Git execution; missing or replaced receipts reject. A lost Provider result cannot be recovered with this method.
 
+Both layers expose `inspectTaskDelivery(sessionId, operationId)` for a pending authorization without a receipt. The result distinguishes completed, absent, and ambiguous current evidence and retains exact authorized inputs; it never confirms delivery or unlocks execution. Validation rejects mismatched request identities, inconsistent effects, extra fields, and execution timestamps. Absence means the effect is absent now, not that Git never changed. The server requires the Task and Review services; see the [inspection decision](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md).
+
 ## Model Experience
 
 None, as this is a client-process library; the model runs in the spawned runtime, whose experience is owned by the plugins its `cordis.yml` composes.

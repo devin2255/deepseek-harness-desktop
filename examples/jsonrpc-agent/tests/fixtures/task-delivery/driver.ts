@@ -27,7 +27,7 @@ try {
     await git(['add', '.'])
     await git(['commit', '-m', 'base'])
     const workspace = await ctx.workspaceRegistry.create(source)
-    for (const label of ['delivered', 'unconfirmed', 'checkpoint']) {
+    for (const label of ['delivered', 'unconfirmed', 'checkpoint', 'not-completed', 'discard-unconfirmed']) {
       const id = SessionId(label)
       const assignment = await ctx.taskWorktrees.create({ taskId: id, workspaceId: workspace.id, workspacePath: source })
       const session = ctx.sessions.create(id, { meta: { cwd: assignment.path } })
@@ -50,6 +50,18 @@ try {
   ctx.taskReview.commit = async (request, signal) => {
     const result = await commit(request, signal)
     if (request.assignment.taskId === 'unconfirmed') throw new Error('Injected loss after real Git commit')
+    return result
+  }
+  const discard = ctx.taskReview.discard.bind(ctx.taskReview)
+  ctx.taskReview.discard = async (request, signal) => {
+    const result = await discard(request, signal)
+    if (request.assignment.taskId === 'discard-unconfirmed') throw new Error('Injected loss after real Git discard')
+    return result
+  }
+  const startDelivery = ctx.tasks.startDelivery.bind(ctx.tasks)
+  ctx.tasks.startDelivery = async (id, request) => {
+    const result = await startDelivery(id, request)
+    if (id === 'not-completed') throw new Error('Injected loss after authorization before Git')
     return result
   }
   const flush = ctx.sessions.flush.bind(ctx.sessions)

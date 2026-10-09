@@ -17,8 +17,130 @@ from deepseek_harness import (
     Notification,
     SdkProtocolError,
     TaskCriterion,
+    TaskDeliveryInspection,
     TaskRisk,
 )
+
+
+def delivery_evidence(kind: str = "commit") -> dict:
+    common = {
+        "kind": kind, "operationId": "00000000-0000-4000-8000-000000000001", "reviewRevision": "b" * 64,
+    }
+    if kind == "commit":
+        intent = {**common, "message": "Reviewed", "headCommit": "1" * 40, "tree": "2" * 40}
+        effect = {"kind": kind, "commit": "3" * 40, "committedRevision": "c" * 64,
+                  "headBefore": "1" * 40, "tree": "2" * 40, "branch": "task"}
+    elif kind == "apply":
+        intent = {**common, "commit": "3" * 40, "sourceHead": "1" * 40}
+        effect = {"kind": kind, "commit": "3" * 40, "sourceHead": "1" * 40, "sourceTree": "2" * 40}
+    else:
+        intent = {**common, "headCommit": "1" * 40, "confirmedUncommittedLoss": True, "uncommittedChanges": True}
+        effect = {"kind": kind, "branch": "task", "headCommit": "1" * 40, "worktreeRemoved": True,
+                  "branchPreserved": True, "uncommittedChangesDiscarded": True, "recoverableCommit": "1" * 40}
+    return {"taskId": "root", "workspaceId": "workspace", "intent": intent, "effect": effect,
+            "revision": "d" * 64, "observedAt": 0, "status": "completed"}
+
+
+@pytest.mark.parametrize("kind", ["commit", "apply", "discard"])
+@pytest.mark.parametrize("status", ["completed", "not-completed", "ambiguous"])
+def test_inspection_decodes_current_evidence(monkeypatch: pytest.MonkeyPatch, kind: str, status: str) -> None:
+    client = HarnessClient()
+    value = delivery_evidence(kind)
+    value["status"] = status
+    if status != "completed":
+        del value["effect"]
+    if status == "ambiguous":
+        value["reason"] = "state-changed"
+
+    def request(method: str, params: dict, *, response_model: type, **_kwargs: object):
+        assert method == "task/inspectDelivery"
+        assert params == {"sessionId": "root", "operationId": value["intent"]["operationId"]}
+        return response_model.model_validate(value)
+
+    monkeypatch.setattr(client, "request", request)
+    result = client.inspect_task_delivery("root", value["intent"]["operationId"])
+    assert isinstance(result, TaskDeliveryInspection)
+    assert result.status == status
+    assert result.intent.kind == kind
+    assert result.observed_at == 0
+    if status != "completed":
+        assert result.effect is None
+
+
+@pytest.mark.parametrize("case", [
+    "task", "operation", "time", "unsafe-time", "revision", "history", "missing-intent", "intent-extra",
+    "commit-message", "commit-tree", "commit-parent", "effect-extra", "effect-kind", "effect-missing",
+    "reason-extra", "absent-effect", "ambiguous-effect", "ambiguous-reason", "ambiguous-missing-reason",
+    "apply-commit", "apply-head", "discard-loss", "discard-recovery", "discard-confirmation", "discard-removed",
+    "discard-preserved", "discard-branch", "identity-whitespace", "discard-recovery-null", "discard-numeric-fact",
+])
+def test_inspection_rejects_inconsistent_or_historical_values(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    value = delivery_evidence("apply" if case.startswith("apply-") else "discard" if case.startswith("discard-") else "commit")
+    if case == "task":
+        value["taskId"] = "other"
+    elif case == "operation":
+        value["intent"]["operationId"] = "00000000-0000-4000-8000-000000000002"
+    elif case in {"time", "unsafe-time"}:
+        value["observedAt"] = -1 if case == "time" else 9007199254740992
+    elif case == "revision":
+        value["revision"] = "invalid"
+    elif case == "history":
+        value["committedAt"] = 1
+    elif case == "missing-intent":
+        del value["intent"]
+    elif case == "intent-extra":
+        value["intent"]["sourcePath"] = "/other"
+    elif case == "commit-message":
+        value["intent"]["message"] = "\x00"
+    elif case in {"commit-tree", "commit-parent", "apply-commit", "apply-head", "discard-recovery"}:
+        field = {"commit-tree": "tree", "commit-parent": "headBefore", "apply-commit": "commit",
+                 "apply-head": "sourceHead", "discard-recovery": "recoverableCommit"}[case]
+        value["effect"][field] = "4" * 40
+    elif case == "effect-extra":
+        value["effect"]["committedAt"] = 1
+    elif case == "effect-kind":
+        value["effect"]["kind"] = "unknown"
+    elif case == "effect-missing":
+        del value["effect"]
+    elif case == "reason-extra":
+        value["reason"] = "state-changed"
+    elif case == "absent-effect":
+        value["status"] = "not-completed"
+    elif case.startswith("ambiguous-"):
+        value["status"] = "ambiguous"
+        if case != "ambiguous-effect":
+            del value["effect"]
+        if case != "ambiguous-missing-reason":
+            value["reason"] = "unknown" if case == "ambiguous-reason" else "state-changed"
+    elif case == "discard-loss":
+        value["effect"]["uncommittedChangesDiscarded"] = False
+    elif case == "discard-confirmation":
+        value["intent"]["confirmedUncommittedLoss"] = False
+    elif case in {"discard-removed", "discard-preserved"}:
+        value["effect"]["worktreeRemoved" if case == "discard-removed" else "branchPreserved"] = False
+    elif case == "discard-branch":
+        value["effect"]["branch"] = " task "
+    elif case == "identity-whitespace":
+        value["workspaceId"] = " workspace "
+    elif case == "discard-recovery-null":
+        value["effect"]["recoverableCommit"] = None
+    elif case == "discard-numeric-fact":
+        value["effect"]["worktreeRemoved"] = 1
+
+    client = HarnessClient()
+    monkeypatch.setattr(client, "request", lambda _method, _params, *, response_model, **_kwargs: response_model.model_validate(value))
+    with pytest.raises(SdkProtocolError):
+        client.inspect_task_delivery("root", "00000000-0000-4000-8000-000000000001")
+
+
+def test_high_level_inspection_delegates_without_adopting(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = DeepSeekHarness()
+    monkeypatch.setattr(harness, "start", lambda: None)
+    value = TaskDeliveryInspection.model_validate(delivery_evidence())
+    calls = []
+    monkeypatch.setattr(harness.client, "inspect_task_delivery", lambda *args: calls.append(args) or value)
+    assert harness.inspect_task_delivery("root", value.intent.operation_id) is value
+    assert calls == [("root", value.intent.operation_id)]
 
 
 def test_isolated_writer_assignment_stays_in_child_notifications(tmp_path: Path) -> None:

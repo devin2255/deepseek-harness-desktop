@@ -51,5 +51,17 @@
   "missingReceiptRetryRejected": {
     "live": true,
     "cold": true
+  },
+  "inspection": {
+    "live": "completed",
+    "cold": "completed",
+    "absence": "not-completed",
+    "removedWorktree": "completed",
+    "externalEdit": "ambiguous",
+    "authorizedTargetsMatched": true,
+    "observationRevisionRetained": true,
+    "noReceiptFabricated": true,
+    "pendingRowsUnchanged": true,
+    "indexesUnchanged": true
   }
 }

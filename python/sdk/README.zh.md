@@ -51,6 +51,8 @@ Discard 回执标识当前授权的审查和保留的 Task 分支，不一定等
 
 两层客户端都提供 `retry_task_delivery_checkpoint(session_id, operation_id)`，用于提供给调用方的 `retryable_delivery_checkpoint`。即使 worktree 已被丢弃，它仍能保存现有实时回执，不追加事件，也不执行 Git。回执缺失或被替换时会拒绝；Provider 结果丢失时需要检查 Git，而不是使用此重试。
 
+两层客户端都提供 `inspect_task_delivery(session_id, operation_id)`，用于没有回执的未完成授权。`TaskDeliveryInspection` 通过类型化授权与效果区分当前已完成、缺失和不确定的证据；它绝不确认交付或解除执行限制。校验拒绝不匹配的请求身份、不一致的效果、额外字段和执行时间戳。缺失表示此刻效果不存在，不表示 Git 从未变化。服务器要求所选组合提供 Task 与 Review 服务。
+
 也可以通过 `DSH_CORDIS_CONFIG` 为运行时子进程指定配置。注入逻辑位于 `HarnessClient.start()`，因此底层客户端按默认方式启动时也具有该行为：如果启动方式最终解析为内置运行时，且既没有设置 `cordis`，也没有设置非空的 `DSH_CORDIS_CONFIG`（运行时将空值视为未设置，注入检查也是如此），系统就会使用内置默认配置；显式指定 `runtime_bin`、`bridge_bin` 或 `launch_args_override` 时，则会完全禁用该注入。运行时载体（生产用 exe 与仅限开发的 `node` 闭包）及其获取方式见 [sdk-runtime README](https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk-runtime/README.md)。
 
 `cwd` 与 `runtime_cwd` 会在启动子进程、注入环境变量和协议握手前解析为绝对路径。公开 API 只暴露由 SDK 直接应用的选项：部署 persona 和持久化配置应在 `cordis.yml` 中定义；`session_root` 则保留为设置 `DSH_SESSION_ROOT` 的高层便捷参数。

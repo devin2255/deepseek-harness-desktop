@@ -14,13 +14,13 @@ import { carrierKeyOf, type Scoped } from '@deepseek-ai/dsh-scope'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
-import { TaskError } from '@deepseek-ai/dsh-task'
+import { foldTask, TaskError } from '@deepseek-ai/dsh-task'
 import type {
   DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
   TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
 import type {} from '@deepseek-ai/dsh-task-review'
-import { TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDeliveryIntent, type TaskDiscardPreflight, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
+import { TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDeliveryInspection, type TaskDeliveryIntent, type TaskDiscardPreflight, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   InitializeParams,
@@ -275,6 +275,44 @@ export class HarnessSdkJsonRpcServer {
   }
 
   /**
+   * Observe current Git evidence without adopting delivery or activating a cold Agent.
+   * @param sessionId - root Session identity.
+   * @param operationId - pending delivery authorization identity.
+   * @returns current evidence, not an execution receipt; missing or changed authorization rejects.
+   */
+  async inspectTaskDelivery(sessionId: string, operationId: string): Promise<TaskDeliveryInspection> {
+    const agents = this.ctx.get('agents')
+    if (agents === undefined) throw new TaskError('Task execution ownership is unavailable', 'TASK_UNAVAILABLE')
+    const id = SessionId(sessionId)
+    const inspect = async (signal?: AbortSignal): Promise<TaskDeliveryInspection> => {
+      signal?.throwIfAborted()
+      const target = this.taskReviewTarget(sessionId)
+      const intent = await this.pendingDeliveryIntent(id, TaskReviewOperationId(operationId), signal)
+      const result = await target.review.inspectDelivery({ assignment: target.task.executionWorkspace, intent }, signal)
+      const current = await this.pendingDeliveryIntent(id, TaskReviewOperationId(operationId), signal)
+      if (JSON.stringify(current) !== JSON.stringify(intent)) {
+        throw new TaskError('The pending delivery authorization changed during inspection.', 'TASK_DELIVERY_PENDING')
+      }
+      return result
+    }
+    const agent = agents.get(id)
+    return agent === undefined ? agents.withOfflineSessions([id], () => inspect()) : agent.runMaintenance(inspect)
+  }
+
+  private async pendingDeliveryIntent(
+    sessionId: SessionId, operationId: TaskReviewOperationId, signal?: AbortSignal,
+  ): Promise<TaskDeliveryIntent> {
+    const attached = this.ctx.get('sessions')?.get(sessionId)
+    const events = attached?.events ?? (await this.ctx.get('sessionPersistence')?.inspect(sessionId, signal))?.events
+    signal?.throwIfAborted()
+    const pending = events === undefined ? undefined : foldTask(events).pendingDelivery
+    if (pending === undefined || pending.intent.operationId !== operationId) {
+      throw new TaskError('No matching pending delivery authorization. An existing live receipt must be saved instead.', 'TASK_DELIVERY_PENDING')
+    }
+    return pending.intent
+  }
+
+  /**
    * Apply one exact recorded Task commit and record its receipt.
    * @param params - root Session, committed revision, source head, commit, and sequence.
    * @returns the Task carrying its durable apply receipt.
@@ -416,6 +454,15 @@ export class HarnessSdkJsonRpcServer {
       case 'task/retryDeliveryCheckpoint': {
         const { sessionId, operationId } = params as unknown as { sessionId: string; operationId: string }
         return this.retryTaskDeliveryCheckpoint(sessionId, operationId)
+      }
+      case 'task/inspectDelivery': {
+        if (params === undefined || Object.keys(params).length !== 2
+          || typeof params.sessionId !== 'string' || params.sessionId.length === 0 || params.sessionId !== params.sessionId.trim()
+          || typeof params.operationId !== 'string'
+          || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(params.operationId)) {
+          throw new TypeError('task/inspectDelivery requires only a root sessionId and normalized operationId')
+        }
+        return this.inspectTaskDelivery(params.sessionId, params.operationId)
       }
       case 'task/define': {
         const { sessionId, ...request } = params as unknown as DefineTaskRequest & { sessionId: string }

@@ -26,6 +26,22 @@ import { finalResponse, normalizeInput } from '../src/api.ts'
 
 const reviewRevision = 'b'.repeat(64) as TaskReviewRevision
 
+const deliveryOperationId = '00000000-0000-4000-8000-000000000001'
+
+function deliveryEvidence(kind: 'commit' | 'apply' | 'discard' = 'commit'): Record<string, unknown> {
+  const intent = { kind, operationId: deliveryOperationId, reviewRevision,
+    ...(kind === 'commit' ? { message: 'Reviewed', headCommit: '1'.repeat(40), tree: '2'.repeat(40) }
+      : kind === 'apply' ? { commit: '3'.repeat(40), sourceHead: '1'.repeat(40) }
+        : { headCommit: '1'.repeat(40), uncommittedChanges: true, confirmedUncommittedLoss: true }) }
+  const effect = kind === 'commit'
+    ? { kind, commit: '3'.repeat(40), committedRevision: 'c'.repeat(64), headBefore: '1'.repeat(40), tree: '2'.repeat(40), branch: 'task' }
+    : kind === 'apply' ? { kind, commit: '3'.repeat(40), sourceHead: '1'.repeat(40), sourceTree: '2'.repeat(40) }
+      : { kind, branch: 'task', headCommit: '1'.repeat(40), worktreeRemoved: true, branchPreserved: true,
+        uncommittedChangesDiscarded: true, recoverableCommit: '1'.repeat(40) }
+  return { taskId: 'task-root', workspaceId: 'workspace', intent, effect,
+    revision: 'd'.repeat(64), observedAt: 0, status: 'completed' }
+}
+
 const fakeRuntime = fileURLToPath(new URL('./fake-runtime.ts', import.meta.url))
 
 const cleanups: (() => Promise<void>)[] = []
@@ -322,6 +338,77 @@ describe('DeepSeekHarness', () => {
 })
 
 describe('HarnessClient', () => {
+  it.each(['commit', 'apply', 'discard'] as const)('validates %s evidence without treating it as a receipt', async (kind) => {
+    const client = new HarnessClient(fakeLaunch())
+    const value = deliveryEvidence(kind)
+    const request = vi.spyOn(client, 'request').mockResolvedValue(value)
+    await expect(client.inspectTaskDelivery('task-root', deliveryOperationId)).resolves.toEqual(value)
+    expect(request).toHaveBeenCalledWith('task/inspectDelivery', { sessionId: 'task-root', operationId: deliveryOperationId })
+    request.mockRestore()
+  })
+
+  it.each(['not-completed', 'ambiguous'] as const)('accepts %s evidence with no completed effect', async (status) => {
+    const client = new HarnessClient(fakeLaunch())
+    const { effect: _effect, ...common } = deliveryEvidence()
+    const value = { ...common, status, ...(status === 'ambiguous' ? { reason: 'state-changed' } : {}) }
+    const request = vi.spyOn(client, 'request').mockResolvedValue(value)
+    await expect(client.inspectTaskDelivery('task-root', deliveryOperationId)).resolves.toEqual(value)
+    request.mockRestore()
+  })
+
+  it.each([
+    null, {}, { taskId: 'other' }, { workspaceId: ' ' }, { revision: 'invalid' }, { observedAt: -1 },
+    { observedAt: 1.5 }, { observedAt: Number.MAX_SAFE_INTEGER + 1 }, { status: 'unknown' },
+    { status: 'ambiguous', reason: 'unknown', effect: undefined }, { status: 'not-completed' },
+    { reason: 'state-changed' }, { committedAt: 1 }, { intent: {} },
+    { intent: { ...(deliveryEvidence().intent as object), operationId: '00000000-0000-4000-8000-000000000002' } },
+    { intent: { ...(deliveryEvidence().intent as object), message: '\0' } },
+    { intent: { ...(deliveryEvidence().intent as object), kind: 'unknown' } },
+    { intent: { ...(deliveryEvidence().intent as object), sourcePath: '/other' } },
+    { effect: { ...(deliveryEvidence().effect as object), tree: '4'.repeat(40) } },
+    { effect: { ...(deliveryEvidence().effect as object), committedAt: 1 } },
+    { effect: { ...(deliveryEvidence().effect as object), kind: 'unknown' } },
+    { effect: null },
+  ])('rejects malformed or inconsistent inspection evidence: %j', async (override) => {
+    const client = new HarnessClient(fakeLaunch())
+    const value = override === null ? null : Object.keys(override).length === 0 ? override : { ...deliveryEvidence(), ...override }
+    const request = vi.spyOn(client, 'request').mockResolvedValue(value)
+    await expect(client.inspectTaskDelivery('task-root', deliveryOperationId)).rejects.toThrow(SdkProtocolError)
+    request.mockRestore()
+  })
+
+  it('exposes inspection on the high-level client without changing evidence', async () => {
+    const harness = harnessWith()
+    await harness.start()
+    const inspection = vi.spyOn(harness.client, 'inspectTaskDelivery').mockResolvedValue(deliveryEvidence() as never)
+    await expect(harness.inspectTaskDelivery('task-root', deliveryOperationId)).resolves.toEqual(deliveryEvidence())
+    expect(inspection).toHaveBeenCalledWith('task-root', deliveryOperationId)
+    inspection.mockRestore()
+  })
+
+  it.each([
+    ['apply', { commit: '4'.repeat(40) }], ['apply', { sourceHead: '4'.repeat(40) }], ['apply', { sourceTree: 'invalid' }],
+    ['discard', { headCommit: '4'.repeat(40) }], ['discard', { worktreeRemoved: false }],
+    ['discard', { branchPreserved: 1 }], ['discard', { branch: ' task ' }],
+    ['discard', { uncommittedChangesDiscarded: false }], ['discard', { recoverableCommit: '4'.repeat(40) }],
+  ] as const)('rejects an inconsistent %s effect: %j', async (kind, fields) => {
+    const client = new HarnessClient(fakeLaunch())
+    const value = deliveryEvidence(kind)
+    value.effect = { ...(value.effect as object), ...fields }
+    const request = vi.spyOn(client, 'request').mockResolvedValue(value)
+    await expect(client.inspectTaskDelivery('task-root', deliveryOperationId)).rejects.toThrow(SdkProtocolError)
+    request.mockRestore()
+  })
+
+  it('rejects discard evidence for unconfirmed uncommitted loss', async () => {
+    const client = new HarnessClient(fakeLaunch())
+    const value = deliveryEvidence('discard')
+    value.intent = { ...(value.intent as object), confirmedUncommittedLoss: false }
+    const request = vi.spyOn(client, 'request').mockResolvedValue(value)
+    await expect(client.inspectTaskDelivery('task-root', deliveryOperationId)).rejects.toThrow(SdkProtocolError)
+    request.mockRestore()
+  })
+
   it('projects Task list and compare-and-set commands through typed methods', async () => {
     const client = new HarnessClient(fakeLaunch())
     cleanups.push(() => client.close())

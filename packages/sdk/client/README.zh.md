@@ -39,6 +39,8 @@ console.log(result.finalResponse)
 
 两层客户端都提供 `retryTaskDeliveryCheckpoint(sessionId, operationId)`，用于提供给调用方的 `retryableDeliveryCheckpoint`。该操作保存现有实时回执，不要求审查 revision，不追加事件，也不执行 Git；回执缺失或被替换时会拒绝。此方法不能恢复丢失的 Provider 结果。
 
+两层客户端都提供 `inspectTaskDelivery(sessionId, operationId)`，用于没有回执的未完成授权。结果区分当前已完成、缺失和不确定的证据，并保留确切授权输入；它绝不确认交付或解除执行限制。校验拒绝不匹配的请求身份、不一致的效果、额外字段和执行时间戳。缺失表示此刻效果不存在，不表示 Git 从未变化。服务器要求 Task 与 Review 服务；参见[核验决策](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md)。
+
 ## 模型体验
 
 无，因为这是一个客户端进程库；模型运行在 spawn 出的运行时中，其体验由该运行时的 `cordis.yml` 所组合的插件决定。

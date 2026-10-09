@@ -110,6 +110,42 @@ it('projects authorized delivery and preserves lost results through the TypeScri
     expect(git(['rev-parse', 'HEAD'])).toBe(summary.sourceHead)
     expect(git(['rev-parse', execution.branch])).toBe(discardSummary.headCommit)
     expect(existsSync(initial.executionWorkspace!.path)).toBe(false)
+    const indexPath = git(['-C', pending.executionWorkspace!.path, 'rev-parse', '--path-format=absolute', '--git-path', 'index'])
+    const sourceIndexPath = git(['rev-parse', '--path-format=absolute', '--git-path', 'index'])
+    const taskIndex = await readFile(indexPath)
+    const sourceIndex = await readFile(sourceIndexPath)
+    await expect(harness.client.request('task/inspectDelivery', { sessionId: 'unconfirmed', operationId,
+      sourcePath: '/client-cannot-select-this' })).rejects.toThrow('requires only a root sessionId')
+    const liveObservation = await harness.inspectTaskDelivery('unconfirmed', operationId)
+    expect(liveObservation).toMatchObject({ taskId: 'unconfirmed', status: 'completed',
+      intent: intents[4]?.data.intent, effect: { kind: 'commit', commit: lostCommit, headBefore: before.headCommit,
+        tree: git(['rev-parse', `${lostCommit}^{tree}`]) } })
+    expect(liveObservation).not.toHaveProperty('committedAt')
+    expect(liveObservation.status === 'completed' && liveObservation.effect).not.toHaveProperty('committedAt')
+    expect(row('unconfirmed', (await harness.listTasks()).tasks)).toEqual(pending)
+    expect(await readFile(indexPath)).toEqual(taskIndex)
+    expect(await readFile(sourceIndexPath)).toEqual(sourceIndex)
+    const absent = row('not-completed', (await harness.listTasks()).tasks)
+    const absentSummary = await harness.getTaskReviewSummary('not-completed')
+    await expect(harness.commitTask('not-completed', { expectedRevision: absentSummary.revision,
+      expectedSeq: absent.asOfSeq, message: 'Do not run Git' })).rejects.toThrow('Delivery result is unconfirmed')
+    const absentPending = row('not-completed', (await harness.listTasks()).tasks)
+    const absentId = absentPending.attention.find(item => item.kind === 'delivery-unconfirmed')?.sourceId
+    if (absentId === undefined) throw new Error('Absent delivery has no authorization')
+    const absence = await harness.inspectTaskDelivery('not-completed', absentId)
+    expect(absence.status).toBe('not-completed')
+    expect(git(['rev-parse', absentPending.executionWorkspace!.branch])).toBe(absentSummary.headCommit)
+    const removed = row('discard-unconfirmed', (await harness.listTasks()).tasks)
+    const removedSummary = await harness.getTaskReviewSummary('discard-unconfirmed')
+    await expect(harness.discardTask('discard-unconfirmed', { expectedRevision: removedSummary.revision,
+      expectedSeq: removed.asOfSeq, confirmedUncommittedLoss: true })).rejects.toThrow('Delivery result is unconfirmed')
+    const removedPending = row('discard-unconfirmed', (await harness.listTasks()).tasks)
+    const removedId = removedPending.attention.find(item => item.kind === 'delivery-unconfirmed')?.sourceId
+    if (removedId === undefined) throw new Error('Removed delivery has no authorization')
+    expect(existsSync(removed.executionWorkspace!.path)).toBe(false)
+    const removedObservation = await harness.inspectTaskDelivery('discard-unconfirmed', removedId)
+    expect(removedObservation).toMatchObject({ status: 'completed', effect: { kind: 'discard', worktreeRemoved: true,
+      branchPreserved: true, uncommittedChangesDiscarded: true, headCommit: removedSummary.headCommit } })
     await harness.close()
     harness = create()
     const restored = await harness.listTasks()
@@ -129,6 +165,21 @@ it('projects authorized delivery and preserves lost results through the TypeScri
     await expect(harness.commitTask('unconfirmed', { expectedRevision: before.revision,
       expectedSeq: cold.asOfSeq, message: 'Do not repeat' })).rejects.toThrow()
     expect(git(['rev-parse', branch])).toBe(lostCommit)
+    const coldObservation = await harness.inspectTaskDelivery('unconfirmed', operationId)
+    expect(coldObservation).toMatchObject({ status: 'completed', intent: liveObservation.intent, revision: liveObservation.revision })
+    expect(row('unconfirmed', (await harness.listTasks()).tasks)).toEqual(cold)
+    const coldRemoved = row('discard-unconfirmed', (await harness.listTasks()).tasks)
+    expect(await harness.inspectTaskDelivery('discard-unconfirmed', removedId)).toMatchObject({ status: 'completed',
+      revision: removedObservation.revision, intent: removedObservation.intent })
+    expect(row('discard-unconfirmed', (await harness.listTasks()).tasks)).toEqual(coldRemoved)
+    expect((await harness.inspectTaskDelivery('not-completed', absentId)).status).toBe('not-completed')
+    await writeFile(join(pending.executionWorkspace!.path, 'tracked.txt'), 'external edit after delivery\n')
+    const ambiguous = await harness.inspectTaskDelivery('unconfirmed', operationId)
+    expect(ambiguous).toMatchObject({ status: 'ambiguous', reason: 'task-changed' })
+    expect(row('unconfirmed', (await harness.listTasks()).tasks)).toEqual(cold)
+    expect(await readFile(indexPath)).toEqual(taskIndex)
+    expect(await readFile(sourceIndexPath)).toEqual(sourceIndex)
+    expect(git(['rev-parse', branch])).toBe(lostCommit)
     const result = { operations: intents.map(event => event.data.intent.kind),
       commitTarget: { notified: true, completedTreeMatches: true, lostTreeMatches: true },
       correlatedReceipts: completions.map(event => event.data.receipt.kind),
@@ -140,7 +191,11 @@ it('projects authorized delivery and preserves lost results through the TypeScri
         currentHeadRetained: true, originalCommitRetained: true, coldReceiptRetained: true },
       checkpointRetry: { advertised: true, operationIdMatched: true, attentionCleared: true,
         noEventAppended: true, gitCommitPreserved: true, coldReceiptRetained: true },
-      missingReceiptRetryRejected: { live: true, cold: true } }
+      missingReceiptRetryRejected: { live: true, cold: true },
+      inspection: { live: liveObservation.status, cold: coldObservation.status, absence: absence.status,
+        removedWorktree: removedObservation.status, externalEdit: ambiguous.status,
+        authorizedTargetsMatched: true, observationRevisionRetained: true,
+        noReceiptFabricated: true, pendingRowsUnchanged: true, indexesUnchanged: true } }
     const output = `${JSON.stringify(result, null, 2)}\n`
     if (process.env.DSH_SNAPSHOT === 'refresh') {
       await mkdir(dirname(expected), { recursive: true })

@@ -1,6 +1,6 @@
 /**
- * Named wire types for the DeepSeek Harness SDK runtime protocol: the three
- * request/result pairs and the four server-to-client notification payloads
+ * Named wire types for the DeepSeek Harness SDK runtime protocol:
+ * request/result pairs and server-to-client notification payloads
  * exchanged over the newline-delimited JSON-RPC stdio transport. The server
  * plugin (`@deepseek-ai/dsh-sdk-jsonrpc-server`) and SDK clients share these shapes;
  * `serverInfo.name` stays the wire-stable `deepseek-harness-sdk-runtime`.
@@ -15,7 +15,7 @@ import type {
   DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
   TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
-import type { TaskFileDiff, TaskReviewRevision, TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskDeliveryInspection, TaskFileDiff, TaskReviewRevision, TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 
 /** Parameters for loading one assigned Task's bounded review summary. */
 export interface TaskReviewSummaryParams {
@@ -56,6 +56,12 @@ export interface TaskDiscardParams {
 
 /** Parameters for saving an existing live delivery receipt without repeating Git. */
 export interface TaskDeliveryCheckpointParams {
+  readonly sessionId: string
+  readonly operationId: string
+}
+
+/** Parameters for observing a pending root delivery; paths and authorization come from its log. */
+export interface TaskDeliveryInspectionParams {
   readonly sessionId: string
   readonly operationId: string
 }
@@ -151,6 +157,7 @@ export interface HarnessSdkRequestMap {
   'session/prompt': { params: SessionPromptParams; result: SessionPromptResult }
   'task/list': { params: Record<string, never>; result: TaskListSnapshot }
   'task/retryDeliveryCheckpoint': { params: TaskDeliveryCheckpointParams; result: TaskSnapshot }
+  'task/inspectDelivery': { params: TaskDeliveryInspectionParams; result: TaskDeliveryInspection }
   'task/define': { params: DefineTaskRequest & { sessionId: string }; result: TaskSnapshot }
   'task/updateCriterion': { params: UpdateTaskCriterionRequest & { sessionId: string }; result: TaskSnapshot }
   'task/recordRisk': { params: RecordTaskRiskRequest & { sessionId: string }; result: TaskSnapshot }

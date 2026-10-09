@@ -23,6 +23,7 @@ from .models import (
     JsonValue,
     Notification,
     TaskCriterion,
+    TaskDeliveryInspection,
     TaskFileDiff,
     TaskListSnapshot,
     TaskReviewSummary,
@@ -276,6 +277,15 @@ class HarnessClient:
         return self._task_request("task/retryDeliveryCheckpoint", {
             "sessionId": session_id, "operationId": operation_id,
         }, TaskSnapshot)
+
+    def inspect_task_delivery(self, session_id: str, operation_id: str) -> TaskDeliveryInspection:
+        """Observe pending delivery without adopting its result or repeating Git."""
+        result = self._task_request("task/inspectDelivery", {
+            "sessionId": session_id, "operationId": operation_id,
+        }, TaskDeliveryInspection)
+        if result.task_id != session_id or result.intent.operation_id != operation_id:
+            raise SdkProtocolError("task/inspectDelivery returned mismatched evidence identities")
+        return result
 
     def _task_request(
         self, method: str, params: JsonObject, response_model: type[ModelT]
