@@ -218,8 +218,16 @@ jobs:
             exit 1
           }
 
+      - name: Build workspace
+        run: pnpm run build
+
+      - name: Python SDK Task delivery and cold recovery over built Node
+        run: >-
+          uv run --python 3.10 --group test --project python/sdk
+          python scripts/smoke-python-task-delivery.py
+
       - name: Build single-exe
-        run: pnpm exec tsx scripts/build-exe-for-python-sdk.ts --targets=${{ matrix.target }}
+        run: pnpm exec tsx scripts/build-exe-for-python-sdk.ts --skip-build --targets=${{ matrix.target }}
 
       - name: Resolve platform outputs
         id: runtime
@@ -247,11 +255,6 @@ jobs:
           python scripts/smoke-python-runtime.py
           --scenario all
           --exe "${{ steps.runtime.outputs.exe }}"
-
-      - name: Python SDK Task delivery and cold recovery over built Node
-        run: >-
-          uv run --python 3.10 --group test --project python/sdk
-          python scripts/smoke-python-task-delivery.py
 
       - name: Build release-shaped runtime wheel
         run: >-

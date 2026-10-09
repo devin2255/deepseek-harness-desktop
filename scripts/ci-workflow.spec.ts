@@ -386,6 +386,33 @@ describe('Python release workflows', () => {
     expect(JSON.stringify(manylinuxSmoke)).toContain('-e DSH_TELEMETRY_DISABLED')
   })
 
+  it('validates built-workspace Task delivery before production deploy rewrites dependency links', () => {
+    const build = workflowJob(loadWorkflow('.github/workflows/build-exe-for-python-sdk.yml'), 'build')
+    if (!Array.isArray(build.steps)) throw new TypeError('Python runtime builder must define steps')
+    const steps = build.steps.filter(isRecord)
+    const install = steps.findIndex(step => step.run === 'pnpm install --frozen-lockfile')
+    const compile = steps.findIndex(step => step.run === 'pnpm run build')
+    const delivery = steps.findIndex(step => typeof step.run === 'string'
+      && step.run.includes('scripts/smoke-python-task-delivery.py'))
+    const pack = steps.findIndex(step => typeof step.run === 'string'
+      && step.run.includes('scripts/build-exe-for-python-sdk.ts'))
+    const executableSmoke = steps.findIndex(step => typeof step.run === 'string'
+      && step.run.includes('scripts/smoke-python-runtime.py') && step.run.includes('--scenario all'))
+
+    expect(install).toBeGreaterThanOrEqual(0)
+    expect(compile).toBeGreaterThan(install)
+    expect(delivery).toBeGreaterThan(compile)
+    expect(pack).toBeGreaterThan(delivery)
+    expect(executableSmoke).toBeGreaterThan(pack)
+    expect(steps[delivery]).toMatchObject({
+      run: 'uv run --python 3.10 --group test --project python/sdk python scripts/smoke-python-task-delivery.py',
+    })
+    expect(steps[delivery]?.if).toBeUndefined()
+    expect(steps[pack]?.run).toBe(
+      'pnpm exec tsx scripts/build-exe-for-python-sdk.ts --skip-build --targets=${{ matrix.target }}',
+    )
+  })
+
   it('uses the shared macOS deployment-target check in GitLab', () => {
     const workflow = loadWorkflow('.gitlab-ci.yml')
     const runtimeWheel = workflow['.runtime-wheel']
