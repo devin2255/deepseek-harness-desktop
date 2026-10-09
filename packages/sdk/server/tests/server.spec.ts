@@ -259,7 +259,7 @@ describe('HarnessSdkJsonRpcServer', () => {
         path: request.path, binary: false, truncated: false, patch: 'diff',
       })),
       commit: vi.fn(async (request: CommitTaskReviewRequest) => {
-        await request.authorization!.authorize()
+        await request.authorization!.authorize({ headCommit: assignment.baseCommit, tree: '6'.repeat(40) })
         return { ...commitReceipt, operationId: request.authorization!.operationId }
       }),
       apply: vi.fn(async (request: ApplyTaskReviewRequest) => {
@@ -296,6 +296,7 @@ describe('HarnessSdkJsonRpcServer', () => {
     expect(committedTask.commitReceipt).toMatchObject({ ...commitReceipt,
       operationId: tasks.startDelivery.mock.calls[0]?.[1].intent.operationId,
     })
+    expect(tasks.startDelivery.mock.calls[0]?.[1].intent).toMatchObject({ headCommit: assignment.baseCommit, tree: '6'.repeat(40) })
     row = { ...row, status: 'settled', commitReceipt, asOfSeq: 5 }
     const appliedTask = await server.handleRequest('task/apply', {
       sessionId: 'root', expectedRevision: 'c'.repeat(64), expectedSourceHead: '2'.repeat(40),
@@ -352,7 +353,7 @@ describe('HarnessSdkJsonRpcServer', () => {
         else expect(() => ctx.agents.enter({ id: row.taskId, session: ctx.sessions.create(row.taskId) } as Agent, undefined))
           .toThrow(AgentOfflineReservationError)
         if (phase === 'preflight') throw failure
-        await request.authorization!.authorize()
+        await request.authorization!.authorize({ headCommit: '2'.repeat(40), tree: '6'.repeat(40) })
         if (phase === 'result') throw failure
         return {} as never
       }) }

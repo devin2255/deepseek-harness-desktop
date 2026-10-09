@@ -6,6 +6,11 @@
     "commit",
     "commit"
   ],
+  "commitTarget": {
+    "notified": true,
+    "completedTreeMatches": true,
+    "lostTreeMatches": true
+  },
   "correlatedReceipts": [
     "commit",
     "apply",

@@ -3,6 +3,11 @@
   "entries": [
     {
       "doc": "docs/subsystems/task.md",
+      "symbol": "TaskCommitPreflight",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
       "symbol": "TaskDiscardPreflight",
       "source": "packages/task/task-review/src/types.ts"
     },

@@ -214,6 +214,7 @@ describe('aggregateTasks', () => {
     const assigned = event('task/worktree-assigned', 0, 1, { assignment })
     const commitStarted = event('task/delivery-started', 4, 5, { intent: {
       kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision, message: 'Ship',
+      headCommit: assignment.baseCommit, tree: '6'.repeat(40),
     } })
     const applyStarted = event('task/delivery-started', 6, 6, { intent: {
       kind: 'apply', operationId: applyReceipt.operationId, reviewRevision: applyReceipt.reviewRevision,

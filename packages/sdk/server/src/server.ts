@@ -20,7 +20,7 @@ import type {
   TaskSnapshot, TaskDeliveryIntent, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
 import type {} from '@deepseek-ai/dsh-task-review'
-import { TaskReviewOperationId, TaskReviewRevision, type TaskDeliveryAuthorization, type TaskDiscardPreflight, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
+import { TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDiscardPreflight, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   InitializeParams,
@@ -248,8 +248,8 @@ export class HarnessSdkJsonRpcServer {
       || target.task.discardReceipt !== undefined) {
       throw new Error('Commit requires a ready Task without an existing delivery receipt.')
     }
-    return this.deliverTask(params.sessionId, params.expectedSeq, operationId => ({
-      kind: 'commit', operationId,
+    return this.deliverTask<TaskCommitPreflight>(params.sessionId, params.expectedSeq, (operationId, preflight) => ({
+      kind: 'commit', operationId, ...preflight,
       reviewRevision: TaskReviewRevision(params.expectedRevision), message: params.message,
     }), async (authorization, signal) => {
       const receipt = await target.review.commit({

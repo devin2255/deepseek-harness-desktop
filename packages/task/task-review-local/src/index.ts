@@ -1,8 +1,8 @@
 /** Local Git Provider for Task review and delivery. @module @deepseek-ai/dsh-task-review-local */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { lstat, readlink, realpath, unlink } from 'node:fs/promises'
+import { constants, createReadStream } from 'node:fs'
+import { chmod, copyFile, lstat, mkdtemp, readlink, realpath, rmdir, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -22,6 +22,7 @@ import type {
   SummarizeTaskReviewRequest,
   TaskApplyReceipt,
   TaskCommitReceipt,
+  TaskCommitPreflight,
   TaskDiscardReceipt,
   TaskDeliveryAuthorization,
   TaskFileDiff,
@@ -542,12 +543,22 @@ export class LocalTaskReview extends TaskReviewService {
       if (identity.exitCode !== 0) {
         throw failure('Git author identity is not configured for this Task worktree.', 'REVIEW_IDENTITY_MISSING')
       }
-      await request.authorization?.authorize()
+      const preflight = await this.prepareCommit(executable, request.assignment, reviewed.summary.headCommit, signal)
+      if ((await this.state(request.assignment, signal)).summary.revision !== request.expectedRevision) {
+        throw failure('The Task worktree changed while its commit tree was inspected.', 'REVIEW_STALE')
+      }
+      await request.authorization?.authorize(preflight)
       signal?.throwIfAborted()
+      if ((await this.state(request.assignment, signal)).summary.revision !== request.expectedRevision) {
+        throw failure('The Task worktree changed while commit authorization was being saved.', 'REVIEW_STALE')
+      }
       await this.command(executable, request.assignment.path, ['add', '-A', '--'], signal)
       const staged = await this.state(request.assignment, signal)
       if (staged.summary.revision !== request.expectedRevision) {
         throw failure('The Task worktree changed while its commit was prepared.', 'REVIEW_STALE')
+      }
+      if ((await this.command(executable, request.assignment.path, ['write-tree'], signal)).stdout.trim() !== preflight.tree) {
+        throw failure('The staged Git tree differs from the authorized commit tree.', 'REVIEW_STALE')
       }
       await this.command(
         executable,
@@ -565,6 +576,11 @@ export class LocalTaskReview extends TaskReviewService {
       if (status.stdout.length > 0) {
         throw failure('The Task worktree changed while its commit completed.', 'REVIEW_STALE')
       }
+      const commitIdentity = await this.command(executable, request.assignment.path,
+        ['show', '--no-patch', '--format=%P%n%T', committed.summary.headCommit], signal)
+      if (commitIdentity.stdout.trim() !== `${preflight.headCommit}\n${preflight.tree}`) {
+        throw failure('The resulting commit does not match the authorized parent and Git tree.', 'REVIEW_STALE')
+      }
       return Object.freeze({
         kind: 'commit' as const,
         operationId,
@@ -577,6 +593,33 @@ export class LocalTaskReview extends TaskReviewService {
         committedAt: Date.now(),
       })
     })
+  }
+
+  private async prepareCommit(
+    executable: string, assignment: TaskWorktreeAssignment, headCommit: string, signal?: AbortSignal,
+  ): Promise<TaskCommitPreflight> {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-task-commit-'))
+    const index = join(directory, 'index')
+    try {
+      await chmod(directory, 0o700)
+      const env = { GIT_INDEX_FILE: index }
+      // Rebuilding from HEAD loses the real index's assume-unchanged flags and split-index entries.
+      const currentIndex = (await this.command(executable, assignment.path, ['rev-parse', '--path-format=absolute', '--git-path', 'index'], signal)).stdout.trim()
+      if (!isAbsolute(currentIndex)) throw failure('Git returned an invalid Task index path.', 'REVIEW_GIT_FAILED')
+      try {
+        await copyFile(currentIndex, index, constants.COPYFILE_EXCL)
+      } catch (error: unknown) {
+        throw failure('The Task Git index could not be copied for commit inspection.', 'REVIEW_GIT_FAILED', error)
+      }
+      await this.command(executable, assignment.path, ['add', '-A', '--'], signal, undefined, undefined, env)
+      const tree = (await this.command(executable, assignment.path, ['write-tree'], signal, undefined, undefined, env)).stdout.trim()
+      if (!COMMIT.test(tree)) throw failure('Git returned an invalid prepared commit tree.', 'REVIEW_GIT_FAILED')
+      return { headCommit, tree }
+    } finally {
+      await removeTemporaryIndex(index)
+      await removeTemporaryIndex(`${index}.lock`)
+      await rmdir(directory)
+    }
   }
 
   async apply(request: ApplyTaskReviewRequest, signal?: AbortSignal): Promise<TaskApplyReceipt> {

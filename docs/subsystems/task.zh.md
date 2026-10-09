@@ -8,9 +8,17 @@ Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个�
 
 九种全值 Session 事件定义持久记录：`task/worktree-assigned`、`task/defined`、`task/criterion-updated`、`task/risk-recorded`、`task/review-decided`、`task/delivery-started`、`task/review-committed`、`task/review-applied` 和 `task/review-discarded`。Worktree 事件只记录一次不可变的源 Workspace、基础提交、源状态摘要、应用分支和执行目录。人工评审决策只能请求修改或声明准备交付；提交、应用和丢弃事件携带 Git Provider 返回的完整收据，包括准确的评审版本、操作标识、Git 对象 id 和恢复事实。严格折叠会拒绝重复分配、畸形标识、Task 或 Workspace 归属不匹配、额外字段、未规范化的空文本、重复标识、非法证据序号、缺失条件、禁止的状态变化，以及跳过必需阶段的交付事件。[持久化目录](../persistence-catalog.md#taskdefined--log-only)记录其确切声明。
 
-`TaskDeliveryIntent` 保留操作 id 和确切审查 revision，以及 `commit` 的提交消息、`apply` 的提交和源 HEAD，或 `discard` 的当前 worktree HEAD、未提交变更标记和显式损失确认。Discard 的恢复提交等于其授权 HEAD；若 HEAD 等于分配基准，则不提供恢复提交。它不受较早 Commit 回执的限制。`StartTaskDeliveryRequest` 增加授权的 `expectedSeq`。未匹配的意图产生 `delivery-unconfirmed` 注意事项；完成要求相同 id、类型、revision 和操作特定输入。只有回执的历史和不完整的预发布意图会被拒绝。无关 Session 事件可以穿插，但 Task 元数据、重叠交付和根模型步骤仍被阻止。Git 与 Session 持久化不是原子事务；回放和只读刷新都不会重试或结算待核实操作。
+`TaskDeliveryIntent` 保留操作 id 和确切审查 revision，以及 `commit` 的消息、父 HEAD 和目标 Git 树、`apply` 的提交和源 HEAD，或 `discard` 的当前 worktree HEAD、未提交变更标记和显式损失确认。Discard 的恢复提交等于其授权 HEAD；若 HEAD 等于分配基准，则不提供恢复提交。它不受较早 Commit 回执的限制。`StartTaskDeliveryRequest` 增加授权的 `expectedSeq`。未匹配的意图产生 `delivery-unconfirmed` 注意事项；完成要求相同 id、类型、revision 和操作特定输入。只有回执的历史和不完整的预发布意图会被拒绝。无关 Session 事件可以穿插，但 Task 元数据、重叠交付和根模型步骤仍被阻止。Git 与 Session 持久化不是原子事务；回放和只读刷新都不会重试或结算待核实操作。
 
-Review Provider 在删除前将以下 Discard 事实交给调用方拥有的授权：
+Review Provider 在修改用户索引或删除 worktree 前，将以下 Commit 和 Discard 事实交给调用方拥有的授权：
+
+```ts type-equiv
+/** Exact parent and staged Git tree inspected before Commit authorization. */
+interface TaskCommitPreflight {
+  readonly headCommit: string
+  readonly tree: string
+}
+```
 
 ```ts type-equiv
 /** Current worktree facts captured before Discard authorization and removal. */
@@ -182,6 +190,7 @@ abstract diff( request: GetTaskFileDiffRequest, signal?: AbortSignal, ): Promise
 
 /**
  * Commit the exact reviewed state inside its Task worktree.
+ * Private-index preparation may retain unreachable Git objects; hooks or filters changing the authorized tree reject.
  * @param request - Recorded assignment, expected revision, and commit message.
  * @param signal - Optional cancellation before Git commits the state.
  * @returns Durable commit facts for Session logging.

@@ -65,7 +65,7 @@ import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
 import type { LiveTaskFact, TaskDeliveryIntent, TaskErrorCode, TaskService, TaskSnapshot } from '@deepseek-ai/dsh-task'
 import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
-import { TaskReviewError, TaskReviewOperationId, TaskReviewRevision, type TaskDeliveryAuthorization, type TaskDiscardPreflight } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewError, TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDiscardPreflight } from '@deepseek-ai/dsh-task-review'
 import { foldSubagentWorktree } from '@deepseek-ai/dsh-subagent-spawn-in-process'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
@@ -3496,8 +3496,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { sessionId: request.payload.sessionId },
           })
         }
-        return withTaskDelivery(request, signal, target.tasks, operationId => ({
-          kind: 'commit', operationId,
+        return withTaskDelivery<TaskCommitPreflight>(request, signal, target.tasks, (operationId, preflight) => ({
+          kind: 'commit', operationId, ...preflight,
           reviewRevision: TaskReviewRevision(request.payload.expectedRevision), message: request.payload.message,
         }), async (operationSignal, authorization) => {
           const receipt = await target.review.commit({

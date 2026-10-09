@@ -8,7 +8,7 @@
 
 人工交付先持久化 `task/delivery-started`。`TaskDeliveryIntent` 记录操作 id、审查 revision、类型及确切变更输入。完成要求匹配的 Provider 回执，而非最初的 Session 序列。待完成交付阻止 Task 元数据更改，并产生 `delivery-unconfirmed` 注意事项；无关 Session 事件仍被允许。只有回执的预发布日志会被拒绝。参见[交付日志决策](../../../.agents/notes/implemented/architecture/2026-10-08-root-delivery-journal.md)。
 
-Discard 授权记录当前 worktree HEAD、未提交变更标记和显式损失确认。其回执必须匹配这些事实与当前审查 revision，不依赖较早的 Commit 回执。不完整的预发布丢弃意图会被拒绝。
+Commit 授权除消息外还记录确切父 HEAD 和目标 Git 树。Discard 授权记录当前 worktree HEAD、未提交变更标记和显式损失确认。其回执必须匹配这些事实与当前审查 revision，不依赖较早的 Commit 回执。不完整的预发布意图会被拒绝。
 
 `retryDeliveryCheckpoint` 保存已追加的实时回执，不执行 Git，也不追加另一条事件。只有原 Session 仍持有该回执时，`TaskSnapshot.retryableDeliveryCheckpoint` 才提供其确切操作 id。回执缺失、Session 被替换或分离时会拒绝；保存失败保留待核实状态。
 

@@ -200,12 +200,13 @@ function decodeDeliveryIntent(value: unknown): TaskDeliveryIntent {
   }
   switch (value['kind']) {
     case 'commit': {
-      const record = exactRecord(value, [...common, 'message'], 'commit intent')
+      const record = exactRecord(value, [...common, 'message', 'headCommit', 'tree'], 'commit intent')
       const message = record['message']
       if (typeof message !== 'string' || message.trim().length === 0 || message.includes('\0')) {
         throw new Error('commit intent message must contain non-NUL text')
       }
-      return { ...identity, kind: 'commit', message }
+      return { ...identity, kind: 'commit', message,
+        headCommit: gitObjectId(record['headCommit'], 'commit intent headCommit'), tree: gitObjectId(record['tree'], 'commit intent tree') }
     }
     case 'apply': {
       const record = exactRecord(value, [...common, 'commit', 'sourceHead'], 'apply intent')

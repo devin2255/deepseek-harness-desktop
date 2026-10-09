@@ -98,7 +98,7 @@ const worktreeAssigned = (value: unknown, seq = 0): SessionEvent =>
 
 function started(receipt: TaskCommitReceipt | TaskApplyReceipt | TaskDiscardReceipt): SessionEvent {
   const common = { operationId: receipt.operationId, reviewRevision: receipt.reviewRevision }
-  const intent = receipt.kind === 'commit' ? { ...common, kind: 'commit', message: 'Ship' }
+  const intent = receipt.kind === 'commit' ? { ...common, kind: 'commit', message: 'Ship', headCommit: assignment.baseCommit, tree: '6'.repeat(40) }
     : receipt.kind === 'apply' ? { ...common, kind: 'apply', commit: receipt.commit, sourceHead: receipt.sourceHeadBefore }
       : { ...common, kind: 'discard', confirmedUncommittedLoss: receipt.uncommittedChangesDiscarded,
         headCommit: receipt.recoverableCommit ?? assignment.baseCommit, uncommittedChanges: receipt.uncommittedChangesDiscarded }
@@ -132,8 +132,15 @@ describe('task replay fold', () => {
   it.each([
     null,
     { ...commitReceipt, kind: 'unknown' },
-    { kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision, message: '' },
-    { kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision, message: 'a\0b' },
+    { kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision,
+      message: '', headCommit: assignment.baseCommit, tree: '6'.repeat(40) },
+    { kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision,
+      message: 'a\0b', headCommit: assignment.baseCommit, tree: '6'.repeat(40) },
+    { kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision,
+      message: 'Ship', headCommit: 'bad', tree: '6'.repeat(40) },
+    { kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision,
+      message: 'Ship', headCommit: assignment.baseCommit, tree: 'bad' },
+    { kind: 'commit', operationId: commitReceipt.operationId, reviewRevision: commitReceipt.reviewRevision, message: 'Ship' },
     { kind: 'discard', operationId: discardReceipt.operationId, reviewRevision: discardReceipt.reviewRevision, confirmedUncommittedLoss: 'yes' },
     { kind: 'discard', operationId: discardReceipt.operationId, reviewRevision: discardReceipt.reviewRevision,
       confirmedUncommittedLoss: true, headCommit: 'bad', uncommittedChanges: true },

@@ -126,6 +126,12 @@ try {
         if (start?.type !== 'task/delivery-started' || start.data.intent.kind !== method) {
           throw new Error('Git began without a durable delivery intent')
         }
+        if (start.data.intent.kind === 'commit') {
+          const target = (await git(assignment.path, ['show', '--no-patch', '--format=%P%n%T', 'HEAD'])).stdout.trim()
+          if (target !== `${start.data.intent.headCommit}\n${start.data.intent.tree}`) {
+            throw new Error('Commit did not retain its exact parent and Git tree before publishing the result')
+          }
+        }
         if (start.data.intent.kind === 'discard' && (start.data.intent.headCommit !== discardHead
           || !start.data.intent.uncommittedChanges || !start.data.intent.confirmedUncommittedLoss)) {
           throw new Error('Discard did not retain current recovery facts before removing the worktree')
@@ -181,6 +187,7 @@ try {
     const resumed = await runtime.agents.resume({ resumeSessionId: assignment.taskId, agentOptions: { provider: 'fixture', model: 'fixture' } })
     await resumed.dispose()
     process.stdout.write(`${JSON.stringify({ stage: mode, blocked, durable, metadataBlocked, interleavedInput,
+      commitTargetPersisted: true,
       receipts: [row.commitReceipt?.kind, row.applyReceipt?.kind, row.discardReceipt?.kind],
       discard: { currentReviewUsed: true, currentHeadRetained: true, headAdvanced: discardHead !== commit,
         uncommittedLoss: true, preflightPersisted: true },
@@ -226,12 +233,19 @@ try {
   const stored = await ctx.sessionPersistence.inspect(assignment.taskId)
   const intentRetained = stored.events.filter(event => event.type === 'task/delivery-started').length === 1
     && replayed?.attention.some(item => item.kind === 'delivery-unconfirmed') === true
+  const lostIntent = stored.events.find(event => event.type === 'task/delivery-started')
+  const committedTarget = (await git(source, ['show', '--no-patch', '--format=%P%n%T', committed])).stdout.trim()
+  if (lostIntent?.type !== 'task/delivery-started' || lostIntent.data.intent.kind !== 'commit'
+    || committedTarget !== `${lostIntent.data.intent.headCommit}\n${lostIntent.data.intent.tree}`) {
+    throw new Error('Cold unconfirmed commit lost its authorized parent and tree')
+  }
   const retryApi = new InProcessApiClient(toFetchHandler(createApiProxy(ctx, {
     defaultModelSelection: () => ({ provider: 'fixture', model: 'fixture' }), cwd: source,
   })))
   const retried = await retryApi.tasks.commit({ sessionId: assignment.taskId, expectedRevision: reviewed.revision,
     message: 'Must not repeat', expectedSeq: replayed?.asOfSeq ?? 0 })
   process.stdout.write(`${JSON.stringify({ stage: 'unconfirmed', intentRetained, executionBlocked,
+    commitTargetRetained: true,
     receiptAbsent: replayed?.commitReceipt === undefined, retryRejected: !retried.result.ok,
     gitCommitExists: (await git(source, ['rev-parse', assignment.branch])).stdout.trim() === committed })}\n`)
 } finally {

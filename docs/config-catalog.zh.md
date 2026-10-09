@@ -2280,7 +2280,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/task/task-review-local/src/index.ts:57`](../packages/task/task-review-local/src/index.ts)
+来源：[`packages/task/task-review-local/src/index.ts:58`](../packages/task/task-review-local/src/index.ts)
 
 <a id="deepseek-aidsh-task-worktree-local"></a>
 

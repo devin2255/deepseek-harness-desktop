@@ -73,6 +73,7 @@ export abstract class TaskReviewService extends Service {
 
   /**
    * Commit the exact reviewed state inside its Task worktree.
+   * Private-index preparation may retain unreachable Git objects; hooks or filters changing the authorized tree reject.
    * @param request - Recorded assignment, expected revision, and commit message.
    * @param signal - Optional cancellation before Git commits the state.
    * @returns Durable commit facts for Session logging.

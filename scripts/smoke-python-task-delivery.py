@@ -122,6 +122,10 @@ def main() -> None:
             }]
             operations = [intent["kind"] for intent in intents]
             assert operations == ["commit", "apply", "discard", "commit", "commit"], operations
+            assert intents[0]["headCommit"] == summary.head_commit
+            assert intents[0]["tree"] == git("rev-parse", f"{receipt.commit}^{{tree}}")
+            assert intents[3]["headCommit"] == checkpoint_summary.head_commit
+            assert intents[3]["tree"] == git("rev-parse", f"{checkpoint_head}^{{tree}}")
             assert len(completions) == 4, completions
             assert intents[2]["headCommit"] == discard_summary.head_commit
             assert intents[2]["reviewRevision"] == discard_summary.revision
@@ -137,6 +141,8 @@ def main() -> None:
             assert pending.execution_workspace is not None
             branch = pending.execution_workspace.branch
             lost_commit = git("rev-parse", branch)
+            assert intents[4]["headCommit"] == before.head_commit
+            assert intents[4]["tree"] == git("rev-parse", f"{lost_commit}^{{tree}}")
             assert git("show", "-s", "--format=%s", lost_commit) == "SDK lost result"
             assert (root / "source/tracked.txt").read_text(encoding="utf-8") == "delivered\n"
             assert git("rev-parse", "HEAD") == summary.source_head
@@ -162,6 +168,7 @@ def main() -> None:
             assert git("rev-parse", branch) == lost_commit
             result = {
                 "operations": operations,
+                "commitTarget": {"notified": True, "completedTreeMatches": True, "lostTreeMatches": True},
                 "correlatedReceipts": [completed["kind"] for completed in completions],
                 "status": discarded.status,
                 "sourceHeadPreserved": True,

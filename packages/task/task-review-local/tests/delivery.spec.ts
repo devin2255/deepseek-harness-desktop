@@ -93,6 +93,69 @@ describe('local Task review delivery', () => {
     await test.dispose()
   })
 
+  it('authorizes the exact Git parent and tree without changing the real index', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    try {
+      const { assignment, ctx } = test
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed change\n')
+      writeFileSync(join(assignment.path, 'new.bin'), Buffer.from([0, 1, 2]))
+      git(assignment.path, ['mv', 'rename-me.txt', 'renamed.txt'])
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      const indexBefore = git(assignment.path, ['ls-files', '--stage', '-z'])
+      const authorize = vi.fn(async () => {
+        expect(git(assignment.path, ['ls-files', '--stage', '-z'])).toBe(indexBefore)
+        expect(git(assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(reviewed.headCommit)
+      })
+      const receipt = await ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Recoverable',
+        authorization: { operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000005'), authorize } })
+      expect(authorize).toHaveBeenCalledWith({ headCommit: reviewed.headCommit,
+        tree: git(assignment.path, ['rev-parse', 'HEAD^{tree}']).trim() })
+      expect(git(assignment.path, ['rev-parse', 'HEAD^']).trim()).toBe(reviewed.headCommit)
+      expect(git(assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(receipt.commit)
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it('rejects changed contents after authorization before altering the real index', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    try {
+      const { assignment, ctx } = test
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed change\n')
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      const indexBefore = git(assignment.path, ['ls-files', '--stage', '-z'])
+      await expect(ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Stale authorization',
+        authorization: { operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000006'), authorize: async () => {
+          writeFileSync(join(assignment.path, 'tracked.txt'), 'later edit\n')
+        } } })).rejects.toMatchObject({ code: 'REVIEW_STALE' })
+      expect(git(assignment.path, ['ls-files', '--stage', '-z'])).toBe(indexBefore)
+      expect(git(assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(reviewed.headCommit)
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it.each([false, true])('preserves real index flags when preparing the authorized commit tree: split=%s', async (splitIndex) => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    try {
+      const { assignment, ctx } = test
+      git(assignment.path, ['update-index', '--assume-unchanged', 'tracked.txt'])
+      if (splitIndex) git(assignment.path, ['update-index', '--split-index'])
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'locally ignored edit\n')
+      writeFileSync(join(assignment.path, 'new.txt'), 'reviewed addition\n')
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      const receipt = await ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Preserve Git flags' })
+      expect(git(assignment.path, ['show', `${receipt.commit}:tracked.txt`])).toBe('base\n')
+      expect(git(assignment.path, ['show', `${receipt.commit}:new.txt`])).toBe('reviewed addition\n')
+      expect(readFileSync(join(assignment.path, 'tracked.txt'), 'utf8')).toBe('locally ignored edit\n')
+    } finally {
+      await test.dispose()
+    }
+  })
+
   it('rejects invalid messages and empty commits without moving Task HEAD', async () => {
     const emptyFixture = repository()
     const empty = await mount(emptyFixture)
@@ -167,7 +230,30 @@ describe('local Task review delivery', () => {
     await hook.dispose()
   })
 
-  it('rejects a worktree changed between review and Git staging', async () => {
+  it('does not return a receipt when a hook commits a different tree', async () => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    try {
+      const { assignment, ctx } = test
+      const hooks = join(fixture.root, 'hooks')
+      mkdirSync(hooks)
+      const preCommit = join(hooks, 'pre-commit')
+      writeFileSync(preCommit, '#!/bin/sh\nprintf "hook\\n" > hook.txt\ngit add hook.txt\n')
+      chmodSync(preCommit, 0o755)
+      git(assignment.path, ['config', 'core.hooksPath', hooks])
+      writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed\n')
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      await expect(ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Hook modifies tree' }))
+        .rejects.toMatchObject({ code: 'REVIEW_STALE' })
+      expect(git(assignment.path, ['rev-parse', 'HEAD']).trim()).not.toBe(assignment.baseCommit)
+      expect(git(assignment.path, ['status', '--porcelain=v1', '-z'])).toBe('')
+      expect(git(assignment.path, ['show', 'HEAD:hook.txt'])).toBe('hook\n')
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it.each(['private', 'real'] as const)('rejects a worktree changed during %s Git staging', async (index) => {
     const fixture = repository()
     const test = await mount(fixture)
     const { assignment, ctx } = test
@@ -175,7 +261,7 @@ describe('local Task review delivery', () => {
     const reviewed = await ctx.taskReview.summarize({ assignment })
     const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
     const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
-      if (spec.argv.includes('add') && spec.argv.includes('-A')) {
+      if (spec.argv.includes('add') && spec.argv.includes('-A') && (spec.env?.GIT_INDEX_FILE !== undefined) === (index === 'private')) {
         writeFileSync(join(assignment.path, 'tracked.txt'), 'changed during staging\n')
       }
       return spawn(spec)

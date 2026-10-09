@@ -252,6 +252,7 @@ describe('root delivery execution ownership', () => {
     const record = vi.spyOn(tasks, method === 'commit' ? 'recordCommit' : method === 'apply' ? 'recordApply' : 'recordDiscard')
     const authorize = async <T>(request: CommitTaskReviewRequest | ApplyTaskReviewRequest | DiscardTaskReviewRequest, receipt: T) => {
       if ('confirmedUncommittedLoss' in request) await request.authorization!.authorize({ headCommit: commitReceipt.commit, uncommittedChanges: false })
+      else if ('message' in request) await request.authorization!.authorize({ headCommit: '2'.repeat(40), tree: '6'.repeat(40) })
       else await request.authorization!.authorize()
       expect(start).toHaveBeenCalledOnce()
       return { ...receipt, operationId: request.authorization!.operationId }
@@ -267,6 +268,7 @@ describe('root delivery execution ownership', () => {
       if (method === 'discard') expect(start.mock.calls[0]?.[1].intent).toMatchObject({
         headCommit: commitReceipt.commit, uncommittedChanges: false,
       })
+      if (method === 'commit') expect(start.mock.calls[0]?.[1].intent).toMatchObject({ headCommit: '2'.repeat(40), tree: '6'.repeat(40) })
     } finally {
       await ctx.fiber.dispose()
     }
@@ -279,6 +281,7 @@ describe('root delivery execution ownership', () => {
       const abort = new AbortController()
       const authorize = async <T>(request: CommitTaskReviewRequest | ApplyTaskReviewRequest | DiscardTaskReviewRequest, receipt: T) => {
         if ('confirmedUncommittedLoss' in request) await request.authorization!.authorize({ headCommit: commitReceipt.commit, uncommittedChanges: false })
+        else if ('message' in request) await request.authorization!.authorize({ headCommit: '2'.repeat(40), tree: '6'.repeat(40) })
         else await request.authorization!.authorize()
         if (phase === 'git-result') throw new TaskReviewError('Git response lost', 'REVIEW_STALE')
         if (phase === 'cancelled') { abort.abort(); abort.signal.throwIfAborted() }

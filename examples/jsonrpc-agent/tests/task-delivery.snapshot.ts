@@ -85,6 +85,8 @@ it('projects authorized delivery and preserves lost results through the TypeScri
     const completions = events.filter(event => event.type === 'task/review-committed'
       || event.type === 'task/review-applied' || event.type === 'task/review-discarded')
     expect(intents.map(event => event.data.intent.kind)).toEqual(['commit', 'apply', 'discard', 'commit', 'commit'])
+    expect(intents[0]?.data.intent).toMatchObject({ headCommit: summary.headCommit, tree: git(['rev-parse', `${receipt.commit}^{tree}`]) })
+    expect(intents[3]?.data.intent).toMatchObject({ headCommit: checkpointSummary.headCommit, tree: git(['rev-parse', `${checkpointHead}^{tree}`]) })
     expect(completions).toHaveLength(4)
     expect(intents[2]?.data.intent).toMatchObject({ headCommit: discardSummary.headCommit,
       uncommittedChanges: true, confirmedUncommittedLoss: true, reviewRevision: discardSummary.revision })
@@ -102,6 +104,7 @@ it('projects authorized delivery and preserves lost results through the TypeScri
     const branch = pending.executionWorkspace?.branch
     if (branch === undefined) throw new Error('Unconfirmed Task has no branch')
     const lostCommit = git(['rev-parse', branch])
+    expect(intents[4]?.data.intent).toMatchObject({ headCommit: before.headCommit, tree: git(['rev-parse', `${lostCommit}^{tree}`]) })
     expect(git(['show', '-s', '--format=%s', lostCommit])).toBe('SDK lost result')
     expect(await readFile(join(cwd, 'source', 'tracked.txt'), 'utf8')).toBe('delivered\n')
     expect(git(['rev-parse', 'HEAD'])).toBe(summary.sourceHead)
@@ -127,6 +130,7 @@ it('projects authorized delivery and preserves lost results through the TypeScri
       expectedSeq: cold.asOfSeq, message: 'Do not repeat' })).rejects.toThrow()
     expect(git(['rev-parse', branch])).toBe(lostCommit)
     const result = { operations: intents.map(event => event.data.intent.kind),
+      commitTarget: { notified: true, completedTreeMatches: true, lostTreeMatches: true },
       correlatedReceipts: completions.map(event => event.data.receipt.kind),
       status: discarded.status, sourceHeadPreserved: true, sourceContentApplied: true,
       worktreeRemoved: true, branchRetained: true, unconfirmed: { status: cold.status,

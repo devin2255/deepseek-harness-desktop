@@ -87,7 +87,7 @@ export type TaskDeliveryIntent = {
   readonly operationId: TaskReviewOperationId
   readonly reviewRevision: TaskReviewRevision
 } & (
-  | { readonly kind: 'commit'; readonly message: string }
+  | { readonly kind: 'commit'; readonly message: string; readonly headCommit: string; readonly tree: string }
   | { readonly kind: 'apply'; readonly commit: string; readonly sourceHead: string }
   | {
     readonly kind: 'discard'

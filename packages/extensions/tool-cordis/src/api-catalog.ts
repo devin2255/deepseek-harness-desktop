@@ -1780,7 +1780,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract commit( request: CommitTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskCommitReceipt>',
-        description: 'Commit the exact reviewed state inside its Task worktree.',
+        description: 'Commit the exact reviewed state inside its Task worktree. Private-index preparation may retain unreachable Git objects; hooks or filters changing the authorized tree reject.',
         parameters: [{ name: 'request', description: 'Recorded assignment, expected revision, and commit message.' }, { name: 'signal', description: 'Optional cancellation before Git commits the state.' }],
         returns: 'Durable commit facts for Session logging.',
       },
@@ -3023,7 +3023,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CommitTaskReviewRequest',
-    declaration: 'export interface CommitTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly message: string;\n    readonly authorization?: TaskDeliveryAuthorization;\n}',
+    declaration: 'export interface CommitTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly message: string;\n    readonly authorization?: TaskDeliveryAuthorization<TaskCommitPreflight>;\n}',
   },
   {
     name: 'CompactionAgentContext',
@@ -4566,6 +4566,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TaskApplyReceipt {\n    readonly kind: \'apply\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly commit: string;\n    readonly sourceHeadBefore: string;\n    readonly sourceHeadAfter: string;\n    readonly appliedAt: number;\n}',
   },
   {
+    name: 'TaskCommitPreflight',
+    declaration: 'export interface TaskCommitPreflight {\n    readonly headCommit: string;\n    readonly tree: string;\n}',
+  },
+  {
     name: 'TaskCommitReceipt',
     declaration: 'export interface TaskCommitReceipt {\n    readonly kind: \'commit\';\n    readonly operationId: TaskReviewOperationId;\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly reviewRevision: TaskReviewRevision;\n    readonly committedRevision: TaskReviewRevision;\n    readonly branch: string;\n    readonly commit: string;\n    readonly committedAt: number;\n}',
   },
@@ -4591,7 +4595,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskDeliveryIntent',
-    declaration: 'export type TaskDeliveryIntent = {\n    readonly operationId: TaskReviewOperationId;\n    readonly reviewRevision: TaskReviewRevision;\n} & ({\n    readonly kind: \'commit\';\n    readonly message: string;\n} | {\n    readonly kind: \'apply\';\n    readonly commit: string;\n    readonly sourceHead: string;\n} | {\n    readonly kind: \'discard\';\n    readonly confirmedUncommittedLoss: boolean;\n    readonly headCommit: string;\n    readonly uncommittedChanges: boolean;\n});',
+    declaration: 'export type TaskDeliveryIntent = {\n    readonly operationId: TaskReviewOperationId;\n    readonly reviewRevision: TaskReviewRevision;\n} & ({\n    readonly kind: \'commit\';\n    readonly message: string;\n    readonly headCommit: string;\n    readonly tree: string;\n} | {\n    readonly kind: \'apply\';\n    readonly commit: string;\n    readonly sourceHead: string;\n} | {\n    readonly kind: \'discard\';\n    readonly confirmedUncommittedLoss: boolean;\n    readonly headCommit: string;\n    readonly uncommittedChanges: boolean;\n});',
   },
   {
     name: 'TaskDiscardPreflight',

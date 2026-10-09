@@ -1,11 +1,50 @@
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { existsSync, writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { TaskReviewError } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewError, TaskReviewOperationId } from '@deepseek-ai/dsh-task-review'
 import { cleanupFixtures, mount, repository } from './fixture.ts'
 
 afterEach(() => { cleanupFixtures() })
 
 describe('Task review Git identity faults', () => {
+  it.each(['private-tree', 'staged-tree', 'commit-identity', 'relative-index', 'missing-index'] as const)('rejects %s mismatch and cleans its private index', async (mode) => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'reviewed\n')
+    const reviewed = await ctx.taskReview.summarize({ assignment })
+    const authorize = vi.fn(async () => {})
+    let temporaryIndex: string | undefined
+    const spawn = ctx.subprocess.spawn.bind(ctx.subprocess)
+    const intercepted = vi.spyOn(ctx.subprocess, 'spawn').mockImplementation((spec) => {
+      const handle = spawn(spec)
+      temporaryIndex = spec.env?.GIT_INDEX_FILE ?? temporaryIndex
+      const matches = mode === 'relative-index' || mode === 'missing-index' ? spec.argv.includes('--git-path')
+        : mode === 'private-tree' ? spec.argv.includes('write-tree') && spec.env?.GIT_INDEX_FILE !== undefined
+          : mode === 'staged-tree' ? spec.argv.includes('write-tree') && spec.env?.GIT_INDEX_FILE === undefined
+            : spec.argv.includes('--format=%P%n%T')
+      if (!matches) return handle
+      const stdout = mode === 'relative-index' ? 'relative.index'
+        : mode === 'missing-index' ? join(fixture.root, 'missing.index') : mode === 'private-tree' ? 'not-a-tree\n' : 'f'.repeat(40)
+      return { ...handle, collected: { ...handle.collected,
+        stdout: { readFrom: () => ({ nextOffset: Buffer.byteLength(stdout), text: stdout, lossy: false }) },
+      } }
+    })
+    try {
+      await expect(ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Reject mismatch',
+        authorization: { operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000007'), authorize } }))
+        .rejects.toMatchObject({ code: mode === 'staged-tree' || mode === 'commit-identity' ? 'REVIEW_STALE' : 'REVIEW_GIT_FAILED' })
+      expect(authorize).toHaveBeenCalledTimes(mode === 'staged-tree' || mode === 'commit-identity' ? 1 : 0)
+      if (mode !== 'relative-index' && mode !== 'missing-index') {
+        if (temporaryIndex === undefined) throw new Error('No private index was inspected')
+        expect(existsSync(dirname(temporaryIndex))).toBe(false)
+      }
+    } finally {
+      intercepted.mockRestore()
+      await test.dispose()
+    }
+  })
+
   it('rejects vanished registrations, malformed HEADs, and lost base ancestry', async () => {
     const fixture = repository()
     const test = await mount(fixture)

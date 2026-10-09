@@ -95,7 +95,7 @@ function readyRoot(root: Session): void {
 }
 
 const commitIntent = () => ({ kind: 'commit' as const, operationId: commitReceipt().operationId,
-  reviewRevision: commitReceipt().reviewRevision, message: 'Ship' })
+  reviewRevision: commitReceipt().reviewRevision, message: 'Ship', headCommit: '2'.repeat(40), tree: '6'.repeat(40) })
 
 function preStep(ctx: Context, root: Session) {
   return agentEvents(ctx, { session: root } as Agent).waterfall('agent/pre-step', {
@@ -297,7 +297,7 @@ describe('TaskSessionProvider', () => {
     root.append('task/review-decided', { decision: 'ready' })
 
     await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: {
-      kind: 'commit', operationId: commitReceipt().operationId, reviewRevision: commitReceipt().reviewRevision, message: 'Ship',
+      ...commitIntent(),
     } })
     expect(test.persisted.logs.get(root.id)?.events.at(-1)?.type).toBe('task/delivery-started')
     root.append('turn/start', { turn: 1 })
@@ -342,7 +342,7 @@ describe('TaskSessionProvider', () => {
     await expect(test.tasks.review(root.id, { decision: 'ready', expectedSeq: 1 }))
       .rejects.toMatchObject({ code: 'TASK_ACTIVE' })
     await expect(test.tasks.startDelivery(root.id, { expectedSeq: 1, intent: {
-      kind: 'commit', operationId: commitReceipt().operationId, reviewRevision: commitReceipt().reviewRevision, message: 'Ship',
+      ...commitIntent(),
     } })).rejects.toMatchObject({ code: 'TASK_ACTIVE' })
     expect(root.events).toHaveLength(1)
   })
