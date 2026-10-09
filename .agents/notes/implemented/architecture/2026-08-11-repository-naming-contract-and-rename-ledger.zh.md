@@ -104,7 +104,7 @@ PascalCase 标识符中的首字母缩略词使用首字母大写格式：`Ui`�
 | `packages/pty/` | `packages/terminal/` | 该包系列负责持久终端会话。原始 PTY 分配仍位于子进程层。 |
 | `@deepseek-ai/dsh-pty`, `ctx.pty`, `PtyService` | `@deepseek-ai/dsh-terminal`, `ctx.terminals`, `TerminalSessionService` | 调用方管理多个具名终端会话，而不是通过该服务分配原始 PTY。 |
 | 公开的高层 `Pty*` 会话和后端名称 | `Terminal*` 名称 | 公开抽象是终端会话。保留底层 `SubprocessTerminal*` 名称，因为它们已经说明底层机制。 |
-| `@deepseek-ai/dsh-pty-local`, `LocalPtyBackend` | `@deepseek-ai/dsh-terminal-bash`, `BashTerminalBackend` | 该提供方依赖 Bash 提示符和 shell 行为。`local` 隐藏了实际方言。 |
+| `@deepseek-ai/dsh-pty-local`, `LocalPtyBackend` | `@deepseek-ai/dsh-terminal-shell`, `ShellTerminalBackend` | 该提供方依赖 Bash 提示符和 shell 行为。`local` 隐藏了实际方言。 |
 | `@deepseek-ai/dsh-tool-pty` | `@deepseek-ai/dsh-tool-terminal` | 面向模型的工具已使用 `terminal_*`；包应采用相同的产品名词。 |
 | 原 PTY 系列中的 `tool-bash-persistent` | `shell/tool-bash-persistent/` | 该工具是 Bash 工具，应与 shell 工具放在一起。保留其 NPM 名称：`persistent` 将它与一次性 `bash` 区分开来，而 `bash-terminal` 会混淆产品工具与终端会话系列。 |
 | `docs/subsystems/pty.md` | `docs/subsystems/terminal.md` | 该页面记录终端会话，而不是原始 PTY 分配。 |

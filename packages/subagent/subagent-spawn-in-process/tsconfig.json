@@ -8,6 +8,13 @@
     "src"
   ],
   "references": [
+    { "path": "../../core/agent" },
+    { "path": "../../core/session" },
+    { "path": "../../sandbox/sandbox-policy" },
+    { "path": "../../interaction/user-approval" },
+    { "path": "../../task/task" },
+    { "path": "../../task/task-review" },
+    { "path": "../../task/task-worktree" },
     {
       "path": "../../../vendor/cosmokit"
     },

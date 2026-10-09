@@ -1,0 +1,147 @@
+{
+  "taskId": "task-root",
+  "workspaceId": "workspace-root",
+  "descendantSessionIds": [
+    "writer-a",
+    "writer-b"
+  ],
+  "status": "needs-attention",
+  "freshness": "live",
+  "attention": [],
+  "risks": [],
+  "updatedAt": 8,
+  "asOfSeq": 8,
+  "integrations": [
+    {
+      "id": "task-root:integration:1",
+      "callSeq": 1,
+      "startedAt": 1,
+      "finishedAt": 2,
+      "writerSessionIds": [
+        "writer-a"
+      ],
+      "outcome": {
+        "kind": "conflict",
+        "result": {
+          "kind": "conflict",
+          "operationId": "00000000-0000-4000-8000-000000000001",
+          "taskId": "task-root",
+          "workspaceId": "workspace-root",
+          "reviewRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "headBefore": "0000000000000000000000000000000000000000",
+          "contributors": [
+            {
+              "sessionId": "writer-a",
+              "branch": "dsh/writer",
+              "commit": "2222222222222222222222222222222222222222",
+              "reviewRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          ],
+          "conflictingSessionId": "writer-a",
+          "paths": [
+            "src/shared.ts"
+          ],
+          "detectedAt": 2
+        }
+      },
+      "resolvedBy": "task-root:integration:5"
+    },
+    {
+      "id": "task-root:integration:2",
+      "callSeq": 2,
+      "startedAt": 2,
+      "writerSessionIds": [
+        "writer-b"
+      ],
+      "outcome": {
+        "kind": "running"
+      }
+    },
+    {
+      "id": "task-root:integration:3",
+      "callSeq": 3,
+      "startedAt": 3,
+      "finishedAt": 4,
+      "writerSessionIds": [],
+      "outcome": {
+        "kind": "unconfirmed"
+      }
+    },
+    {
+      "id": "task-root:integration:4",
+      "callSeq": 4,
+      "startedAt": 4,
+      "finishedAt": 5,
+      "writerSessionIds": [
+        "writer-a"
+      ],
+      "outcome": {
+        "kind": "failed",
+        "message": "Git rejected the reviewed revision."
+      }
+    },
+    {
+      "id": "task-root:integration:5",
+      "callSeq": 5,
+      "startedAt": 5,
+      "finishedAt": 6,
+      "writerSessionIds": [
+        "writer-a"
+      ],
+      "outcome": {
+        "kind": "integrated",
+        "result": {
+          "kind": "integrated",
+          "operationId": "00000000-0000-4000-8000-000000000001",
+          "taskId": "task-root",
+          "workspaceId": "workspace-root",
+          "reviewRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "headBefore": "0000000000000000000000000000000000000000",
+          "contributors": [
+            {
+              "sessionId": "writer-a",
+              "branch": "dsh/writer",
+              "commit": "2222222222222222222222222222222222222222",
+              "reviewRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          ],
+          "headAfter": "1111111111111111111111111111111111111111",
+          "integratedAt": 6
+        }
+      }
+    },
+    {
+      "id": "task-root:integration:6",
+      "callSeq": 6,
+      "startedAt": 6,
+      "finishedAt": 7,
+      "writerSessionIds": [
+        "writer-b"
+      ],
+      "outcome": {
+        "kind": "conflict",
+        "result": {
+          "kind": "conflict",
+          "operationId": "00000000-0000-4000-8000-000000000001",
+          "taskId": "task-root",
+          "workspaceId": "workspace-root",
+          "reviewRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "headBefore": "0000000000000000000000000000000000000000",
+          "contributors": [
+            {
+              "sessionId": "writer-b",
+              "branch": "dsh/writer",
+              "commit": "2222222222222222222222222222222222222222",
+              "reviewRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          ],
+          "conflictingSessionId": "writer-b",
+          "paths": [
+            "src/shared.ts"
+          ],
+          "detectedAt": 2
+        }
+      }
+    }
+  ]
+}

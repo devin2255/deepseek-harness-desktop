@@ -11,10 +11,10 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import SandboxPolicyService, { SANDBOX_MODES, effectiveSandboxMode, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import SandboxPolicyService, { SANDBOX_MODES, effectiveSandboxMode, setSandboxMode, type Config } from '@deepseek-ai/dsh-sandbox-policy'
 import SystemPrompt, { renderContextSnapshot, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 
-async function mounted(config: { mode?: 'read-only' | 'workspace-write' | 'danger-full-access'; workspaceRoot?: string } = {}) {
+async function mounted(config: Config = {}) {
   const ctx = new Context()
   await ctx.plugin(SandboxPolicyService, config)
   return ctx
@@ -127,6 +127,31 @@ describe('SandboxPolicyService', () => {
     const ctx = new Context()
     // schemastery rejects the union violation when the plugin loads.
     await expect(ctx.plugin(SandboxPolicyService, { mode: 'yolo' as never })).rejects.toThrow()
+  })
+
+  it('inherits only an explicit parent mode without recording a deployment default', async () => {
+    const ctx = await mounted({ mode: 'workspace-write' })
+    const parent = session('delegating-parent')
+    expect(ctx.sandboxPolicy.delegatedModeOf(parent)).toBeUndefined()
+    setSandboxMode(parent, 'danger-full-access')
+    expect(ctx.sandboxPolicy.delegatedModeOf(parent)).toBe('danger-full-access')
+  })
+
+  it.each([undefined, 'read-only', 'workspace-write', 'danger-full-access'] as const)(
+    'selects read-only delegation without changing a parent in %s mode', async (mode) => {
+      const ctx = await mounted({ mode: 'workspace-write', delegationMode: 'read-only' })
+      const parent = session('delegating-parent')
+      if (mode !== undefined) setSandboxMode(parent, mode)
+      const before = [...parent.events]
+      expect(ctx.sandboxPolicy.delegatedModeOf(parent)).toBe('read-only')
+      expect(ctx.sandboxPolicy.resolve({ session: parent }).mode).toBe(mode ?? 'workspace-write')
+      expect(parent.events).toEqual(before)
+    },
+  )
+
+  it('rejects an unsupported delegation policy at load', async () => {
+    const ctx = new Context()
+    await expect(ctx.plugin(SandboxPolicyService, { delegationMode: 'workspace-write' as never })).rejects.toThrow()
   })
 
   it('disposes the service and context contribution from a child fiber (HMR safety)', async () => {

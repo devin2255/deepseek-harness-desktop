@@ -131,12 +131,10 @@ async function main(): Promise<number> {
   }
 
   const api = await win32()
-  // Ignore this process's own CTRL+C: the confined child (same console) keeps
-  // handling its own; the runner must survive to revoke grants and mirror the
-  // child's exit code.
-  if (api.setConsoleCtrlHandler(null, 1) === 0) {
-    fail(`SetConsoleCtrlHandler failed (Win32 ${api.getLastError()})`)
-  }
+  // A Node SIGINT listener protects this runner without the inheritable ignore
+  // flag of SetConsoleCtrlHandler(NULL, TRUE), which disables child Ctrl+C too.
+  const onInterrupt = (): void => {}
+  process.on('SIGINT', onInterrupt)
 
   let ownedTempDir: string | undefined
   let sandbox: AclSandbox | undefined
@@ -201,6 +199,7 @@ async function main(): Promise<number> {
         process.stderr.write(`${RUNNER_SIGNATURE}: cleanup: ${error instanceof Error ? error.message : String(error)}\n`)
       }
     }
+    process.off('SIGINT', onInterrupt)
   }
 }
 

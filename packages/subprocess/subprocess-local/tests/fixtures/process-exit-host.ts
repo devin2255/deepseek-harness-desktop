@@ -4,11 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 
-const [kind, trigger, root] = process.argv.slice(2)
+const [kind, trigger, root, publication] = process.argv.slice(2)
 if ((kind !== 'ordinary' && kind !== 'terminal')
   || (trigger !== 'direct' && trigger !== 'uncaught-exception'
     && trigger !== 'unhandled-rejection' && trigger !== 'dispose')
-  || root === undefined) {
+  || root === undefined || (publication !== undefined && publication !== 'partial')) {
   throw new Error('usage: process-exit-host.ts <ordinary|terminal> <direct|uncaught-exception|unhandled-rejection|dispose> <root>')
 }
 
@@ -28,13 +28,35 @@ async function waitForFile(path: string): Promise<void> {
   }
 }
 
+async function waitForTree(path: string, partialMarker?: string): Promise<void> {
+  await waitForFile(path)
+  for (;;) {
+    const text = await readFile(path, 'utf8')
+    if (partialMarker !== undefined && text === '{') await writeFile(partialMarker, 'observed')
+    let published: { root?: unknown; descendant?: unknown }
+    try {
+      published = JSON.parse(text) as typeof published
+    } catch (error: unknown) {
+      if (!(error instanceof SyntaxError)) throw error
+      // writeFile makes the path visible before its JSON contents are complete.
+      await new Promise(resolve => setTimeout(resolve, 10))
+      continue
+    }
+    if (!Number.isSafeInteger(published.root) || !Number.isSafeInteger(published.descendant)) {
+      throw new Error('managed tree published invalid process ids')
+    }
+    return
+  }
+}
+
 const listenersBefore = process.listenerCount('exit')
 const ctx = new Context()
 const fiber = await ctx.plugin(LocalSubprocessRuntime)
 const listenersAfterLoad = process.listenerCount('exit')
 if (kind === 'ordinary') {
   ctx.subprocess.spawn({
-    argv: [process.execPath, managedTree, treeState],
+    argv: [process.execPath, managedTree, treeState,
+      ...(publication === 'partial' ? [join(root, 'publish')] : [])],
     cwd: process.cwd(),
     stdio: {
       stdin: 'ignore',
@@ -53,11 +75,7 @@ if (kind === 'ordinary') {
   })
 }
 
-await waitForFile(treeState)
-const published = JSON.parse(await readFile(treeState, 'utf8')) as { root?: unknown; descendant?: unknown }
-if (!Number.isSafeInteger(published.root) || !Number.isSafeInteger(published.descendant)) {
-  throw new Error('managed tree published invalid process ids')
-}
+await waitForTree(treeState, publication === 'partial' ? join(root, 'partial-read') : undefined)
 await writeFile(ready, 'ready')
 await waitForFile(proceed)
 

@@ -1,0 +1,4 @@
+{"stage":"created","availability":"available"}
+{"stage":"committed","availability":"available","commitAdvanced":true,"baseRetained":true,"sourceUnchanged":true}
+{"stage":"detached","availability":"diverged"}
+{"stage":"unrelated-history","branchRetained":true,"availability":"diverged"}

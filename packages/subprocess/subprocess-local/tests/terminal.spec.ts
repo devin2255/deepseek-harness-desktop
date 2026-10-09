@@ -83,6 +83,32 @@ class FakeInspector implements ProcessInspector {
 afterEach(() => { vi.useRealTimers() })
 
 describe('LocalTerminalHandle', () => {
+  it('interrupts a verified foreground group with SIGINT instead of raw keyboard bytes', async () => {
+    const pty = new FakePty()
+    const inspector = new FakeInspector()
+    const handle = new LocalTerminalHandle(pty.asPty(), inspector, 10)
+    await expect(handle.interrupt()).resolves.toEqual({ kind: 'signal', signal: 'SIGINT', targetPgid: 456 })
+    expect(inspector.groups).toEqual([[456, 'SIGINT']])
+    expect(pty.writes).toEqual([])
+    inspector.pgid = undefined
+    await expect(handle.interrupt()).rejects.toThrow('cannot resolve foreground')
+    await handle.terminate()
+    await expect(handle.interrupt()).rejects.toThrow('closing')
+  })
+
+  it('does not deliver a foreground signal after termination has begun', async () => {
+    const pty = new FakePty()
+    const inspector = new FakeInspector()
+    const handle = new LocalTerminalHandle(pty.asPty(), inspector, 10)
+    const interrupted = handle.interrupt()
+    const rejected = expect(interrupted).rejects.toThrow('closing')
+    await handle.terminate()
+    await rejected
+    expect(inspector.groups).toEqual([])
+    await expect(handle.inspectForeground()).rejects.toThrow('closing')
+    await expect(handle.write('late')).rejects.toThrow('closing')
+  })
+
   it('force-kills descendants around the shell during synchronous host exit', () => {
     const pty = new FakePty()
     const inspector = new FakeInspector()

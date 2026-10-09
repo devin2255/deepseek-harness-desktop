@@ -1,0 +1,8 @@
+{"stage":"writer-review","activeRejected":true,"childIdentity":true,"diffPresent":true,"noActivation":true}
+{"stage":"offline-reservation","reviewBlocked":true,"resumeBlocked":true,"toolBlocked":true,"noPublication":true,"resumeAfterRelease":true}
+{"stage":"conflict","reported":true,"paths":["same.txt"],"rootUnchanged":true}
+{"stage":"integrated","reported":true,"contributors":2,"filesPresent":true,"rootClean":true,"sourceUnchanged":true}
+{"stage":"transcript","reviews":5,"commits":4,"integrations":2,"errors":1}
+{"stage":"projection","outcomes":["conflict","integrated"],"writers":[[0,1],[2,3]],"conflictRetained":true,"status":"needs-attention"}
+{"stage":"next-wave","usesIntegratedBaseline":true}
+{"stage":"cold-replay","nodesUnchanged":true,"conflictRetained":true,"noAgentActivation":true}

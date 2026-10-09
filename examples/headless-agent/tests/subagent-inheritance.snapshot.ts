@@ -1,9 +1,9 @@
 /**
- * Assembled-app regression: a parent-only read-only override is seeded into
- * its child log and confines a real write under a wider deployment default.
+ * Assembled-app regression: inherited and deployment-selected child policies
+ * confine a real write without tightening the deployment's root-session mode.
  */
 
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
@@ -17,8 +17,6 @@ import { describe, expect, it } from 'vitest'
 const fixtureDir = fileURLToPath(new URL('./subagent-inheritance-snapshots/parent-override', import.meta.url))
 const replayOverride = join(fixtureDir, 'replay.override.json')
 const childReplay = join(fixtureDir, 'child.replay.jsonl')
-const parentExpected = join(fixtureDir, 'parent.expected.jsonl')
-const childExpected = join(fixtureDir, 'child.expected.jsonl')
 const configPath = fileURLToPath(new URL('../subagent-inheritance.cordis.snapshot.yml', import.meta.url))
 const binScript = fileURLToPath(new URL('./fixtures/headless-driver.ts', import.meta.url))
 const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
@@ -26,8 +24,8 @@ const sessionId = SessionId('subagent-inheritance-parent')
 const refreshing = process.env.DSH_SNAPSHOT === 'refresh'
 const task = 'Delegate the write probe to a subagent.'
 
-/** Seed a completed parent turn with the only read-only fact in the app. */
-async function seedReadOnlyParent(root: string, cwd: string): Promise<void> {
+/** Seed a completed parent turn, optionally carrying the sole read-only override. */
+async function seedParent(root: string, cwd: string, readOnly: boolean): Promise<void> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
   await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
@@ -40,10 +38,10 @@ async function seedReadOnlyParent(root: string, cwd: string): Promise<void> {
   }
   const events: SessionEvent[] = [
     { type: 'turn/start', seq: 0, time: 10, data: { turn: 1 } },
-    { type: 'user/message', seq: 1, time: 11, data: createUserMessage({ content: [{ type: 'text', text: 'Tighten this session to read-only.' }], source: { kind: 'user' } }), surfaceOp: 'append' },
-    { type: 'sandbox/mode', seq: 2, time: 12, data: { mode: 'read-only' } },
-    { type: 'turn/end', seq: 3, time: 13, data: { turn: 1, reason: { kind: 'completed' } } },
+    { type: 'user/message', seq: 1, time: 11, data: createUserMessage({ content: [{ type: 'text', text: readOnly ? 'Tighten this session to read-only.' : 'Keep the root session writable.' }], source: { kind: 'user' } }), surfaceOp: 'append' },
   ]
+  if (readOnly) events.push({ type: 'sandbox/mode', seq: 2, time: 12, data: { mode: 'read-only' } })
+  events.push({ type: 'turn/end', seq: events.length, time: 13, data: { turn: 1, reason: { kind: 'completed' } } })
   try {
     await ctx.sessionPersistence.create(meta)
     await ctx.sessionPersistence.append(sessionId, events)
@@ -52,8 +50,14 @@ async function seedReadOnlyParent(root: string, cwd: string): Promise<void> {
   }
 }
 
-describe('parent-only override inheritance snapshot', () => {
-  it('confines a delegated child through the assembled headless app', async () => {
+describe('delegated child policy snapshots', () => {
+  it.each([
+    { name: 'parent-override', parentMode: 'workspace-write', delegationMode: 'inherit', parentReadOnly: true },
+    { name: 'desktop-read-only', parentMode: 'danger-full-access', delegationMode: 'read-only', parentReadOnly: false },
+  ])('confines a delegated child with $name through the assembled app', async (scenario) => {
+    const expectedDir = fileURLToPath(new URL(`./subagent-inheritance-snapshots/${scenario.name}`, import.meta.url))
+    const parentExpected = join(expectedDir, 'parent.expected.jsonl')
+    const childExpected = join(expectedDir, 'child.expected.jsonl')
     let cwd = ''
     const result = await runLoaderSmoke({
       label: 'subagent inheritance headless stream-json snapshot',
@@ -69,14 +73,15 @@ describe('parent-only override inheritance snapshot', () => {
         DSH_SNAPSHOT_FILE: replayOverride,
         DSH_SNAPSHOT_OVERRIDE: replayOverride,
         DSH_SNAPSHOT_CHILD_FILES: childReplay,
+        DSH_SNAPSHOT_PARENT_MODE: scenario.parentMode,
+        DSH_SNAPSHOT_DELEGATION_MODE: scenario.delegationMode,
       },
       prepare: async (runCwd) => {
         cwd = runCwd
-        await seedReadOnlyParent(join(runCwd, '.sessions'), runCwd)
+        await seedParent(join(runCwd, '.sessions'), runCwd, scenario.parentReadOnly)
       },
       inspect: async (runCwd) => {
-        // THE physical fact: the child's write never reached the disk. Under
-        // the deployment default (workspace-write) alone it would succeed.
+        // The writable deployment default would allow this without the child policy.
         await expect(readFile(join(runCwd, 'inherited.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
 
         // Collect both persisted logs (parent resumed turn + child run).
@@ -85,7 +90,7 @@ describe('parent-only override inheritance snapshot', () => {
         const logs = await Promise.all(files.map(async file => readFile(join(sessionsDir, file), 'utf8')))
         const headerOf = (content: string): Record<string, unknown> =>
           JSON.parse(content.split('\n')[0] ?? '{}') as Record<string, unknown>
-        const parent = logs.find(content => content.includes('"subagent-inheritance-parent"'))
+        const parent = logs.find(content => headerOf(content).id === sessionId)
         const child = logs.find(content => typeof headerOf(content).parentSession === 'string')
         if (parent === undefined || child === undefined) throw new Error('missing persisted parent or child log')
 
@@ -108,20 +113,29 @@ describe('parent-only override inheritance snapshot', () => {
             || record.data.source.plugin !== '@deepseek-ai/dsh-system-prompt') return []
           return record.data.content?.flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : []) ?? []
         })
-        const policyContexts = [...runtimeContexts(parent), ...runtimeContexts(child)]
+        const parentContexts = runtimeContexts(parent)
+        const childContexts = runtimeContexts(child)
+        const policyContexts = [...parentContexts, ...childContexts]
         expect(policyContexts).toHaveLength(2)
-        for (const context of policyContexts) {
+        const expectedReadOnly = scenario.parentReadOnly ? policyContexts : childContexts
+        for (const context of expectedReadOnly) {
           expect(context).toContain('Any available operation enforced by the DSH file sandbox cannot modify files in the standing mode.')
           expect(context).toContain('Do not refuse a required modification from this policy alone')
           expect(context).not.toContain('write and edit tools')
           expect(context).not.toContain('one-shot bash commands')
           expect(context).not.toContain('terminal sessions')
         }
+        if (!scenario.parentReadOnly) {
+          expect(parentContexts[0]).toContain('Current DSH file policy: danger-full-access.')
+          expect(parent.trimEnd().split('\n').some(line =>
+            (JSON.parse(line) as Record<string, unknown>).type === 'sandbox/mode')).toBe(false)
+        }
 
         const context: NormalizeContext = { sessionIds: [sessionId, String(headerOf(child).id)], cwd }
         const normalizedParent = scrubRequestHeaders(normalizeSessionLog(parent, context))
         const normalizedChild = scrubRequestHeaders(normalizeSessionLog(child, context))
         if (refreshing) {
+          await mkdir(expectedDir, { recursive: true })
           await writeFile(parentExpected, normalizedParent)
           await writeFile(childExpected, normalizedChild)
         }

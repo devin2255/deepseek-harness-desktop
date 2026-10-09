@@ -137,7 +137,9 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
     })
     await page.setViewportSize({ width: 1280, height: 800 })
 
-    await member.click()
+    // The replay can settle and collapse this row while the responsive layout
+    // assertions run; dispatch through its button without requiring it to stay visible.
+    await member.dispatchEvent('click')
     await page.getByText(CHILD_PROMPT, { exact: true }).waitFor({ timeout: 15_000 })
 
     const sessions = page.getByRole('tree', { name: 'Sessions' })

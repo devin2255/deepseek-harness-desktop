@@ -15,15 +15,30 @@
 
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 
+/** Configured plugin identity captured from the preset generation an agent joined. */
+export interface PresetCompositionEntry {
+  readonly entryId: string
+  readonly moduleName: string
+  readonly enabled: boolean
+}
+
+/** Durable preset composition without plugin configuration or credential values. */
+export interface PresetComposition {
+  readonly agentPreset: string
+  readonly entries: readonly PresetCompositionEntry[]
+}
+
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
+    /** The preset generation joined when an agent was published. */
+    'agent-preset/composed': PresetComposition
     /**
      * The session's agent preset was chosen after creation, while the session
      * was still blank. Log-only: it records the composition later turns ran
      * under, so a resumed or forked session rebuilds the same one instead of
      * the header's creation-time value.
      */
-    'agent-preset/selected': { agentPreset: string }
+    'agent-preset/selected': PresetComposition
   }
 }
 

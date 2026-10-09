@@ -1,0 +1,391 @@
+# 根任务投影
+
+[English](task.md) | 中文
+
+Task 能力把一个根 Session 及其连续的 subagent 后代聚合为一个桌面工作项。应用所有的执行 Worktree、验收条件、证据、风险、评审决策和 Git 交付收据保留在根 Session 日志中。实时活动与交互注意事项属于 generation 作用域叠加值；持久审批、失败和集成冲突则分别从日志派生。
+
+## 持久事实
+
+九种全值 Session 事件定义持久记录：`task/worktree-assigned`、`task/defined`、`task/criterion-updated`、`task/risk-recorded`、`task/review-decided`、`task/delivery-started`、`task/review-committed`、`task/review-applied` 和 `task/review-discarded`。Worktree 事件只记录一次不可变的源 Workspace、基础提交、源状态摘要、应用分支和执行目录。人工评审决策只能请求修改或声明准备交付；提交、应用和丢弃事件携带 Git Provider 返回的完整收据，包括准确的评审版本、操作标识、Git 对象 id 和恢复事实。严格折叠会拒绝重复分配、畸形标识、Task 或 Workspace 归属不匹配、额外字段、未规范化的空文本、重复标识、非法证据序号、缺失条件、禁止的状态变化，以及跳过必需阶段的交付事件。[持久化目录](../persistence-catalog.md#taskdefined--log-only)记录其确切声明。
+
+`TaskDeliveryIntent` 保留操作 id 和确切审查 revision，以及 `commit` 的消息、父 HEAD 和目标 Git 树、`apply` 的提交和源 HEAD，或 `discard` 的当前 worktree HEAD、未提交变更标记和显式损失确认。Discard 的恢复提交等于其授权 HEAD；若 HEAD 等于分配基准，则不提供恢复提交。它不受较早 Commit 回执的限制。`StartTaskDeliveryRequest` 增加授权的 `expectedSeq`。未匹配的意图产生 `delivery-unconfirmed` 注意事项；完成要求相同 id、类型、revision 和操作特定输入。只有回执的历史和不完整的预发布意图会被拒绝。无关 Session 事件可以穿插，但 Task 元数据、重叠交付和根模型步骤仍被阻止。Git 与 Session 持久化不是原子事务；回放和只读刷新都不会重试或结算待核实操作。
+
+Review Provider 在修改用户索引或删除 worktree 前，将以下 Commit 和 Discard 事实交给调用方拥有的授权：
+
+```ts type-equiv
+/** Exact parent and staged Git tree inspected before Commit authorization. */
+interface TaskCommitPreflight {
+  readonly headCommit: string
+  readonly tree: string
+}
+```
+
+```ts type-equiv
+/** Current worktree facts captured before Discard authorization and removal. */
+interface TaskDiscardPreflight {
+  readonly headCommit: string
+  readonly uncommittedChanges: boolean
+}
+```
+
+证据指向一个确切的 `(sessionId, seq)` 事件。此包校验其序列化字段；Session Provider 在接受变更前校验该事件存在于同一根任务树中。
+
+## 交付核验
+
+Review 能力声明 `TaskDeliveryIntent`、`InspectTaskDeliveryRequest`、`TaskDeliveryInspection`、`TaskDeliveryInspectionRevision` 和 `TaskDeliveryEffect`。核验接收已记录分配和意图，返回以任务、Workspace、意图、摘要版本及 `observedAt` 标识的当前观察。`completed` 包含对应操作的 Git 事实，不包含执行时间；`not-completed` 表示预期结果当前不存在；`ambiguous` 区分 Task 状态变化、源状态变化、未完整移除，以及两次观察之间的变化。未完成与已完成都不证明结果由原操作造成。
+
+[Host 核验 API](../../packages/host/apiproxy/README.md) 从根日志读取授权，保留执行互斥，并保持持久的待核实注意事项不变。[本地 Provider](../../packages/task/task-review-local/README.md) 在公共仓库队列内检查当前 Git，不改变用户索引、文件或分支。人工结算独立于该观察和确切实时回执的持久化重试。
+
+## 执行 worktree
+
+[`TaskWorktreeService`](../../packages/task/task-worktree/README.md) 将应用所有的 worktree 分配给执行 Session id：根集成 Session 和隔离写入子 agent 使用同一分配格式，但不会把子 agent 变成根 Task。`decodeTaskWorktreeAssignment` 校验并分离记录数据，但不验证实时 Git 注册；复用必须经过 Provider 的 `inspect` 操作。
+
+```ts type-equiv
+/** Inputs required to create one application-owned execution worktree. */
+interface CreateTaskWorktreeRequest {
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly workspacePath: string
+  /** Reject creation if the source HEAD differs from this captured commit. */
+  readonly expectedSourceHead?: string
+  /** Reject creation when the source has staged, unstaged, or untracked changes. */
+  readonly requireCleanSource?: boolean
+}
+```
+
+[本地 Provider](../../packages/task/task-worktree-local/README.md) 在创建分支或目录之前，用 `WORKTREE_SOURCE_MOVED` 拒绝与捕获 HEAD 不符的源，用 `WORKTREE_SOURCE_DIRTY` 拒绝有更改且要求干净的源。省略这些可选要求时，根任务创建仍基于源的已提交 HEAD，不复制未提交内容。
+
+## 写入者集成
+
+可选[写入者工具](../../packages/subagent/tool-subagent-control/README.md#isolated-writer-results) 独立于根交付消费批量集成。确切的已审查提交只合并到托管根；普通持久化工具结果保留成功或不改变工作树的冲突回执。[Session Provider](../../packages/task/task-session/README.md#projection-rules) 从这些结果重建显式尝试和未解决冲突注意事项。
+
+```ts type-equiv
+/** One exact committed writer result selected for integration. */
+interface TaskIntegrationInput {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly commit: string
+}
+```
+
+```ts type-equiv
+/** Batch of writer commits to merge into their recorded root execution worktree. */
+interface IntegrateTaskReviewRequest {
+  readonly assignment: TaskWorktreeAssignment
+  readonly expectedRevision: TaskReviewRevision
+  readonly inputs: readonly TaskIntegrationInput[]
+  readonly message: string
+}
+```
+
+```ts type-equiv
+/** Exact contributor identities retained by either integration outcome. */
+interface TaskIntegrationContributor {
+  readonly sessionId: SessionId
+  readonly branch: string
+  readonly commit: string
+  readonly reviewRevision: TaskReviewRevision
+}
+```
+
+```ts type-equiv
+/** Successful batch integration; the user's source checkout is not changed. */
+interface TaskIntegrationReceipt {
+  readonly kind: 'integrated'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly headAfter: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly integratedAt: number
+}
+```
+
+```ts type-equiv
+/** Preflight conflict; root and child working trees and branches remain unchanged. */
+interface TaskIntegrationConflict {
+  readonly kind: 'conflict'
+  readonly operationId: TaskReviewOperationId
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly reviewRevision: TaskReviewRevision
+  readonly headBefore: string
+  readonly contributors: readonly TaskIntegrationContributor[]
+  readonly conflictingSessionId: SessionId
+  readonly paths: readonly string[]
+  readonly detectedAt: number
+}
+```
+
+```ts type-equiv
+/** Integration either publishes the complete batch or reports a non-mutating conflict. */
+type TaskIntegrationResult = TaskIntegrationReceipt | TaskIntegrationConflict
+```
+
+## 投影值
+
+`TaskSnapshot` 是 Provider、Host 与客户端共享的分离全行值，其中包括根 Session id、可选源 Workspace id、可选完整 `executionWorkspace`、所属后代 id、持久任务事实与交付收据、派生状态、注意事项、实时数据新鲜度、更新时间，以及用于比较并设置变更的根 Session 序号。应用重启后即使瞬态成员关系不可用，持久 Worktree 分配仍决定投影的 Workspace 标识。`TaskListSnapshot` 建立一个运行时 generation 的有序基线；`TaskListChange` 携带同一 generation 的全行更新与移除项。
+
+当前状态优先级依次为 `needs-attention`、`failed`、`running`、由持久交付收据产生的 `settled`、`reviewing`、经明确证明的 `ready`，最后是空闲 `settled`。仅处于空闲状态绝不代表已经就绪。运行时断开或不可用会通过 `freshness` 明确表达，不会伪装成当前信息。
+
+冷态 Session 修复会用 `interrupted` 原因关闭未完成轮次，并为未配对的工具调用补充合成结果。Task 投影把该标记显示为由确切 Session 所属、不可直接操作的运行故障；进程内的问题注意事项不会被重建，工具调用也不会被重放。
+
+可选的 `TaskSnapshot.integrations` 包含有序的 `TaskIntegrationNode`，其不透明 id 由所属根与调用序号派生。`resolvedBy` 指定最后完成全部所选写入者覆盖的后续成功批次，并保留原冲突结果。缺失、spill 或无法验证的回执保持未确认，包括实时执行所有权丢失之后。这些记录从工具事件重建，不新增 Task 事件。
+
+```ts type-equiv
+/** Recorded integration outcome; missing or unverifiable receipts never imply Git success. */
+type TaskIntegrationOutcome =
+  | { readonly kind: 'running' | 'unconfirmed' }
+  | { readonly kind: 'failed'; readonly message: string }
+  | { readonly kind: 'integrated'; readonly result: TaskIntegrationReceipt }
+  | { readonly kind: 'conflict'; readonly result: TaskIntegrationConflict }
+```
+
+```ts type-equiv
+/** One integration attempt reconstructed from native or Code Mode tool events. */
+interface TaskIntegrationNode {
+  readonly id: TaskIntegrationNodeId
+  readonly callSeq: number
+  readonly startedAt: number
+  readonly writerSessionIds: readonly SessionId[]
+  readonly outcome: TaskIntegrationOutcome
+  readonly finishedAt?: number
+  /** Later successful batches cover every writer selected by this conflict, including revised commits. */
+  readonly resolvedBy?: TaskIntegrationNodeId
+}
+```
+
+## 服务行为
+
+`TaskSnapshot.retryableDeliveryCheckpoint` 标识原附加 Session 持有的现有回执。`retryDeliveryCheckpoint` 只保存该回执：不执行 Git，不追加事件，也不要求可读取的 worktree。回执缺失或被替换时会拒绝；再次保存失败保留待核实状态。冷态回放没有实时重试所有者，只依据持久日志事实。
+
+[`TaskService`](../../packages/task/task/src/service.ts) 是 Host 与 SDK API 使用、由 Session Provider 实现的服务定义。`assignWorktree` 还会校验分配指向目标根 Task、源 Workspace 仍然存在且源路径与该 Workspace 一致。元数据命令和 `startDelivery` 在追加一个经过校验的事件前，将 `expectedSeq` 与根 Session 的下一序号比较；授权还会拒绝活动 Task 树。`recordCommit`、`recordApply` 和 `recordDiscard` 只接受匹配待完成意图的完整回执，并在当前序号追加。授权和完成等待实时 Session flush 参与者或冷持久化确认；实时检查点缺失或失败会保留待核实注意事项。Provider 必须向订阅者发送分离的全行变更，并隔离各订阅者的故障。
+
+<!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
+
+<a id="cordis-surface"></a>
+
+## Cordis API
+
+Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxtaskreview--taskreviewservice-abstract-seam"></a>
+
+### `ctx.taskReview` — `TaskReviewService` (abstract seam)
+
+Service Definition for inspecting and delivering Task-owned worktree changes.
+
+```ts cordis-catalog
+/**
+ * Inspect the current bounded review state of one Task worktree.
+ * @param request - Recorded assignment that owns the review.
+ * @param signal - Optional cancellation of repository inspection.
+ * @returns One immutable summary and its exact review revision.
+ */
+abstract summarize( request: SummarizeTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskReviewSummary>
+
+/**
+ * Compare current Git state with a recorded delivery authorization without repeating it.
+ * Private-index inspection may retain unreachable Git objects, but changes no user index, worktree, or branch.
+ * A completed classification supplies observed facts, not proof of execution time or causal attribution.
+ * @param request - Recorded worktree assignment and exact pending authorization.
+ * @param signal - Optional cancellation of bounded Git inspection.
+ * @returns Current completed, absent, or ambiguous result; does not clear delivery uncertainty.
+ */
+abstract inspectDelivery(request: InspectTaskDeliveryRequest, signal?: AbortSignal): Promise<TaskDeliveryInspection>
+
+/**
+ * Read one member file diff from an exact review snapshot.
+ * @param request - Recorded assignment, repository-relative path, and expected revision.
+ * @param signal - Optional cancellation of diff generation.
+ * @returns The bounded text or binary diff description.
+ */
+abstract diff( request: GetTaskFileDiffRequest, signal?: AbortSignal, ): Promise<TaskFileDiff>
+
+/**
+ * Commit the exact reviewed state inside its Task worktree.
+ * Private-index preparation may retain unreachable Git objects; hooks or filters changing the authorized tree reject.
+ * @param request - Recorded assignment, expected revision, and commit message.
+ * @param signal - Optional cancellation before Git commits the state.
+ * @returns Durable commit facts for Session logging.
+ */
+abstract commit( request: CommitTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskCommitReceipt>
+
+/**
+ * Apply one reviewed Task commit to its recorded source checkout.
+ * @param request - Recorded assignment, expected revision, and exact Task commit.
+ * @param signal - Optional cancellation before source mutation.
+ * @returns Durable apply facts for Session logging.
+ */
+abstract apply( request: ApplyTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskApplyReceipt>
+
+/**
+ * Preflight all selected writer commits and publish their combined result on the root branch.
+ * Requires exact review revisions, clean working trees, and direct child assignments.
+ * Conflicts change no working tree or branch; Git objects from preflight may remain unreachable.
+ * @param request - root assignment and exact reviewed contributor commits in merge order.
+ * @param signal - cancellation before final publication; publication itself is bounded but not caller-cancellable.
+ * @returns the complete integration receipt or a preflight conflict with exact contributor identities.
+ */
+abstract integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): Promise<TaskIntegrationResult>
+
+/**
+ * Release one Task worktree after exact-state and loss confirmation checks.
+ * @param request - Recorded assignment, expected revision, and loss acknowledgement.
+ * @param signal - Optional cancellation before worktree removal.
+ * @returns Durable cleanup facts for Session logging.
+ */
+abstract discard( request: DiscardTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskDiscardReceipt>
+```
+
+Source: [`packages/task/task-review/src/index.ts:49`](../../packages/task/task-review/src/index.ts)
+
+<a id="ctxtasks--taskservice-abstract-seam"></a>
+
+### `ctx.tasks` — `TaskService` (abstract seam)
+
+Root-task projection seam. Implementations own Session resolution, replay, compare-and-set appends, live generations, and subscriber containment.
+
+```ts cordis-catalog
+/**
+ * Read the current task-list baseline.
+ * @returns a detached whole-list baseline for the current generation.
+ */
+abstract snapshot(): TaskListSnapshot
+
+/**
+ * Subscribe to whole-row changes.
+ * @param listener - callback invoked for each committed change batch.
+ * @returns a disposer that removes this exact subscription.
+ */
+abstract onChanged(listener: (change: TaskListChange) => void): () => void
+
+/**
+ * Replace the complete process-local activity and attention baseline.
+ * @param generation - monotonically increasing live-source generation.
+ * @param facts - complete detached fact set for that generation.
+ */
+abstract replaceLiveGeneration(generation: number, facts: readonly LiveTaskFact[]): void
+
+/**
+ * Retain the last live baseline but mark it disconnected.
+ * @param generation - exact generation whose source disconnected.
+ */
+abstract invalidateLiveGeneration(generation: number): void
+
+/**
+ * Record the immutable execution worktree created for one root Task.
+ * @param sessionId - root Session identity.
+ * @param request - complete assignment facts and expected next sequence.
+ * @returns the committed task row.
+ */
+abstract assignWorktree(sessionId: SessionId, request: AssignTaskWorktreeRequest): Promise<TaskSnapshot>
+
+/**
+ * Define or replace one root Task.
+ * @param sessionId - root Session identity.
+ * @param request - normalized definition input and expected next sequence.
+ * @returns the committed task row.
+ */
+abstract define(sessionId: SessionId, request: DefineTaskRequest): Promise<TaskSnapshot>
+
+/**
+ * Replace one criterion by stable identity.
+ * @param sessionId - root Session identity.
+ * @param request - complete criterion and expected next sequence.
+ * @returns the committed task row.
+ */
+abstract updateCriterion(sessionId: SessionId, request: UpdateTaskCriterionRequest): Promise<TaskSnapshot>
+
+/**
+ * Record or resolve one risk by stable identity.
+ * @param sessionId - root Session identity.
+ * @param request - complete risk and expected next sequence.
+ * @returns the committed task row.
+ */
+abstract recordRisk(sessionId: SessionId, request: RecordTaskRiskRequest): Promise<TaskSnapshot>
+
+/**
+ * Record an explicit human review decision.
+ * @param sessionId - root Session identity.
+ * @param request - decision and expected next sequence.
+ * @returns the committed task row.
+ */
+abstract review(sessionId: SessionId, request: ReviewTaskRequest): Promise<TaskSnapshot>
+
+/**
+ * Authorize one delivery and await its durable Session checkpoint before Git may change.
+ * Rejects concurrent delivery or Task metadata changes until a matching result is recorded.
+ * @param sessionId - owning root Session identity.
+ * @param request - exact mutation and expected authorization sequence.
+ * @returns the committed task row after persistence settles; failure never permits Git mutation.
+ */
+abstract startDelivery(sessionId: SessionId, request: StartTaskDeliveryRequest): Promise<TaskSnapshot>
+
+/**
+ * Retry persistence of an existing live delivery receipt without appending events or running Git.
+ * Rejects missing receipts, mismatched operations, and replaced or detached Session instances.
+ * @param sessionId - owning root Session identity.
+ * @param operationId - exact operation advertised by retryableDeliveryCheckpoint.
+ * @returns the confirmed Task row; failure retains the unconfirmed delivery.
+ */
+abstract retryDeliveryCheckpoint(sessionId: SessionId, operationId: TaskReviewOperationId): Promise<TaskSnapshot>
+
+/**
+ * Record facts returned by a completed Task commit operation.
+ * @param sessionId - root Session identity.
+ * @param request - whole commit receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
+ */
+abstract recordCommit(sessionId: SessionId, request: RecordTaskCommitRequest): Promise<TaskSnapshot>
+
+/**
+ * Record facts returned by a completed source application.
+ * @param sessionId - root Session identity.
+ * @param request - whole apply receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
+ */
+abstract recordApply(sessionId: SessionId, request: RecordTaskApplyRequest): Promise<TaskSnapshot>
+
+/**
+ * Record facts returned by a completed worktree discard.
+ * @param sessionId - root Session identity.
+ * @param request - whole discard receipt matching the outstanding intent.
+ * @returns the committed task row after its durable checkpoint.
+ */
+abstract recordDiscard(sessionId: SessionId, request: RecordTaskDiscardRequest): Promise<TaskSnapshot>
+```
+
+Types: [SessionId](core.md)
+
+Source: [`packages/task/task/src/service.ts:69`](../../packages/task/task/src/service.ts)
+
+<a id="ctxtaskworktrees--taskworktreeservice-abstract-seam"></a>
+
+### `ctx.taskWorktrees` — `TaskWorktreeService` (abstract seam)
+
+Service Definition for Task-specific execution worktrees.
+
+```ts cordis-catalog
+/**
+ * Create one application-owned integration worktree without changing the source checkout.
+ * @param request - Session identity, source Workspace, and optional captured-HEAD or cleanliness requirements.
+ * @param signal - Optional cancellation of inspection and Git execution.
+ * @returns Complete assignment facts suitable for durable Session logging.
+ */
+abstract create( request: CreateTaskWorktreeRequest, signal?: AbortSignal, ): Promise<TaskWorktreeAssignment>
+
+/**
+ * Compare durable assignment facts with the current local Git registration.
+ * Commits descended from the recorded base do not change assignment identity.
+ * @param assignment - Previously recorded worktree assignment.
+ * @param signal - Optional cancellation of Git inspection.
+ * @returns Whether the exact worktree remains available, is missing, or has diverged.
+ */
+abstract inspect( assignment: TaskWorktreeAssignment, signal?: AbortSignal, ): Promise<TaskWorktreeAvailability>
+```
+
+Source: [`packages/task/task-worktree/src/index.ts:39`](../../packages/task/task-worktree/src/index.ts)
+<!-- END GENERATED cordis-surface -->

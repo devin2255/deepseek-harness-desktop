@@ -20,7 +20,7 @@ Web GUI 以一条真实组装链交付——chromium 页面 → client 插件 bu
 
 无密钥的模型替换 = 禁用适配器行的 patch 加 `installLlmReplay` 在停稳的根 ctx 上以提供方目录（providers-catalog）模式填充空的适配器注册表——绝不用 catch-all：适配器行被禁用后不存在任何适配器，catch-all 会让 `resolveModelInfo` 无路由可走，`compaction-basic` 的步后压力检查将步步告警，而不是被可证明地闲置（发布的 128k `contextWindow` 使该路径对小 fixture 保持闲置）。选择直接安装而非插入回放插件行是刻意的：直接安装返回收尾消费检查所需的 `ReplayHandle`。没有 fixture 的场景让注册表保持空置，任何意外的流式调用都会以 NO_ADAPTER 大声失败。
 
-`seedSession()` 通过真实持久化 API 播种冷会话——一次性 `Context` 挂载 `SessionStore` + `JsonlSessionPersistence` 到 host 的根上下文，`create()` + `append()`，一次 `utimes` 回拨保证侧栏顺序确定（`semantic-checkpoint.snapshot.ts` 先例）——绝不裸写文件，因此播种器对桶哈希、文件名编码、压缩一无所知，host 的 zstd 默认值也无需任何启动开关。种子在播种时即校验（可解析、以 `turn/end` 结尾——未闭合的最终轮次会被恢复（resume）的崩溃修复改写）。
+`seedSession()` 通过真实持久化 API 播种冷会话——一次性 `Context` 挂载 `SessionStore` + `JsonlSessionPersistence` 到 host 的根上下文，`create()` + `append()`，一次 `utimes` 回拨保证侧栏顺序确定（`semantic-checkpoint.snapshot.ts` 先例）——绝不裸写文件，因此播种器对桶哈希、文件名编码、压缩一无所知，host 的 zstd 默认值也无需任何启动开关。身份标识和 cwd 的替换字符串采用 JSON 转义，包括录制 cwd 的序列化写法，因此 Windows 路径和含引号的名称仍可解析，重复处理得到相同结果。种子在播种时即校验（可解析、以 `turn/end` 结尾——未闭合的最终轮次会被恢复（resume）的崩溃修复改写）。
 
 ### 确定性规则
 
@@ -32,6 +32,8 @@ Web GUI 以一条真实组装链交付——chromium 页面 → client 插件 bu
 
 ### 预期输出
 
+当次运行的根路径 token 化同时识别普通写法、斜杠分隔写法和 JSON 转义写法，包括含引号的目录名。它只统一已 token 化根路径的紧邻子目录分隔符，不改写无关路径、命令、工具失败或完整 transcript。生产环境中的原生路径保持不变。
+
 具有稳定所属区域的场景会为每个不同的用户可见状态提交一份规范化的 `ariaSnapshot()`；跨区域的工作区管理状态则使用语义 DOM 断言和权威的 host 状态检查。UUID、cwd、工作区目录名与时长等易变内容会归一为稳定 token；采集过程持续轮询，直到连续两次规范化读取结果相同。Role 与文本锚点继续充当可评审预期输出周围的语义防线，并直接覆盖跨区域状态。世界状态断言使用根上下文的会话事件，而不是第二份提交的日志预期输出，因为 ACP、headless 与 TUI 套件已经通过同一循环和持久化钉住持久化日志表面。`refresh` 是预期输出的唯一写入者；回放模式下缺少预期输出时，测试会连同重新生成命令一起失败。
 
 类型检查平面切分是结构性的：host scaffold、其支持模块，以及每个启动或检查 host 组合的 web spec 都会从注册在 client 侧的 `apps/web` 工程中排除，并逐文件纳入 `tsconfig.host.json`。一个程序不能同时持有 Cordis `Context` 合并的两侧。
@@ -41,6 +43,8 @@ Web GUI 以一条真实组装链交付——chromium 页面 → client 插件 bu
 `DSH_SNAPSHOT` 选择 replay（默认，无密钥）、record（带密钥）或 refresh（无密钥）。发起提示的 spec 将所有模式共用的驱动步骤与仅供 replay/refresh 使用的断言分开；record 模式驱动真实输入框，采收内存中的会话 header 与事件，脱敏请求头，并 token 化当次运行的会话、cwd 与 RPC 标识。随后一次无密钥 refresh 重新生成 aria 预期输出。每条提示词都会与 fixture 中录制的 `user/message` 核对；每个场景目录都采用封闭清单，其中每个 JSONL 都是脱敏不动点。Web fixture 全部脱敏请求头且不钉任何 header 类别；见「暂缓」。
 
 ### 覆盖约定
+
+键盘翻页要求历史操作明确获得焦点；依赖平台的工具展示转换器可能呈现不可交互行，使焦点留在输入框中，此时 End 移动的是光标而非 transcript。HMR（热模块替换）场景通过 Node 启动既有的轮询式 `dev:web` 脚本，不依赖 `pnpm.cmd` 的 shell，并在客户端启动前明确选择英文。
 
 该车道覆盖三类行为。实时轮次场景钉住普通工具执行、取消、不可重试失败、瞬态重试、常驻提问与轮次中途 steering（中途引导）；同步依赖持久事件、`whenIdle()` 或显式回放标记，而不使用延时。冷历史场景通过真实持久化 API 播种，在不调用模型的情况下覆盖历史渲染、侧栏搜索、Trajectory 与 waterfall（瀑布式事件）视图及工具详情。浏览器生命周期场景覆盖首次发送时物化工作区、重新加载恢复、布局重置、主题与语言偏好，以及工作区的创建、重命名和视图操作。每类场景都断言浏览器表面和权威的 host 状态；意外的模型调用或未耗尽的 fixture 会使拆卸失败。必需车道还包含一份合成的 88 轮 Chat 滚动约定，其中混合了换行 Markdown、围栏代码以及成对的 bash 调用/结果。真实 wheel、输入框、工具、tab、会话与 viewport 交互会在并发历史前插加带节奏流式输出、贴底/离底流式输出、工具 disclosure 离屏循环、扩展历史后的视图/会话重新挂载、宽度重排、贴底后立即重新挂载、输入框尺寸变化以及 textarea wheel 链场景中，断言一个已稳定的具名行相对 transcript scrollport 的顶部位置和到真实底部的距离；真实键盘翻页与触摸式惯性滑动模拟额外钉住不依赖 wheel 的贴底跟随所有权（[读者滚动归因笔记](../bug-fix/2026-08-06-reader-scroll-attribution-observed-top-ledger.md)）；它刻意不钉 DOM 基数或绝对 `scrollTop`，因此同一约定可以验收虚拟化实现。另一份基于同一 fixture 的交互约定钉住异构行顺序、相邻工具 disclosure 的独立状态、用户消息剪贴板内容的精确值、以轮次为边界的消息 fork、源会话/子会话隔离，以及子会话中的一次真实追问轮次；wheel 输入只用于导航到语义目标，不承载几何预期。一份简短的实时历史约定从空白工作区开始，连续驱动输入框轮次，其中包括真实的 bash 调用/结果轮次和一段带节奏的长篇最终响应；它钉住单一会话身份、每轮事件的精确归属、浏览器回显唯一性与输入框恢复，不设置时间阈值。
 
@@ -80,7 +84,7 @@ Web GUI 以一条真实组装链交付——chromium 页面 → client 插件 bu
 
 ## 测试
 
-`pnpm run test:web` 构建并无密钥运行该车道；`test:web:built` 基于现有构建产物运行。`pnpm run test:web:perf` 构建并运行手动性能清单；`test:web:perf:built` 复用现有产物。`DSH_SNAPSHOT=record pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/<spec>` 对真实模型录制一个发起提示的场景，`DSH_SNAPSHOT=refresh pnpm run test:web` 则无密钥重写 aria 预期输出。CI 显式选择回放模式。live-interactions AUTH 场景会把不可重试的终态失败钉为 Chat 内联状态，其中携带适合展示的消息与错误码，并验证提供方回显的凭据片段不会出现在 Chat 或 Trajectory 中；该场景同时覆盖输入框恢复与 `turn/end` 错误。scaffold 环境隔离场景会在全部 3 个环境 skill 根目录中分别填入不同条目，并要求这些条目都不得进入组装后的目录。`dsh-llm-replay` 单元覆盖率钉住节奏控制、取消、消费诊断、sidecar 校验、按索引替换与唯一的追加位置。
+`pnpm run test:web` 构建并无密钥运行该车道；`test:web:built` 基于现有构建产物运行。`pnpm run test:web:perf` 构建并运行手动性能清单；`test:web:perf:built` 复用现有产物。`DSH_SNAPSHOT=record pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/<spec>` 对真实模型录制一个发起提示的场景，`DSH_SNAPSHOT=refresh pnpm run test:web` 则无密钥重写 aria 预期输出。CI 显式选择回放模式。live-interactions AUTH 场景会把不可重试的终态失败钉为 Chat 内联状态，其中携带适合展示的消息与错误码，并验证提供方回显的凭据片段不会出现在 Chat 或 Trajectory 中；该场景同时覆盖输入框恢复与 `turn/end` 错误。scaffold 环境隔离场景会在全部 3 个环境 skill 根目录中分别填入不同条目，并要求这些条目都不得进入组装后的目录。种子替换单元测试覆盖 Windows 与 POSIX 路径、需转义的身份标识、含引号的目录名、缺失 cwd、无效 JSON 和重复处理；交付组合检查会执行按平台选定的 shell，并访问它的真实后台任务注册表。`dsh-llm-replay` 单元覆盖率钉住节奏控制、取消、消费诊断、sidecar 校验、按索引替换与唯一的追加位置。
 
 ## 暂缓
 

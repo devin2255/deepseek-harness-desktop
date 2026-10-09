@@ -25,7 +25,7 @@ describe('gen-tool-catalog collectToolCatalog', () => {
   it('boots every shipped tool package and harvests its model-facing schemas', async () => {
     const catalog = await collectToolCatalog()
     const names = catalog.flatMap(entry => entry.schemas.map(s => s.name)).sort()
-    expect(names).toEqual(['ask_user_question', 'bash', 'bash', 'cordis_define', 'cordis_inspect_list', 'cordis_inspect_query', 'cordis_inspect_self', 'cordis_run', 'cordis_stop', 'cordis_undefine', 'create_goal', 'edit', 'exit_plan_mode', 'get_goal', 'glob', 'grep', 'interrupt_agent', 'job_kill', 'job_list', 'job_output', 'list_agents', 'lsp', 'pwsh', 'ralph', 'read', 'read_image', 'report', 'run_code', 'schedule_create', 'schedule_delete', 'schedule_list', 'send_message', 'session_event_read', 'session_event_search', 'session_event_trace', 'session_search', 'session_trace', 'skill', 'str_replace_editor', 'subagent', 'terminal_close', 'terminal_list', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_signal', 'todo_write', 'update_goal', 'web_fetch', 'web_search', 'workflow', 'write'])
+    expect(names).toEqual(['ask_user_question', 'bash', 'bash', 'commit_agent_changes', 'cordis_define', 'cordis_inspect_list', 'cordis_inspect_query', 'cordis_inspect_self', 'cordis_run', 'cordis_stop', 'cordis_undefine', 'create_goal', 'edit', 'exit_plan_mode', 'get_goal', 'glob', 'grep', 'integrate_agents', 'interrupt_agent', 'job_kill', 'job_list', 'job_output', 'list_agents', 'lsp', 'pwsh', 'ralph', 'read', 'read_image', 'report', 'review_agent_changes', 'run_code', 'schedule_create', 'schedule_delete', 'schedule_list', 'send_message', 'session_event_read', 'session_event_search', 'session_event_trace', 'session_search', 'session_trace', 'skill', 'str_replace_editor', 'subagent', 'terminal_close', 'terminal_list', 'terminal_open', 'terminal_read', 'terminal_send', 'terminal_signal', 'todo_write', 'update_goal', 'web_fetch', 'web_search', 'workflow', 'write'])
     // Every tool carries a JSON-Schema `parameters` object (what the model sees).
     for (const entry of catalog) {
       for (const schema of entry.schemas) {
@@ -51,8 +51,11 @@ describe('gen-tool-catalog collectToolCatalog', () => {
     expect(bash?.sources.bash).toBe('packages/shell/tool-bash/src/index.ts')
     const control = catalog.find(entry => entry.pkg === '@deepseek-ai/dsh-tool-subagent-control')
     expect(control?.sources).toEqual({
+      commit_agent_changes: 'packages/subagent/tool-subagent-control/src/integrate.ts',
+      integrate_agents: 'packages/subagent/tool-subagent-control/src/integrate.ts',
       interrupt_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
       list_agents: 'packages/subagent/tool-subagent-control/src/list-agents.ts',
+      review_agent_changes: 'packages/subagent/tool-subagent-control/src/integrate.ts',
       send_message: 'packages/subagent/tool-subagent-control/src/index.ts',
     })
   })

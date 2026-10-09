@@ -749,13 +749,11 @@ describe('web e2e: long Chat scroll contract', () => {
       await expectBottom(world.page)
       const backToBottom = world.page.getByRole('button', { name: 'Back to bottom', exact: true })
 
-      // Focus rides the last seeded tool row (a tabbable button whose keydown
-      // handler passes scrolling keys through). End first normalizes the
-      // focus-driven scrollIntoView back to the floor.
-      const lastToolRow = world.page.locator(
-        `[data-chat-call-id="chat-scroll-${String(INPUTS_FIXTURE.turns).padStart(3, '0')}-1"] [data-sample="bash"]`,
-      )
-      await lastToolRow.focus()
+      // A history action remains focusable even when this host cannot present
+      // a recorded Bash call. End normalizes the focus-driven scrollIntoView.
+      const lastHistoryAction = world.page.locator('[data-chat-flow] button').last()
+      await lastHistoryAction.focus()
+      expect(await lastHistoryAction.evaluate(button => button === document.activeElement)).toBe(true)
       await world.page.keyboard.press('End')
       await expectBottom(world.page)
       await expect.poll(() => backToBottom.count(), { timeout: 10_000 }).toBe(0)

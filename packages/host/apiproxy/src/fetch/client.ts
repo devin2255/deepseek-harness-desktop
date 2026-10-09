@@ -33,6 +33,7 @@ import {
 } from '../api/sessions.schema.ts'
 import {
   workspaceArchiveSessionValueSchema,
+  workspaceUnarchiveSessionValueSchema,
   workspaceCreateValueSchema,
   workspaceDeleteValueSchema,
   workspaceInsertBeforeValueSchema,
@@ -42,7 +43,7 @@ import {
 } from '../api/workspace.schema.ts'
 import { skillListValueSchema } from '../api/skills.schema.ts'
 import {
-  agentPresetCopyValueSchema, agentPresetListValueSchema, agentPresetOpenDocumentValueSchema,
+  agentPresetCompositionValueSchema, agentPresetCopyValueSchema, agentPresetListValueSchema, agentPresetOpenDocumentValueSchema,
   agentPresetReadValueSchema, agentPresetRemoveValueSchema, agentPresetSelectValueSchema,
 } from '../api/agent-presets.schema.ts'
 import {
@@ -53,6 +54,13 @@ import {
   goalCompleteValueSchema,
   goalClearValueSchema,
 } from '../api/goals.schema.ts'
+import {
+  taskApplyValueSchema, taskCommitValueSchema, taskDefineValueSchema, taskDiscardValueSchema,
+  taskRetryDeliveryCheckpointValueSchema,
+  taskInspectDeliveryValueSchema,
+  taskListValueSchema, taskRecordRiskValueSchema, taskReviewDiffValueSchema,
+  taskReviewSummaryValueSchema, taskReviewValueSchema, taskUpdateCriterionValueSchema,
+} from '../api/tasks.schema.ts'
 import {
   settingsDescribeValueSchema, settingsMutateValueSchema, settingsOpenDocumentValueSchema,
   settingsReplaceValueSchema, settingsUpdateValueSchema,
@@ -120,12 +128,14 @@ export interface IApiClient {
     insertBefore(payload: RequestPayload<'workspace.insertBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertBefore'>>>
     insertSessionBefore(payload: RequestPayload<'workspace.insertSessionBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertSessionBefore'>>>
     archiveSession(payload: RequestPayload<'workspace.archiveSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.archiveSession'>>>
+    unarchiveSession(payload: RequestPayload<'workspace.unarchiveSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.unarchiveSession'>>>
   }
   skills: {
     list(payload: RequestPayload<'skill.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'skill.list'>>>
   }
   agentPresets: {
     list(payload: RequestPayload<'agentPreset.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.list'>>>
+    composition(payload: RequestPayload<'agentPreset.composition'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.composition'>>>
     select(payload: RequestPayload<'agentPreset.select'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.select'>>>
     read(payload: RequestPayload<'agentPreset.read'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.read'>>>
     copy(payload: RequestPayload<'agentPreset.copy'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'agentPreset.copy'>>>
@@ -143,6 +153,20 @@ export interface IApiClient {
     resume(payload: RequestPayload<'goal.resume'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'goal.resume'>>>
     complete(payload: RequestPayload<'goal.complete'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'goal.complete'>>>
     clear(payload: RequestPayload<'goal.clear'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'goal.clear'>>>
+  }
+  tasks: {
+    list(payload: RequestPayload<'task.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.list'>>>
+    define(payload: RequestPayload<'task.define'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.define'>>>
+    updateCriterion(payload: RequestPayload<'task.updateCriterion'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.updateCriterion'>>>
+    recordRisk(payload: RequestPayload<'task.recordRisk'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.recordRisk'>>>
+    review(payload: RequestPayload<'task.review'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.review'>>>
+    inspectDelivery(payload: RequestPayload<'task.inspectDelivery'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.inspectDelivery'>>>
+    reviewSummary(payload: RequestPayload<'task.reviewSummary'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewSummary'>>>
+    reviewDiff(payload: RequestPayload<'task.reviewDiff'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewDiff'>>>
+    commit(payload: RequestPayload<'task.commit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.commit'>>>
+    apply(payload: RequestPayload<'task.apply'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.apply'>>>
+    discard(payload: RequestPayload<'task.discard'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.discard'>>>
+    retryDeliveryCheckpoint(payload: RequestPayload<'task.retryDeliveryCheckpoint'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.retryDeliveryCheckpoint'>>>
   }
   settings: {
     describe(payload: RequestPayload<'settings.describe'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'settings.describe'>>>
@@ -198,8 +222,10 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'workspace.insertBefore': workspaceInsertBeforeValueSchema,
   'workspace.insertSessionBefore': workspaceInsertSessionBeforeValueSchema,
   'workspace.archiveSession': workspaceArchiveSessionValueSchema,
+  'workspace.unarchiveSession': workspaceUnarchiveSessionValueSchema,
   'skill.list': skillListValueSchema,
   'agentPreset.list': agentPresetListValueSchema,
+  'agentPreset.composition': agentPresetCompositionValueSchema,
   'agentPreset.select': agentPresetSelectValueSchema,
   'agentPreset.read': agentPresetReadValueSchema,
   'agentPreset.copy': agentPresetCopyValueSchema,
@@ -211,6 +237,18 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'goal.resume': goalResumeValueSchema,
   'goal.complete': goalCompleteValueSchema,
   'goal.clear': goalClearValueSchema,
+  'task.list': taskListValueSchema,
+  'task.define': taskDefineValueSchema,
+  'task.updateCriterion': taskUpdateCriterionValueSchema,
+  'task.recordRisk': taskRecordRiskValueSchema,
+  'task.review': taskReviewValueSchema,
+  'task.inspectDelivery': taskInspectDeliveryValueSchema,
+  'task.reviewSummary': taskReviewSummaryValueSchema,
+  'task.reviewDiff': taskReviewDiffValueSchema,
+  'task.commit': taskCommitValueSchema,
+  'task.apply': taskApplyValueSchema,
+  'task.discard': taskDiscardValueSchema,
+  'task.retryDeliveryCheckpoint': taskRetryDeliveryCheckpointValueSchema,
   'settings.describe': settingsDescribeValueSchema,
   'settings.openDocument': settingsOpenDocumentValueSchema,
   'settings.update': settingsUpdateValueSchema,
@@ -451,6 +489,7 @@ export abstract class AbstractApiClient implements IApiClient {
     insertBefore: (payload, signal) => this.callUnary('workspace.insertBefore', payload, signal),
     insertSessionBefore: (payload, signal) => this.callUnary('workspace.insertSessionBefore', payload, signal),
     archiveSession: (payload, signal) => this.callUnary('workspace.archiveSession', payload, signal),
+    unarchiveSession: (payload, signal) => this.callUnary('workspace.unarchiveSession', payload, signal),
   }
 
   readonly skills: IApiClient['skills'] = {
@@ -464,6 +503,7 @@ export abstract class AbstractApiClient implements IApiClient {
   // Client program that imports this carrier.
   readonly agentPresets: IApiClient['agentPresets'] = {
     list: (payload, signal) => this.callUnary('agentPreset.list', payload, signal),
+    composition: (payload, signal) => this.callUnary('agentPreset.composition', payload, signal),
     select: (payload, signal) => this.callUnary('agentPreset.select', payload, signal),
     read: (payload, signal) => this.callUnary('agentPreset.read', payload, signal),
     copy: (payload, signal) => this.callUnary('agentPreset.copy', payload, signal),
@@ -478,6 +518,21 @@ export abstract class AbstractApiClient implements IApiClient {
     resume: (payload, signal) => this.callUnary('goal.resume', payload, signal),
     complete: (payload, signal) => this.callUnary('goal.complete', payload, signal),
     clear: (payload, signal) => this.callUnary('goal.clear', payload, signal),
+  }
+
+  readonly tasks: IApiClient['tasks'] = {
+    list: (payload, signal) => this.callUnary('task.list', payload, signal),
+    define: (payload, signal) => this.callUnary('task.define', payload, signal),
+    updateCriterion: (payload, signal) => this.callUnary('task.updateCriterion', payload, signal),
+    recordRisk: (payload, signal) => this.callUnary('task.recordRisk', payload, signal),
+    review: (payload, signal) => this.callUnary('task.review', payload, signal),
+    inspectDelivery: (payload, signal) => this.callUnary('task.inspectDelivery', payload, signal),
+    reviewSummary: (payload, signal) => this.callUnary('task.reviewSummary', payload, signal),
+    reviewDiff: (payload, signal) => this.callUnary('task.reviewDiff', payload, signal),
+    commit: (payload, signal) => this.callUnary('task.commit', payload, signal),
+    apply: (payload, signal) => this.callUnary('task.apply', payload, signal),
+    discard: (payload, signal) => this.callUnary('task.discard', payload, signal),
+    retryDeliveryCheckpoint: (payload, signal) => this.callUnary('task.retryDeliveryCheckpoint', payload, signal),
   }
 
   readonly settings: IApiClient['settings'] = {

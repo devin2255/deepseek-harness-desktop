@@ -7,7 +7,9 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { ApiProxy, GoalRef, HostFrame, MuxFrame, RpcMessage, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy'
+import { TaskReviewOperationId, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
+import type { TaskDeliveryEffect, TaskDeliveryInspection, TaskDeliveryIntent, TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review'
+import type { ApiProxy, GoalRef, HostFrame, MuxFrame, RpcMessage, RpcRequest, RpcResponse, TaskSnapshot } from '@deepseek-ai/dsh-host-apiproxy'
 import { InProcessApiClient, RpcId, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 
 const sid = (id: string): SessionId => id as SessionId
@@ -25,6 +27,7 @@ function scriptedApi(overrides: {
   agentPresets?: Partial<ApiProxy['agentPresets']>
   events?: Partial<ApiProxy['events']>
   goals?: Partial<ApiProxy['goals']>
+  tasks?: Partial<ApiProxy['tasks']>
   settings?: Partial<ApiProxy['settings']>
   credentials?: Partial<ApiProxy['credentials']>
   llm?: Partial<ApiProxy['llm']>
@@ -88,10 +91,12 @@ function scriptedApi(overrides: {
       insertBefore: r => ok(r, { workspaceIds: [r.payload.workspaceId] }),
       insertSessionBefore: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' } }),
       archiveSession: r => ok(r, { archivedSessionIds: [r.payload.sessionId] }),
+      unarchiveSession: r => ok(r, { archivedSessionIds: [] }),
     },
     skills: { list: r => ok(r, { skills: [] }), ...overrides.skills },
     agentPresets: {
       list: r => ok(r, { presets: [], authorable: false, hasDocument: false }),
+      composition: r => ok(r, { composition: null, seq: null }),
       select: r => ok(r, { agentPreset: r.payload.agentPreset }),
       read: r => ok(r, { agentPreset: r.payload.agentPreset, trust: 'user' as const, content: '' }),
       copy: r => ok(r, { agentPreset: r.payload.agentPreset }),
@@ -107,6 +112,21 @@ function scriptedApi(overrides: {
       complete: err,
       clear: err,
       ...overrides.goals,
+    },
+    tasks: {
+      list: err,
+      define: err,
+      updateCriterion: err,
+      recordRisk: err,
+      review: err,
+      reviewSummary: err,
+      reviewDiff: err,
+      commit: err,
+      apply: err,
+      discard: err,
+      retryDeliveryCheckpoint: err,
+      inspectDelivery: err,
+      ...overrides.tasks,
     },
     settings: {
       describe: r => ok(r, { writable: true, hasDocument: false, namespaces: [] }),
@@ -249,6 +269,30 @@ describe('unary round trip', () => {
     // conversation has started, and it can only know which by id.
     const selected = await c.agentPresets.select({ sessionId: sid('s1'), agentPreset: 'standard' })
     expect(selected.result).toEqual({ ok: true, value: { agentPreset: 'standard' } })
+  })
+
+  it('reads recorded preset plugins through the wire without accepting a malformed session id', async () => {
+    const composition = vi.fn((r: RpcRequest<{ sessionId: SessionId }>) => ok(r, {
+      composition: { agentPreset: 'standard', entries: [
+        { entryId: 'tool', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true },
+      ] },
+      seq: 7,
+    }))
+    const c = client(scriptedApi({ agentPresets: { composition } }))
+
+    const recorded = await c.agentPresets.composition({ sessionId: sid('s1') })
+    expect(recorded.result).toEqual({ ok: true, value: {
+      composition: { agentPreset: 'standard', entries: [
+        { entryId: 'tool', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true },
+      ] },
+      seq: 7,
+    } })
+    expect(composition).toHaveBeenCalledOnce()
+    expect(composition.mock.calls[0]?.[0].payload).toEqual({ sessionId: 's1' })
+
+    const malformed = await c.agentPresets.composition({ sessionId: 42 as never })
+    expect(malformed.result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(composition).toHaveBeenCalledOnce()
   })
 
   it('passes business errors through as 200 + err result, not a throw', async () => {
@@ -424,7 +468,7 @@ describe('unary round trip', () => {
 })
 
 describe('workspace domain round trip', () => {
-  it('routes both workspace methods through their handler rows and value schemas', async () => {
+  it('routes workspace baselines and archive mutations through their handler rows and value schemas', async () => {
     const c = client(scriptedApi())
     const list = await c.workspace.list({})
     expect(list.result).toEqual({ ok: true, value: { items: [], archivedSessionIds: [] } })
@@ -433,6 +477,8 @@ describe('workspace domain round trip', () => {
     if (created.result.ok) expect(created.result.value.created).toBe(true)
     const archivedResponse = await c.workspace.archiveSession({ sessionId: 's-arch' as never })
     expect(archivedResponse.result).toEqual({ ok: true, value: { archivedSessionIds: ['s-arch'] } })
+    const restoredResponse = await c.workspace.unarchiveSession({ sessionId: 's-arch' as never })
+    expect(restoredResponse.result).toEqual({ ok: true, value: { archivedSessionIds: [] } })
   })
 
   it('rejects a pathless create payload at the handler schema', async () => {
@@ -647,6 +693,201 @@ describe('goals unary surface', () => {
     expect(emptyEdit.result.ok).toBe(false)
     if (!emptyEdit.result.ok) expect(emptyEdit.result.error.code).toBe('bad-request')
     expect(editCalls).toBe(0)
+  })
+})
+
+describe('tasks unary surface', () => {
+  const task: TaskSnapshot = {
+    taskId: sid('root'),
+    descendantSessionIds: [],
+    status: 'running',
+    freshness: 'live',
+    attention: [],
+    risks: [],
+    updatedAt: 1,
+    asOfSeq: 0,
+  }
+
+  it('round-trips an exact delivery checkpoint and its saved receipt without advancing the event sequence', async () => {
+    const operationId = TaskReviewOperationId('12345678-1234-4234-8234-123456789abc')
+    const receipt = {
+      kind: 'commit' as const, operationId, taskId: task.taskId, workspaceId: 'workspace' as never,
+      reviewRevision: TaskReviewRevision('a'.repeat(64)), committedRevision: TaskReviewRevision('b'.repeat(64)),
+      branch: 'dsh/task-0123456789abcdef01234567', commit: 'c'.repeat(40), committedAt: 1,
+    }
+    const pending: TaskSnapshot = {
+      ...task, status: 'needs-attention', asOfSeq: 9, commitReceipt: receipt,
+      retryableDeliveryCheckpoint: operationId,
+      attention: [{
+        id: 'checkpoint-attention' as never, taskId: task.taskId, ownerSessionId: task.taskId,
+        kind: 'delivery-unconfirmed', severity: 'error', summary: 'Receipt save failed',
+        createdAt: 1, sourceId: operationId, actionable: false,
+      }],
+    }
+    const saved: TaskSnapshot = { ...task, asOfSeq: pending.asOfSeq, commitReceipt: receipt }
+    let seen: RpcRequest<{ sessionId: SessionId; operationId: TaskReviewOperationId }> | undefined
+    const api = scriptedApi({ tasks: {
+      list: request => ok(request, { generation: 1, tasks: [pending] }),
+      retryDeliveryCheckpoint: (request) => {
+        seen = request
+        return ok(request, saved)
+      },
+    } })
+    const c = client(api)
+    expect((await c.tasks.list({})).result).toEqual({ ok: true, value: { generation: 1, tasks: [pending] } })
+    const payload = { sessionId: task.taskId, operationId }
+    const response = await c.tasks.retryDeliveryCheckpoint(payload)
+    expect(seen?.payload).toEqual(payload)
+    expect(seen?.rpcId).toBeTruthy()
+    expect(response.rpcId).toBe(seen?.rpcId)
+    expect(response.result).toEqual({ ok: true, value: saved })
+  })
+
+  it('routes delivery observations without accepting client-supplied Git facts', async () => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const observation: TaskDeliveryInspection = { taskId: task.taskId, workspaceId: 'w1' as never,
+      intent: { kind: 'commit', operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)),
+        headCommit: '1'.repeat(40), tree: '2'.repeat(40), message: 'Inspect' },
+      status: 'not-completed', observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'] }
+    const inspect = vi.fn((request: RpcRequest<{ sessionId: SessionId; operationId: typeof operationId }>) => ok(request, observation))
+    const c = client(scriptedApi({ tasks: { inspectDelivery: inspect } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: observation })
+    expect(inspect.mock.calls[0]?.[0].payload).toEqual({ sessionId: task.taskId, operationId })
+    for (const payload of [
+      { sessionId: task.taskId }, { sessionId: ' ', operationId }, { sessionId: task.taskId, operationId: 'invalid' },
+      { sessionId: task.taskId, operationId, assignment: {} }, { sessionId: task.taskId, operationId, intent: observation.intent },
+    ]) expect((await c.tasks.inspectDelivery(payload as never)).result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(inspect).toHaveBeenCalledOnce()
+  })
+
+  it('rejects delivery observations with mismatched facts or synthetic execution timestamps', async () => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const intent = { kind: 'commit' as const, operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)),
+      headCommit: '1'.repeat(40), tree: '2'.repeat(40), message: 'Inspect' }
+    const effect = { kind: 'commit' as const, commit: '4'.repeat(40), committedRevision: TaskReviewRevision('5'.repeat(64)),
+      headBefore: intent.headCommit, tree: intent.tree, branch: 'task-branch' }
+    const valid = { taskId: task.taskId, workspaceId: 'w1' as never, intent, effect, status: 'completed' as const,
+      observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'] }
+    for (const value of [
+      { ...valid, effect: { ...effect, tree: '6'.repeat(40) } },
+      { ...valid, effect: { ...effect, headBefore: '7'.repeat(40) } },
+      { ...valid, effect: { ...effect, committedAt: 1 } },
+      { ...valid, effect: { kind: 'apply', commit: effect.commit, sourceHead: intent.headCommit, sourceTree: effect.tree } },
+      { ...valid, revision: 'invalid' }, { ...valid, intent: { ...intent, unexpected: true } },
+    ]) {
+      const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, value as TaskDeliveryInspection) } }))
+      await expect(c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).rejects.toThrow()
+    }
+    const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, valid) } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: valid })
+  })
+
+  it.each(['apply', 'discard'] as const)('validates every completed %s observation against its authorization', async (kind) => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const common = { operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)) }
+    const intent: TaskDeliveryIntent = kind === 'apply'
+      ? { ...common, kind, commit: '1'.repeat(40), sourceHead: '2'.repeat(40) }
+      : { ...common, kind, headCommit: '1'.repeat(40), uncommittedChanges: true, confirmedUncommittedLoss: true }
+    const effect: TaskDeliveryEffect = kind === 'apply'
+      ? { kind, commit: '1'.repeat(40), sourceHead: '2'.repeat(40), sourceTree: '3'.repeat(40) }
+      : { kind, branch: 'task-branch', headCommit: '1'.repeat(40), worktreeRemoved: true,
+        branchPreserved: true, uncommittedChangesDiscarded: true, recoverableCommit: '1'.repeat(40) }
+    const valid: TaskDeliveryInspection = { taskId: task.taskId, workspaceId: 'w1' as never, intent, effect, status: 'completed',
+      observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'] }
+    const changedEffects = kind === 'apply'
+      ? [{ ...effect, commit: '4'.repeat(40) }, { ...effect, sourceHead: '4'.repeat(40) }, { ...effect, appliedAt: 1 }]
+      : [{ ...effect, headCommit: '4'.repeat(40) }, { ...effect, uncommittedChangesDiscarded: false },
+        { ...effect, recoverableCommit: '4'.repeat(40) }, { ...effect, discardedAt: 1 }]
+    for (const changed of changedEffects) {
+      const c = client(scriptedApi({ tasks: {
+        inspectDelivery: request => ok(request, { ...valid, effect: changed }),
+      } }))
+      await expect(c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).rejects.toThrow()
+    }
+    const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, valid) } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: valid })
+  })
+
+  it('preserves absent recovery information and rejects unconfirmed Discard loss', async () => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const intent = { kind: 'discard' as const, operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)),
+      headCommit: '1'.repeat(40), uncommittedChanges: true, confirmedUncommittedLoss: true }
+    const valid: TaskDeliveryInspection = { taskId: task.taskId, workspaceId: 'w1' as never, intent, status: 'completed',
+      observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'],
+      effect: { kind: 'discard', branch: 'task-branch', headCommit: intent.headCommit, worktreeRemoved: true,
+        branchPreserved: true, uncommittedChangesDiscarded: true } }
+    const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, valid) } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: valid })
+    const invalid = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, {
+      ...valid, intent: { ...intent, confirmedUncommittedLoss: false },
+    }) } }))
+    await expect(invalid.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).rejects.toThrow()
+  })
+
+  it('rejects malformed delivery checkpoint requests before invoking the Task implementation', async () => {
+    const retry = vi.fn((request: RpcRequest<{ sessionId: SessionId; operationId: TaskReviewOperationId }>) => ok(request, task))
+    const c = client(scriptedApi({ tasks: { retryDeliveryCheckpoint: retry } }))
+    const operationId = '12345678-1234-4234-8234-123456789abc'
+    for (const payload of [
+      { sessionId: task.taskId },
+      { sessionId: task.taskId, operationId: 'invalid' },
+      { sessionId: ' ', operationId },
+      { sessionId: task.taskId, operationId, unexpected: true },
+    ]) {
+      const response = await c.tasks.retryDeliveryCheckpoint(payload as never)
+      expect(response.result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    }
+    expect(retry).not.toHaveBeenCalled()
+  })
+
+  it('round-trips the baseline and every mutation through the strict route table', async () => {
+    const seen: { method: string; payload: unknown }[] = []
+    const record = recorderInto(seen)
+    const revision = TaskReviewRevision('a'.repeat(64))
+    const commit = 'b'.repeat(40)
+    const summary: TaskReviewSummary = {
+      taskId: sid('root'), workspaceId: 'w1' as never, revision,
+      baseCommit: commit, headCommit: commit, sourceHead: commit, sourceDirty: false,
+      branch: 'dsh/task-0123456789abcdef01234567', dirty: false, truncated: false,
+      files: [], additions: 0, deletions: 0,
+    }
+    const diff: TaskFileDiff = {
+      taskId: sid('root'), workspaceId: 'w1' as never, revision,
+      path: 'tracked.txt', binary: false, truncated: false, patch: '@@ -1 +1 @@\n-old\n+new\n',
+    }
+    const api = scriptedApi({ tasks: {
+      list: record('task.list', r => ok(r, { generation: 1, tasks: [task] })),
+      define: record('task.define', r => ok(r, task)),
+      updateCriterion: record('task.updateCriterion', r => ok(r, task)),
+      recordRisk: record('task.recordRisk', r => ok(r, task)),
+      review: record('task.review', r => ok(r, task)),
+      reviewSummary: record('task.reviewSummary', r => ok(r, summary)),
+      reviewDiff: record('task.reviewDiff', r => ok(r, diff)),
+      commit: record('task.commit', r => ok(r, task)),
+      apply: record('task.apply', r => ok(r, task)),
+      discard: record('task.discard', r => ok(r, task)),
+    } })
+    const c = client(api)
+    expect((await c.tasks.list({})).result).toEqual({ ok: true, value: { generation: 1, tasks: [task] } })
+    await c.tasks.define({ sessionId: sid('root'), goal: 'Ship', criteria: [{ text: 'Passes' }], expectedSeq: 0 })
+    await c.tasks.updateCriterion({ sessionId: sid('root'), criterion: { id: 'c1' as never, text: 'Passes', status: 'satisfied', evidence: [] }, expectedSeq: 1 })
+    await c.tasks.recordRisk({ sessionId: sid('root'), risk: { id: 'r1' as never, severity: 'high', summary: 'Signing' }, expectedSeq: 2 })
+    await c.tasks.review({ sessionId: sid('root'), decision: 'ready', expectedSeq: 3 })
+    expect((await c.tasks.reviewSummary({ sessionId: sid('root') })).result)
+      .toEqual({ ok: true, value: summary })
+    expect((await c.tasks.reviewDiff({ sessionId: sid('root'), path: 'tracked.txt', expectedRevision: revision })).result)
+      .toEqual({ ok: true, value: diff })
+    await c.tasks.commit({ sessionId: sid('root'), expectedRevision: revision, message: 'Task', expectedSeq: 4 })
+    await c.tasks.apply({
+      sessionId: sid('root'), expectedRevision: revision, expectedSourceHead: commit, commit, expectedSeq: 5,
+    })
+    await c.tasks.discard({
+      sessionId: sid('root'), expectedRevision: revision, confirmedUncommittedLoss: false, expectedSeq: 6,
+    })
+    expect(seen.map(entry => entry.method)).toEqual([
+      'task.list', 'task.define', 'task.updateCriterion', 'task.recordRisk', 'task.review',
+      'task.reviewSummary', 'task.reviewDiff', 'task.commit', 'task.apply', 'task.discard',
+    ])
   })
 })
 

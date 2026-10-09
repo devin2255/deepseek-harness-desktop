@@ -121,6 +121,17 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ### `agent-preset/*`
 
+<a id="agent-presetcomposed--log-only"></a>
+
+#### `agent-preset/composed` — log-only
+
+```ts persistence-catalog
+/** The preset generation joined when an agent was published. */
+'agent-preset/composed': PresetComposition
+```
+
+来源：[`packages/preset/agent-presets/src/session.ts:34`](../packages/preset/agent-presets/src/session.ts)
+
 <a id="agent-presetselected--log-only"></a>
 
 #### `agent-preset/selected` — log-only
@@ -132,10 +143,10 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
  * under, so a resumed or forked session rebuilds the same one instead of
  * the header's creation-time value.
  */
-'agent-preset/selected': { agentPreset: string }
+'agent-preset/selected': PresetComposition
 ```
 
-来源：[`packages/preset/agent-presets/src/session.ts:26`](../packages/preset/agent-presets/src/session.ts)
+来源：[`packages/preset/agent-presets/src/session.ts:41`](../packages/preset/agent-presets/src/session.ts)
 
 ### `approval/*`
 
@@ -707,6 +718,156 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
+
+<a id="subagentexecution-provider--log-only"></a>
+
+#### `subagent/execution-provider` — log-only
+
+```ts persistence-catalog
+/** Model-hidden provider whose execution validation is required before every activation publishes. */
+'subagent/execution-provider': { readonly provider: string }
+```
+
+来源：[`packages/subagent/subagent/src/types.ts:23`](../packages/subagent/subagent/src/types.ts)
+
+<a id="subagentworktree-assigned--log-only"></a>
+
+#### `subagent/worktree-assigned` — log-only
+
+```ts persistence-catalog
+/** Model-hidden, immutable execution assignment appended before writer publication. */
+'subagent/worktree-assigned': SubagentWorktreeData
+```
+
+来源：[`packages/subagent/subagent-spawn-in-process/src/worktree.ts:23`](../packages/subagent/subagent-spawn-in-process/src/worktree.ts)
+
+### `task/*`
+
+<a id="taskcriterion-updated--log-only"></a>
+
+#### `task/criterion-updated` — log-only
+
+```ts persistence-catalog
+/**
+ * Replaces one criterion in the current definition by stable identity.
+ * @param data - complete post-change criterion.
+ */
+'task/criterion-updated': { readonly criterion: TaskCriterion }
+```
+
+来源：[`packages/task/task/src/index.ts:32`](../packages/task/task/src/index.ts)
+
+<a id="taskdefined--log-only"></a>
+
+#### `task/defined` — log-only
+
+```ts persistence-catalog
+/**
+ * Replaces the complete user-authored definition of one root task.
+ * @param data - complete post-change definition.
+ */
+'task/defined': { readonly definition: TaskDefinition }
+```
+
+来源：[`packages/task/task/src/index.ts:27`](../packages/task/task/src/index.ts)
+
+<a id="taskdelivery-started--log-only"></a>
+
+#### `task/delivery-started` — log-only
+
+```ts persistence-catalog
+/**
+ * Records exact delivery authorization before the first Git mutation.
+ * @param data - operation identity and authorized request; a matching receipt closes it.
+ */
+'task/delivery-started': { readonly intent: TaskDeliveryIntent }
+```
+
+来源：[`packages/task/task/src/index.ts:47`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-applied--log-only"></a>
+
+#### `task/review-applied` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after applying a Task commit to its source checkout.
+ * @param data - provider-produced source-application receipt.
+ */
+'task/review-applied': { readonly receipt: TaskApplyReceipt }
+```
+
+来源：[`packages/task/task/src/index.ts:57`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-committed--log-only"></a>
+
+#### `task/review-committed` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after committing reviewed Task changes.
+ * @param data - provider-produced commit receipt.
+ */
+'task/review-committed': { readonly receipt: TaskCommitReceipt }
+```
+
+来源：[`packages/task/task/src/index.ts:52`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-decided--log-only"></a>
+
+#### `task/review-decided` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the current explicit review or landing decision.
+ * @param data - complete post-change decision.
+ */
+'task/review-decided': { readonly decision: TaskReviewDecision }
+```
+
+来源：[`packages/task/task/src/index.ts:42`](../packages/task/task/src/index.ts)
+
+<a id="taskreview-discarded--log-only"></a>
+
+#### `task/review-discarded` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the complete receipt returned after removing a Task worktree.
+ * @param data - provider-produced discard receipt.
+ */
+'task/review-discarded': { readonly receipt: TaskDiscardReceipt }
+```
+
+来源：[`packages/task/task/src/index.ts:62`](../packages/task/task/src/index.ts)
+
+<a id="taskrisk-recorded--log-only"></a>
+
+#### `task/risk-recorded` — log-only
+
+```ts persistence-catalog
+/**
+ * Replaces one durable risk by stable identity.
+ * @param data - complete post-change risk.
+ */
+'task/risk-recorded': { readonly risk: TaskRisk }
+```
+
+来源：[`packages/task/task/src/index.ts:37`](../packages/task/task/src/index.ts)
+
+<a id="taskworktree-assigned--log-only"></a>
+
+#### `task/worktree-assigned` — log-only
+
+```ts persistence-catalog
+/**
+ * Records the immutable application-owned execution worktree of one root Task.
+ * @param data - complete creation-time assignment facts.
+ */
+'task/worktree-assigned': { readonly assignment: TaskWorktreeAssignment }
+```
+
+来源：[`packages/task/task/src/index.ts:22`](../packages/task/task/src/index.ts)
 
 ### `todo/*`
 

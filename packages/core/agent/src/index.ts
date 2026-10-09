@@ -241,6 +241,15 @@ interface FactorySlot {
   readonly target: AgentFactory
 }
 
+/** A live Agent or another offline operation already owns a selected Session. */
+export class AgentOfflineReservationError extends Error {
+  /** @param sessionId - identity unavailable for offline work or Agent publication. */
+  constructor(readonly sessionId: SessionId) {
+    super(`Session "${sessionId}" has active execution or an offline operation; retry after it finishes.`)
+    this.name = 'AgentOfflineReservationError'
+  }
+}
+
 /**
  * Agent service (`ctx.agents`): tracks live agents and carries the initiating
  * Agent through one process-local asynchronous driver chain. Agent *creation*
@@ -256,6 +265,7 @@ interface FactorySlot {
 export class AgentRegistry extends Service {
   private store = new Map<SessionId, AgentEntry>()
   private factory: FactorySlot | undefined
+  private readonly offlineSessions = new Set<SessionId>()
   private readonly initiators = new AsyncLocalStorage<Agent | undefined>()
   private readonly initiatorRuns = new AsyncLocalStorage<InitiatorRun>()
   private initiatorState: 'active' | 'closing' | 'disposed' = 'active'
@@ -358,6 +368,36 @@ export class AgentRegistry extends Service {
   }
 
   /**
+   * Reserve an entire batch of Agent-free Sessions until an offline operation settles.
+   * Acquisition is synchronous and all-or-nothing; competing reservations and Agent
+   * publication fail rather than wait. This does not lock files or other processes.
+   * Ambient initiator attribution is preserved, and service teardown drains the operation.
+   * @param sessionIds - Session identities to keep without a registered Agent; duplicates are coalesced.
+   * @param operation - owned asynchronous work; its value or rejection is preserved.
+   * @returns the operation result after releasing every reservation.
+   * @throws when registry teardown has begun, or rejects with AgentOfflineReservationError
+   *   when a selected Session already has a registered Agent or offline owner.
+   */
+  withOfflineSessions<T>(sessionIds: readonly SessionId[], operation: () => Promise<T>): Promise<T> {
+    return this.runWithInitiator(this.currentInitiator(), async () => {
+      const ids = new Set(sessionIds)
+      for (const id of ids) {
+        if (this.store.has(id) || this.offlineSessions.has(id)) throw new AgentOfflineReservationError(id)
+      }
+      for (const id of ids) this.offlineSessions.add(id)
+      try {
+        return await operation()
+      } finally {
+        for (const id of ids) this.offlineSessions.delete(id)
+      }
+    })
+  }
+
+  private assertPublicationAvailable(id: SessionId): void {
+    if (this.offlineSessions.has(id)) throw new AgentOfflineReservationError(id)
+  }
+
+  /**
    * Register the agent-creation factory (the loop calls this on construction,
    * effect-scoped). A traced Cordis service is canonicalized to its concrete
    * target; each create/resume call is then traced through that caller's
@@ -403,6 +443,7 @@ export class AgentRegistry extends Service {
    * @returns the handle after setup, rollback-covered publication, and loop start complete.
    */
   async create(options: CreateAgentOptions): Promise<AgentHandle> {
+    this.assertPublicationAvailable(options.sessionId)
     const ownerCtx = this.ctx
     // Re-trace a Service-backed factory through the accessing context
     // explicitly. This preserves AgentLoop's dependency origin while binding
@@ -422,6 +463,7 @@ export class AgentRegistry extends Service {
    * @returns the handle after setup, rollback-covered publication, and loop start complete.
    */
   async resume(options: ResumeAgentOptions): Promise<AgentHandle> {
+    this.assertPublicationAvailable(options.resumeSessionId)
     const ownerCtx = this.ctx
     const { target } = this.requireFactory()
     const receiver = getTraceable(ownerCtx, target)
@@ -473,6 +515,7 @@ export class AgentRegistry extends Service {
    */
   enter(agent: Agent, owner: Agent | undefined): () => void {
     const id = agent.id
+    this.assertPublicationAvailable(id)
     if (id !== agent.session.id) {
       throw new Error(`agent id "${id}" does not match session id "${agent.session.id}"`)
     }

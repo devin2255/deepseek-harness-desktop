@@ -1,0 +1,35 @@
+# @deepseek-ai/dsh-task-worktree-local
+
+[English](README.md) | 中文
+
+`ctx.taskWorktrees` 的本地 Git Provider。它从源 Workspace 已提交的 `HEAD` 创建根 Task 的集成 worktree，路径位于 `DSH_HOME/worktrees/v1` 下，并使用确定性的哈希目录和 `dsh/task-*` 分支。源检出中的未提交更改会被记录为状态摘要，但绝不会复制到隔离检出或被其删除。
+
+预检要求 Workspace 是仓库根目录、存在已提交 HEAD、不属于上级仓库、托管路径和分支均未占用，并满足配置的可用空间保留量。每次 Git 调用都通过托管 subprocess 服务执行，不使用 shell，并明确限制输出、截止时间和终止宽限期。创建失败时保留局部目录和分支以供检查，而不是强制删除。
+
+已有集成 worktree 可作为子检出的源。请求指定 `expectedSourceHead` 时，它必须与检查到的源 HEAD 相符；`requireCleanSource` 拒绝任何已暂存、未暂存或未跟踪更改。两种失败都发生在创建托管路径或分支之前。每个子检出从该确切的已提交基线开始；绝不隐式转移源更改。
+
+本包还会导出供本地 Task Provider 复用的有上限 `runGit` 原语和 NUL 分隔 worktree 解析器。批量 stdin 与显式子进程环境扩展都必须由每个调用点主动选择；仓库策略和失败映射仍由消费方 Provider 负责。
+
+仅当 Git 仍注册确切的规范化路径与分支，且 HEAD 是记录的基准提交或其后代提交时，`inspect` 才返回 `available`。正常 Task 提交保留不可变分配；游离检出、缺失对象和无关历史会被拒绝。检查只报告缺失或偏离状态，不会修复。
+
+## 配置
+
+- `dshHome` — Harness 数据根目录；省略时依次采用 `DSH_HOME` 和 `~/.dsh`。
+- `minFreeBytes` — 创建前要求的可用空间；默认 512 MiB。
+- `gitCommand` — 裸名称或绝对 Git 可执行文件；默认为 `git`。
+- `commandTimeoutMs` — 每条 Git 命令的截止时间；默认 30 秒。
+- `terminateGraceMs` — 托管进程树的终止宽限期；默认 2 秒。
+- `maxOutputBytes` — 每个流的完整输出上限；默认 1 MiB。
+
+## 模型体验
+
+无，因为此 Provider 执行 Host 所有的 Git 操作，不提供提示词、工具或模型可见的 Session 事件。
+
+#### KV Cache 影响
+
+无；此 Provider 既不组装也不改变模型请求。
+
+## 已知限制与后续工作
+
+- Git submodule 和位于仓库根目录下方的 Workspace 会被拒绝。
+- Apply、Commit、Discard、写入 agent 生命周期与集成，以及孤立目录恢复界面属于消费此服务的审查与集成能力。

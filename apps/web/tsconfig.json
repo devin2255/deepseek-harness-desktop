@@ -23,8 +23,11 @@
   // cannot see both sides of the cordis Context merges).
   "exclude": [
     "tests/scaffold.ts",
+    "tests/scaffold-seed.spec.ts",
+    "tests/scaffold-aria.spec.ts",
     "tests/scaffold-hermetic.e2e.ts",
     "tests/minimal-preset.snapshot.ts",
+    "tests/task-attention.snapshot.ts",
     "tests/message-feedback-protocol.snapshot.ts",
     "tests/live-interactions.e2e.ts",
     "tests/question-composer.e2e.ts",
@@ -70,6 +73,8 @@
     "tests/agent-preset-selection.e2e.ts",
     "tests/agent-preset-authoring.e2e.ts",
     "tests/shipped-composition.e2e.ts",
+    "tests/task-delivery-checkpoint.e2e.ts",
+    "tests/task-delivery-inspection.e2e.ts",
     "tests/schedule-after.e2e.ts",
     "tests/feedback-command.e2e.ts",
     "tests/startup-auto-selection.e2e.ts",

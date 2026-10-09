@@ -45,6 +45,7 @@ class StubSubprocessRuntime extends SubprocessRuntime {
       write: async () => {},
       inspectForeground: async () => ({ processGroupId: 1, inputWaiting: true }),
       signalForeground: async () => 1,
+      interrupt: async () => ({ kind: 'signal', signal: 'SIGINT', targetPgid: 1 }),
       terminate: async () => {},
     }
   }

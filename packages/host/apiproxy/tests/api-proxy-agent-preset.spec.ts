@@ -40,6 +40,7 @@ function stubAgent(session: Session): Agent {
  * ship with the deployment.
  */
 function roster(ids: readonly string[], userIds: readonly string[] = []): unknown {
+  const compositions = new WeakMap<Context, string>()
   const trustOf = (id: string): 'system' | 'user' => (userIds.includes(id) ? 'user' : 'system')
   const presetOf = (id: string): object =>
     ({ id, trust: trustOf(id), path: `/presets/${id}/agent.cordis.yml` })
@@ -51,7 +52,15 @@ function roster(ids: readonly string[], userIds: readonly string[] = []): unknow
       if (!ids.includes(wanted)) return Promise.reject(new UnknownPresetError(wanted, ids))
       return Promise.resolve(presetOf(wanted))
     },
-    mount: (_ctx: Context, id?: string) => Promise.resolve(presetOf(id ?? ids[0] ?? '')),
+    mount: (agentCtx: Context, id?: string) => {
+      const presetId = id ?? ids[0] ?? ''
+      compositions.set(agentCtx, presetId)
+      return Promise.resolve(presetOf(presetId))
+    },
+    composition: (agentCtx: Context) => {
+      const agentPreset = compositions.get(agentCtx)
+      return agentPreset === undefined ? undefined : { agentPreset, entries: [] }
+    },
     // What a real mount leaves behind: a service instance only the agent that
     // mounted it can be used to address. The doubles are per agent so a test
     // can tell "this session's" from "some session's".
@@ -71,8 +80,9 @@ function roster(ids: readonly string[], userIds: readonly string[] = []): unknow
       if (!ids.includes(id)) return Promise.reject(new UnknownPresetError(id, ids))
       return Promise.resolve()
     },
-    recompose: (_ctx: Context, id: string) => {
+    recompose: (agentCtx: Context, id: string) => {
       if (!ids.includes(id)) return Promise.reject(new UnknownPresetError(id, ids))
+      compositions.set(agentCtx, id)
       return Promise.resolve({ id, trust: 'system', path: `/presets/${id}.yml` })
     },
     // The standing scope key a cold transcript read resolves presenters in.
@@ -192,7 +202,7 @@ describe('session.create with an agent preset', () => {
     await api.sessions.create(request({ sessionId: SessionId('s4b'), agentPreset: 'standard' }))
     // Exactly what `agentPreset.select` leaves behind on a blank session: the
     // header keeps the creation fact, the log states what the agent runs.
-    ctx.sessions.get(SessionId('s4b'))?.append('agent-preset/selected', { agentPreset: 'minimal' })
+    ctx.sessions.get(SessionId('s4b'))?.append('agent-preset/selected', { agentPreset: 'minimal', entries: [] })
 
     const adopted = await api.sessions.create(request({ sessionId: SessionId('s4b'), agentPreset: 'minimal' }))
     const stale = await api.sessions.create(request({ sessionId: SessionId('s4b'), agentPreset: 'standard' }))
@@ -464,6 +474,47 @@ describe('agentPreset.select', () => {
     expect(response.result.ok).toBe(false)
     if (response.result.ok) throw new Error('unreachable')
     expect(response.result.error.code).toBe('agent-preset-not-found')
+  })
+})
+
+describe('agentPreset.composition', () => {
+  it('reads the latest durable composition from a live session', async () => {
+    const { api, ctx } = await harness(['standard', 'minimal'])
+    await api.sessions.create(request({ sessionId: SessionId('composition-live'), agentPreset: 'standard' }))
+    const session = ctx.sessions.get(SessionId('composition-live'))
+    if (session === undefined) throw new Error('unreachable')
+    const first = { agentPreset: 'standard', entries: [
+      { entryId: 'alpha', moduleName: 'plugin-a', enabled: true },
+    ] }
+    session.append('agent-preset/composed', first)
+    session.append('agent-preset/selected', { agentPreset: 'minimal', entries: [] })
+
+    const response = await api.agentPresets.composition(request({ sessionId: session.id }))
+
+    expect(response.result).toEqual({ ok: true, value: {
+      composition: { agentPreset: 'minimal', entries: [] }, seq: session.seq - 1,
+    } })
+  })
+
+  it('reads cold history without resuming an agent or inventing missing rows', async () => {
+    const meta = { id: SessionId('composition-cold'), createdAt: 1, cwd: '/tmp/cold', agentPreset: 'standard' }
+    const { api, ctx } = await harness(['standard'], {
+      list: () => Promise.resolve([meta]),
+      inspect: () => Promise.resolve({ meta, events: [{
+        type: 'agent-preset/composed', seq: 0, time: 1,
+        data: { agentPreset: 'standard', entries: [{ entryId: 'alpha', moduleName: 'plugin-a', enabled: true }] },
+      }] }),
+    })
+
+    const response = await api.agentPresets.composition(request({ sessionId: meta.id }))
+
+    expect(response.result).toMatchObject({ ok: true, value: {
+      composition: { agentPreset: 'standard', entries: [{ entryId: 'alpha' }] }, seq: 0,
+    } })
+    expect(ctx.agents.get(meta.id)).toBeUndefined()
+
+    const noRecord = await api.agentPresets.composition(request({ sessionId: SessionId('absent') }))
+    expect(noRecord.result).toMatchObject({ ok: false, error: { code: 'session-not-found' } })
   })
 })
 

@@ -176,7 +176,7 @@ export function applyChildComposition(
 
 /** Policy seeded onto a child session's log at the delegation boundary. */
 export interface DelegatedPolicyOverrides {
-  /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
+  /** The deployment-selected child mode, or the parent's explicit override under inheritance. */
   readonly sandboxMode: SandboxMode | undefined
   /**
    * `'never'` whenever the approval capability is composed, `undefined`
@@ -189,16 +189,16 @@ export interface DelegatedPolicyOverrides {
 /**
  * Capture the policy to seed into one delegation. Call synchronously before
  * the child start's first await: a later parent switch belongs to the
- * parent's future, not to this child. Only the parent session's explicit
- * sandbox override is captured — never deployment defaults or one-shot
- * grants — and the approval policy is pinned to `'never'` regardless of the
- * parent's own policy.
+ * parent's future, not to this child. The sandbox-policy service selects
+ * read-only delegation or inheritance of the parent's explicit override;
+ * deployment defaults and one-shot grants are never copied. The approval
+ * policy is pinned to `'never'` regardless of the parent's own policy.
  * @param parent - the delegating parent agent.
- * @returns the sandbox override (or `undefined` without one) and the approval pin.
+ * @returns the resolved child override (or `undefined`) and the approval pin.
  */
 export function captureDelegatedPolicyOverrides(parent: Agent): DelegatedPolicyOverrides {
   return {
-    sandboxMode: parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session),
+    sandboxMode: parent.ctx.get('sandboxPolicy')?.delegatedModeOf(parent.session),
     approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never',
   }
 }

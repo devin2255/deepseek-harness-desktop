@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ApiProxy, HostFrame, MuxFrame } from '../src/api/index.ts'
 import type { ClientResponse, RpcMessage, RpcReceipt, RpcRequest } from '../src/api/rpc.ts'
 import { RpcId } from '../src/api/rpc.ts'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { toFetchHandler } from '../src/fetch/handler.ts'
 import { AbstractApiClient, InProcessApiClient } from '../src/fetch/client.ts'
 
@@ -191,6 +192,9 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       async archiveSession(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [request.payload.sessionId] } } }
       },
+      async unarchiveSession(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { archivedSessionIds: [] } } }
+      },
     },
     agentPresets: {
       list(request: RpcRequest<{}>) {
@@ -198,6 +202,9 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
           rpcId: request.rpcId,
           result: { ok: true as const, value: { presets: [], authorable: false, hasDocument: false } },
         })
+      },
+      composition(request: RpcRequest<{ sessionId: SessionId }>) {
+        return Promise.resolve({ rpcId: request.rpcId, result: { ok: true as const, value: { composition: null, seq: null } } })
       },
       select(request: RpcRequest<{ agentPreset: string }>) {
         const value = { agentPreset: request.payload.agentPreset }
@@ -240,6 +247,44 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
         return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
       },
       async clear(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+    },
+    tasks: {
+      async inspectDelivery(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async retryDeliveryCheckpoint(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async list(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async define(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async updateCriterion(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async recordRisk(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async review(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async reviewSummary(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async reviewDiff(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async commit(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async apply(request) {
+        return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
+      },
+      async discard(request) {
         return { rpcId: request.rpcId, result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } } }
       },
     },
@@ -657,8 +702,9 @@ describe('SSE streams through the carrier', () => {
 
   it('yields host frames', async () => {
     const ac = new AbortController()
-    const frames = await collect(client().events.host({}, ac.signal))
-    expect(frames[0]?.payload).toMatchObject({ type: 'host/session-removed' })
+    const change: HostFrame = { type: 'task/changed', generation: 3, upserts: [], removed: ['s1' as never] }
+    const frames = await collect(client(fakeApi({ hostFrames: [change] })).events.host({}, ac.signal))
+    expect(frames[0]?.payload).toEqual(change)
   })
 
   it('drops frames after the consumer aborts mid-stream', async () => {

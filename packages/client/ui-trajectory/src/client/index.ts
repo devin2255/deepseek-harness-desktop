@@ -3,7 +3,7 @@
  * slot without defining a service.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationSnapshot, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the 'conversation.view' SlotMap row (declared by the slot's
@@ -18,6 +18,22 @@ import { registerTrajectoryRequestHeaderDefinition } from './trajectory-request-
 import { registerTrajectoryConversationView } from './trajectory-snapshot-builder.ts'
 import { registerTrajectoryToolDefinition } from './trajectory-tool-definition.ts'
 import { TrajectoryView, type TrajectoryViewInjected } from './TrajectoryView.tsx'
+import type { TrajectorySnapshot } from './trajectory-contract.ts'
+
+export type { TrajectorySnapshot } from './trajectory-contract.ts'
+
+/** Read-only Trajectory projection consumed by another client plugin. */
+export interface ITrajectory {
+  /** Read the registered target from one immutable Session snapshot. */
+  inspect(snapshot: ConversationSnapshot): TrajectorySnapshot | undefined
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Read-only Trajectory inspection; business components receive a narrowed callback. */
+    trajectory: ITrajectory
+  }
+}
 
 /** Required services: the conversation slot, registries, ordinary Session paging, and the locale service. */
 export const inject = ['slots', 'conversationEvents', 'conversationViews', 'sessions', 'locale']
@@ -28,6 +44,9 @@ export const inject = ['slots', 'conversationEvents', 'conversationViews', 'sess
  * @param ctx - client root context.
  */
 export function apply(ctx: Context): void {
+  ctx.effect(() => ctx.reflect.provide('trajectory', {
+    inspect: snapshot => snapshot.views.get('trajectory'),
+  } satisfies ITrajectory), 'ui-trajectory: inspection service')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-trajectory: dictionaries')
   // Registration-time text (the view tab label) reads through the bound
   // translate as a thunk, so it follows the active locale without

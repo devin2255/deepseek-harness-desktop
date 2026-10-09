@@ -1,4 +1,4 @@
-/** Published dsh web + pnpm dev:web → browser HMR, with no page reload. */
+/** Published dsh web + the dev:web watcher → browser HMR, with no page reload. */
 
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -10,7 +10,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
-import { REPO_ROOT } from './support.ts'
+import { newEnglishPage, REPO_ROOT } from './support.ts'
 
 function spawnSpec(argv: readonly string[], cwd: string, env?: Record<string, string>): SubprocessSpawnSpec {
   return {
@@ -89,8 +89,11 @@ it('hot-reloads a real client-plugin source edit without refreshing the page', a
   const failures: unknown[] = []
   try {
     subprocessFiber = await subprocessCtx.plugin(LocalSubprocessRuntime)
-    watcher = subprocessCtx.subprocess.spawn(spawnSpec(['pnpm', 'run', 'dev:web'], REPO_ROOT))
-    await waitForOutput(watcher, /dev-web: watching/, 'pnpm run dev:web')
+    // Launch the script behind dev:web without a pnpm.cmd shell on Windows.
+    watcher = subprocessCtx.subprocess.spawn(spawnSpec(
+      [process.execPath, '--import', 'tsx/esm', join(REPO_ROOT, 'scripts/dev-web.ts'), '--poll'], REPO_ROOT,
+    ))
+    await waitForOutput(watcher, /dev-web: watching/, 'dev:web watcher')
     host = subprocessCtx.subprocess.spawn(spawnSpec(
       [process.execPath, binPath, 'web', '--port', '0'],
       world,
@@ -101,7 +104,7 @@ it('hot-reloads a real client-plugin source edit without refreshing the page', a
     ))
     const baseUrl = await waitForOutput(host, /dsh web: (http:\/\/[^\s]+)/, 'built dsh web')
     browser = await chromium.launch()
-    const page = await browser.newPage()
+    const page = await newEnglishPage(browser)
     const pageErrors: string[] = []
     page.on('pageerror', error => pageErrors.push(String(error)))
     await page.goto(baseUrl, { waitUntil: 'load' })

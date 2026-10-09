@@ -29,7 +29,7 @@ function listStore() {
       [SID]: { id: SID, title: 'r', displayTitle: 'r', running: false, blank: false, updatedAt: 0 },
     },
     current: undefined,
-    phase: 'ready',
+    phase: 'ready', state: 'idle', error: null,
     subagentsByParent: {}, jobsBySession: {},
     currentAddress: undefined,
   })

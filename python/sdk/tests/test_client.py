@@ -9,7 +9,390 @@ from pathlib import Path
 
 import pytest
 
-from deepseek_harness import DeepSeekHarness, HarnessClient, HarnessConfig, Notification, SdkProtocolError
+from deepseek_harness import (
+    DeepSeekHarness,
+    DefineTaskCriterion,
+    HarnessClient,
+    HarnessConfig,
+    Notification,
+    SdkProtocolError,
+    TaskCriterion,
+    TaskDeliveryInspection,
+    TaskRisk,
+)
+
+
+def delivery_evidence(kind: str = "commit") -> dict:
+    common = {
+        "kind": kind, "operationId": "00000000-0000-4000-8000-000000000001", "reviewRevision": "b" * 64,
+    }
+    if kind == "commit":
+        intent = {**common, "message": "Reviewed", "headCommit": "1" * 40, "tree": "2" * 40}
+        effect = {"kind": kind, "commit": "3" * 40, "committedRevision": "c" * 64,
+                  "headBefore": "1" * 40, "tree": "2" * 40, "branch": "task"}
+    elif kind == "apply":
+        intent = {**common, "commit": "3" * 40, "sourceHead": "1" * 40}
+        effect = {"kind": kind, "commit": "3" * 40, "sourceHead": "1" * 40, "sourceTree": "2" * 40}
+    else:
+        intent = {**common, "headCommit": "1" * 40, "confirmedUncommittedLoss": True, "uncommittedChanges": True}
+        effect = {"kind": kind, "branch": "task", "headCommit": "1" * 40, "worktreeRemoved": True,
+                  "branchPreserved": True, "uncommittedChangesDiscarded": True, "recoverableCommit": "1" * 40}
+    return {"taskId": "root", "workspaceId": "workspace", "intent": intent, "effect": effect,
+            "revision": "d" * 64, "observedAt": 0, "status": "completed"}
+
+
+@pytest.mark.parametrize("kind", ["commit", "apply", "discard"])
+@pytest.mark.parametrize("status", ["completed", "not-completed", "ambiguous"])
+def test_inspection_decodes_current_evidence(monkeypatch: pytest.MonkeyPatch, kind: str, status: str) -> None:
+    client = HarnessClient()
+    value = delivery_evidence(kind)
+    value["status"] = status
+    if status != "completed":
+        del value["effect"]
+    if status == "ambiguous":
+        value["reason"] = "state-changed"
+
+    def request(method: str, params: dict, *, response_model: type, **_kwargs: object):
+        assert method == "task/inspectDelivery"
+        assert params == {"sessionId": "root", "operationId": value["intent"]["operationId"]}
+        return response_model.model_validate(value)
+
+    monkeypatch.setattr(client, "request", request)
+    result = client.inspect_task_delivery("root", value["intent"]["operationId"])
+    assert isinstance(result, TaskDeliveryInspection)
+    assert result.status == status
+    assert result.intent.kind == kind
+    assert result.observed_at == 0
+    if status != "completed":
+        assert result.effect is None
+
+
+@pytest.mark.parametrize("case", [
+    "task", "operation", "time", "unsafe-time", "revision", "history", "missing-intent", "intent-extra",
+    "commit-message", "commit-tree", "commit-parent", "effect-extra", "effect-kind", "effect-missing",
+    "reason-extra", "absent-effect", "ambiguous-effect", "ambiguous-reason", "ambiguous-missing-reason",
+    "apply-commit", "apply-head", "discard-loss", "discard-recovery", "discard-confirmation", "discard-removed",
+    "discard-preserved", "discard-branch", "identity-whitespace", "discard-recovery-null", "discard-numeric-fact",
+])
+def test_inspection_rejects_inconsistent_or_historical_values(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    value = delivery_evidence("apply" if case.startswith("apply-") else "discard" if case.startswith("discard-") else "commit")
+    if case == "task":
+        value["taskId"] = "other"
+    elif case == "operation":
+        value["intent"]["operationId"] = "00000000-0000-4000-8000-000000000002"
+    elif case in {"time", "unsafe-time"}:
+        value["observedAt"] = -1 if case == "time" else 9007199254740992
+    elif case == "revision":
+        value["revision"] = "invalid"
+    elif case == "history":
+        value["committedAt"] = 1
+    elif case == "missing-intent":
+        del value["intent"]
+    elif case == "intent-extra":
+        value["intent"]["sourcePath"] = "/other"
+    elif case == "commit-message":
+        value["intent"]["message"] = "\x00"
+    elif case in {"commit-tree", "commit-parent", "apply-commit", "apply-head", "discard-recovery"}:
+        field = {"commit-tree": "tree", "commit-parent": "headBefore", "apply-commit": "commit",
+                 "apply-head": "sourceHead", "discard-recovery": "recoverableCommit"}[case]
+        value["effect"][field] = "4" * 40
+    elif case == "effect-extra":
+        value["effect"]["committedAt"] = 1
+    elif case == "effect-kind":
+        value["effect"]["kind"] = "unknown"
+    elif case == "effect-missing":
+        del value["effect"]
+    elif case == "reason-extra":
+        value["reason"] = "state-changed"
+    elif case == "absent-effect":
+        value["status"] = "not-completed"
+    elif case.startswith("ambiguous-"):
+        value["status"] = "ambiguous"
+        if case != "ambiguous-effect":
+            del value["effect"]
+        if case != "ambiguous-missing-reason":
+            value["reason"] = "unknown" if case == "ambiguous-reason" else "state-changed"
+    elif case == "discard-loss":
+        value["effect"]["uncommittedChangesDiscarded"] = False
+    elif case == "discard-confirmation":
+        value["intent"]["confirmedUncommittedLoss"] = False
+    elif case in {"discard-removed", "discard-preserved"}:
+        value["effect"]["worktreeRemoved" if case == "discard-removed" else "branchPreserved"] = False
+    elif case == "discard-branch":
+        value["effect"]["branch"] = " task "
+    elif case == "identity-whitespace":
+        value["workspaceId"] = " workspace "
+    elif case == "discard-recovery-null":
+        value["effect"]["recoverableCommit"] = None
+    elif case == "discard-numeric-fact":
+        value["effect"]["worktreeRemoved"] = 1
+
+    client = HarnessClient()
+    monkeypatch.setattr(client, "request", lambda _method, _params, *, response_model, **_kwargs: response_model.model_validate(value))
+    with pytest.raises(SdkProtocolError):
+        client.inspect_task_delivery("root", "00000000-0000-4000-8000-000000000001")
+
+
+def test_high_level_inspection_delegates_without_adopting(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = DeepSeekHarness()
+    monkeypatch.setattr(harness, "start", lambda: None)
+    value = TaskDeliveryInspection.model_validate(delivery_evidence())
+    calls = []
+    monkeypatch.setattr(harness.client, "inspect_task_delivery", lambda *args: calls.append(args) or value)
+    assert harness.inspect_task_delivery("root", value.intent.operation_id) is value
+    assert calls == [("root", value.intent.operation_id)]
+
+
+def test_isolated_writer_assignment_stays_in_child_notifications(tmp_path: Path) -> None:
+    fixture = Path(__file__).resolve().parents[3] / "scripts/snapshots/isolated-writer-sdk/assignment.json"
+    expected = json.loads(fixture.read_text())
+    execution = fixture.with_name("execution.json")
+    owner = json.loads(execution.read_text())
+    script = tmp_path / "writer_runtime.py"
+    script.write_text(
+        """
+import json
+import sys
+from pathlib import Path
+
+assignment = json.loads(Path(sys.argv[1]).read_text())
+owner = json.loads(Path(sys.argv[2]).read_text())
+def notify(method, params):
+    print(json.dumps({"jsonrpc": "2.0", "method": method, "params": params}), flush=True)
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg["method"] == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "writer-fixture"}}}), flush=True)
+    elif msg["method"] == "session/prompt":
+        root = "parent-1"
+        notify("session.event", {"sessionId": root, "event": {"type": "agent/inbox/spliced", "data": {"target": "next-turn", "start": 0, "inserted": [{"id": "message-1"}]}}})
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"messageId": "message-1"}}), flush=True)
+        notify("subagent.started", {"parentSessionId": root, "childSessionId": "parent-1-child"})
+        notify("session.event", {"sessionId": "parent-1-child", "event": {"type": "subagent/worktree-assigned", "seq": 2, "time": 1, "data": assignment}})
+        notify("session.event", {"sessionId": "parent-1-child", "event": {"type": "subagent/execution-provider", "seq": 3, "time": 1, "data": owner}})
+        notify("session.status", {"sessionId": root, "status": "idle"})
+    elif msg["method"] == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        break
+""".strip()
+    )
+    with DeepSeekHarness(
+        launch_args_override=(sys.executable, str(script), str(fixture), str(execution)), cwd=str(tmp_path),
+    ) as harness:
+        result = harness.run("delegate", session_id="parent-1")
+    writer = next(notification for notification in result.notifications
+                  if notification.method == "session.event"
+                  and notification.payload["sessionId"] == "parent-1-child")
+    assert writer.payload["event"]["data"] == expected
+    assert all(event["type"] != "subagent/worktree-assigned" for event in result.events)
+    execution_event = next(notification for notification in result.notifications
+                           if notification.method == "session.event"
+                           and notification.payload["event"]["type"] == "subagent/execution-provider")
+    assert execution_event.payload["sessionId"] == "parent-1-child"
+    assert execution_event.payload["event"]["data"] == owner
+    assert all(event["type"] != "subagent/execution-provider" for event in result.events)
+
+
+@pytest.mark.parametrize("discard_case", ["original", "later", "wrong-owner", "wrong-branch"])
+def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.MonkeyPatch, discard_case: str) -> None:
+    client = HarnessClient()
+    calls: list[tuple[str, object]] = []
+    row = {
+        "taskId": "root",
+        "workspaceId": "workspace",
+        "executionWorkspace": {
+            "kind": "git-worktree",
+            "taskId": "root",
+            "workspaceId": "workspace",
+            "sourcePath": r"D:\source\project",
+            "path": r"D:\harness\worktrees\root",
+            "branch": "dsh/task-0123456789abcdef01234567",
+            "baseCommit": "0" * 40,
+            "sourceHead": "0" * 40,
+            "sourceDirty": False,
+            "sourceStatusDigest": "a" * 64,
+            "createdAt": 1,
+        },
+        "descendantSessionIds": ["child"],
+        "status": "reviewing",
+        "freshness": "live",
+        "attention": [],
+        "risks": [],
+        "updatedAt": 1,
+        "asOfSeq": 0,
+    }
+
+    def request(method: str, params: dict[str, object], *, response_model: type, **_kwargs: object):
+        calls.append((method, params))
+        summary = {
+            "taskId": "root", "workspaceId": "workspace", "revision": "b" * 64,
+            "baseCommit": "0" * 40, "headCommit": "0" * 40, "sourceHead": "0" * 40,
+            "sourceDirty": False, "branch": "dsh/task-0123456789abcdef01234567",
+            "dirty": True, "truncated": False,
+            "files": [{"path": "src/app.ts", "status": "modified", "binary": False,
+                       "additions": 2, "deletions": 1}],
+            "additions": 2, "deletions": 1,
+        }
+        commit_receipt = {
+            "kind": "commit", "operationId": "00000000-0000-4000-8000-000000000001",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "b" * 64,
+            "committedRevision": "c" * 64, "branch": row["executionWorkspace"]["branch"],
+            "commit": "1" * 40, "committedAt": 2,
+        }
+        apply_receipt = {
+            "kind": "apply", "operationId": "00000000-0000-4000-8000-000000000002",
+            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "c" * 64,
+            "commit": "1" * 40, "sourceHeadBefore": "2" * 40,
+            "sourceHeadAfter": "2" * 40, "appliedAt": 3,
+        }
+        discard_receipt = {
+            "kind": "discard", "operationId": "00000000-0000-4000-8000-000000000003",
+            "taskId": "other" if discard_case == "wrong-owner" else "root", "workspaceId": "workspace",
+            "reviewRevision": ("c" if discard_case == "original" else "d") * 64,
+            "branch": "wrong" if discard_case == "wrong-branch" else row["executionWorkspace"]["branch"],
+            "branchPreserved": True, "worktreeRemoved": True,
+            "uncommittedChangesDiscarded": discard_case != "original",
+            "recoverableCommit": ("1" if discard_case == "original" else "3") * 40, "discardedAt": 4,
+        }
+        if method == "task/list":
+            value = {"generation": 7, "tasks": [row]}
+        elif method == "task/reviewSummary":
+            value = summary
+        elif method == "task/reviewDiff":
+            value = {
+                "taskId": "root", "workspaceId": "workspace", "revision": params["expectedRevision"],
+                "path": params["path"], "binary": False, "truncated": False, "patch": "+new",
+            }
+        else:
+            value = {
+                **row,
+                "definition": {"goal": "Ship", "criteria": []},
+                "risks": [params["risk"]] if method == "task/recordRisk" else [],
+                "reviewDecision": params["decision"] if method == "task/review" else None,
+                **({"commitReceipt": commit_receipt} if method == "task/commit" else {}),
+                **({"commitReceipt": commit_receipt, "applyReceipt": apply_receipt}
+                   if method == "task/apply" else {}),
+                **({"commitReceipt": commit_receipt, "applyReceipt": apply_receipt,
+                    "discardReceipt": discard_receipt} if method == "task/discard" else {}),
+            }
+        return response_model.model_validate(value)
+
+    monkeypatch.setattr(client, "request", request)
+    listed = client.list_tasks()
+    assert listed.generation == 7
+    assert listed.tasks[0].execution_workspace.path == r"D:\harness\worktrees\root"
+    assert client.define_task(
+        "root", goal="Ship", criteria=[DefineTaskCriterion(text="Works")], expected_seq=0
+    ).definition.goal == "Ship"
+    criterion = TaskCriterion(id="criterion", text="Works", status="waived", evidence=[])
+    client.update_task_criterion("root", criterion=criterion, expected_seq=1)
+    risk = TaskRisk(id="risk", severity="high", summary="Signing")
+    assert client.record_task_risk("root", risk=risk, expected_seq=2).risks[0].summary == "Signing"
+    assert client.review_task("root", decision="ready", expected_seq=3).review_decision == "ready"
+    summary = client.get_task_review_summary("root")
+    assert summary.files[0].additions == 2
+    assert client.get_task_review_diff(
+        "root", path="src/app.ts", expected_revision=summary.revision
+    ).patch == "+new"
+    committed = client.commit_task(
+        "root", expected_revision=summary.revision, message="feat: ship", expected_seq=4
+    )
+    assert committed.commit_receipt.commit == "1" * 40
+    applied = client.apply_task(
+        "root", expected_revision=committed.commit_receipt.committed_revision,
+        expected_source_head="2" * 40, commit=committed.commit_receipt.commit, expected_seq=5,
+    )
+    assert applied.apply_receipt.source_head_before == "2" * 40
+    discard_params = {
+        "expected_revision": ("c" if discard_case == "original" else "d") * 64,
+        "confirmed_uncommitted_loss": discard_case != "original", "expected_seq": 6,
+    }
+    if discard_case in {"wrong-owner", "wrong-branch"}:
+        with pytest.raises(SdkProtocolError, match="malformed Task response"):
+            client.discard_task("root", **discard_params)
+        return
+    discarded = client.discard_task("root", **discard_params)
+    assert discarded.discard_receipt.worktree_removed is True
+    assert discarded.discard_receipt.review_revision == discard_params["expected_revision"]
+    assert discarded.discard_receipt.recoverable_commit == ("1" if discard_case == "original" else "3") * 40
+    client.retry_task_delivery_checkpoint('root', '00000000-0000-4000-8000-000000000001')
+    assert [method for method, _params in calls] == [
+        "task/list", "task/define", "task/updateCriterion", "task/recordRisk", "task/review",
+        "task/reviewSummary", "task/reviewDiff", "task/commit", "task/apply", "task/discard", "task/retryDeliveryCheckpoint",
+    ]
+
+
+def test_malformed_task_projection_uses_sdk_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": "bad", "tasks": [{}]})
+
+    monkeypatch.setattr(client, "request", request)
+    with pytest.raises(SdkProtocolError, match="malformed Task response"):
+        client.list_tasks()
+
+
+@pytest.mark.parametrize("case", ["valid", "invalid-id", "missing", "child", "kind", "operation"])
+def test_retryable_checkpoint_matches_root_attention(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
+    client = HarnessClient()
+    operation_id = "00000000-0000-4000-8000-000000000001"
+    item = {
+        "id": "pending", "taskId": "root", "ownerSessionId": "child" if case == "child" else "root",
+        "kind": "review-request" if case == "kind" else "delivery-unconfirmed",
+        "severity": "error", "summary": "Save receipt", "createdAt": 1, "actionable": True,
+        "sourceId": "different" if case == "operation" else operation_id,
+    }
+    row = {
+        "taskId": "root", "descendantSessionIds": [], "status": "reviewing", "freshness": "live",
+        "attention": [] if case == "missing" else [item], "risks": [], "updatedAt": 1, "asOfSeq": 1,
+        "retryableDeliveryCheckpoint": "invalid" if case == "invalid-id" else operation_id,
+    }
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": 1, "tasks": [row]})
+
+    monkeypatch.setattr(client, "request", request)
+    if case == "valid":
+        assert client.list_tasks().tasks[0].retryable_delivery_checkpoint == operation_id
+    else:
+        with pytest.raises(SdkProtocolError, match="malformed Task response"):
+            client.list_tasks()
+
+
+def test_mismatched_task_worktree_uses_sdk_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = HarnessClient()
+    row = {
+        "taskId": "root",
+        "workspaceId": "workspace",
+        "executionWorkspace": {
+            "kind": "git-worktree",
+            "taskId": "different-task",
+            "workspaceId": "workspace",
+            "sourcePath": r"D:\source\project",
+            "path": r"D:\harness\worktrees\root",
+            "branch": "dsh/task-0123456789abcdef01234567",
+            "baseCommit": "0" * 40,
+            "sourceHead": "1" * 40,
+            "sourceDirty": False,
+            "sourceStatusDigest": "a" * 64,
+            "createdAt": 1,
+        },
+        "descendantSessionIds": [],
+        "status": "running",
+        "freshness": "live",
+        "attention": [],
+        "risks": [],
+        "updatedAt": 1,
+        "asOfSeq": 0,
+    }
+
+    def request(_method: str, _params: object, *, response_model: type, **_kwargs: object):
+        return response_model.model_validate({"generation": 1, "tasks": [row]})
+
+    monkeypatch.setattr(client, "request", request)
+    with pytest.raises(SdkProtocolError, match="malformed Task response"):
+        client.list_tasks()
 
 
 def test_high_level_sdk_runs_turn_and_collects_final_response(tmp_path: Path) -> None:
@@ -922,7 +1305,7 @@ def _install_fake_bundled_runtime(
 
     Returns the fake bundled default config path.
     """
-    runtime = tmp_path / "dsh-jsonrpc-agent"
+    runtime = tmp_path / "dsh-jsonrpc-agent.py"
     runtime.write_text(
         """#!/usr/bin/env python3
 import json
@@ -947,7 +1330,7 @@ for line in sys.stdin:
     (module_dir / "__init__.py").write_text(
         f"""
 def resolve_bundled_launch_args(mode=None):
-    return ({str(runtime)!r},)
+    return ({sys.executable!r}, {str(runtime)!r})
 
 
 def bundled_default_config_path():

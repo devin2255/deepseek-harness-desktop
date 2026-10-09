@@ -104,7 +104,7 @@ Keep `@deepseek-ai/dsh-sdk-client`, `@deepseek-ai/dsh-sdk-protocol`, and `deepse
 | `packages/pty/` | `packages/terminal/` | The package family owns persistent terminal sessions. Raw PTY allocation remains in the subprocess layer. |
 | `@deepseek-ai/dsh-pty`, `ctx.pty`, `PtyService` | `@deepseek-ai/dsh-terminal`, `ctx.terminals`, `TerminalSessionService` | Callers manage multiple named terminal sessions. They do not allocate raw PTYs through this service. |
 | Public high-level `Pty*` session and backend names | `Terminal*` names | The public abstraction is a terminal session. Keep low-level `SubprocessTerminal*` names because they already name the substrate. |
-| `@deepseek-ai/dsh-pty-local`, `LocalPtyBackend` | `@deepseek-ai/dsh-terminal-bash`, `BashTerminalBackend` | The provider depends on Bash prompt and shell behavior. `local` hides the actual dialect. |
+| `@deepseek-ai/dsh-pty-local`, `LocalPtyBackend` | `@deepseek-ai/dsh-terminal-shell`, `ShellTerminalBackend` | The provider depends on Bash prompt and shell behavior. `local` hides the actual dialect. |
 | `@deepseek-ai/dsh-tool-pty` | `@deepseek-ai/dsh-tool-terminal` | The model-facing tools are already `terminal_*`; the package should use the same product noun. |
 | `tool-bash-persistent` in the former PTY family | `shell/tool-bash-persistent/` | The tool is a Bash tool and belongs with shell tools. Keep its npm name: `persistent` distinguishes it from one-shot `bash`, while `bash-terminal` would blur the product tool with the terminal-session family. |
 | `docs/subsystems/pty.md` | `docs/subsystems/terminal.md` | The page documents terminal sessions, not raw PTY allocation. |

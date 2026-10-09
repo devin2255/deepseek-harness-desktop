@@ -44,7 +44,9 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 `childSessionMeta()` 把所加入的 preset id 记在子 agent 的持久化 header 上，理由与顶层会话记录自己的那一个相同：preset 决定了模型所见的工具 schema 与提示段，因此冷读子 agent 的历史时必须重建那份组装，而不是部署默认值。该值从父方**活着的** scope 链读取，而不是从父方 header 读取，因为在空白期切换过 preset 的父方运行在更新的那份组装上，而它的 header 仍写着旧的那个。
 
-可继续创建对应可选的 `SubagentProvider.prepareContinuable?()` 方法：方法是否存在就是能力检查，因此服务会在没有该方法的提供方上拒绝已配置的可继续启动，而具备该方法的提供方仍可服务普通一次性委派。该方法只返回已分离的 `ContinuableCreateSpec`（`{ seed? }`）。它只是数据，不携带任何能力：不包含 Agent、`AgentHandle`、提示词投递、结果、dispose 或恢复操作。准备完成后，身份预留、组合、Agent 创建、提示词投递、冷恢复、所有权和 dispose 均由继续执行管理器负责。一次性 `SubagentRun` 表示一次可 dispose 的前台委派，只有一个结果，且没有冷恢复操作。服务可以针对不同的同级子 agent 并发调用同一提供方：每次启动或准备都拥有各自的可变状态和取消路径，一项操作的失败、结果或清理不得使另一项操作结算或释放。提供方可以在内部按自身容量排队，但不得改变这项独立性约定。
+可继续创建对应可选的 `SubagentProvider.prepareContinuable?()` 方法：方法是否存在就是能力检查，因此服务会在没有该方法的提供方上拒绝已配置的可继续启动，而具备该方法的提供方仍可服务普通一次性委派。该方法返回已分离的 `ContinuableCreateSpec`（`{ seed?, execution? }`）。它只是数据，不携带任何能力：不包含 Agent、`AgentHandle`、提示词投递、结果、dispose 或恢复操作。准备完成后，身份预留、组合、Agent 创建、提示词投递、冷恢复、所有权和 dispose 均由继续执行管理器负责。一次性 `SubagentRun` 表示一次可 dispose 的前台委派，只有一个结果，且没有冷恢复操作。服务可以针对不同的同级子 agent 并发调用同一提供方：每次启动或准备都拥有各自的可变状态和取消路径，一项操作的失败、结果或清理不得使另一项操作结算或释放。提供方可以在内部按自身容量排队，但不得改变这项独立性约定。
+
+可选执行数据提供初始 cwd、捕获的策略和模型不可见的初始化事实。管理器追加必需的 `subagent/execution-provider` 记录，并在初次发布或冷恢复发布前，调用已注册提供方的 `validateContinuableExecution()` 校验实际尚未发布的 Session。校验缺失、描述符矛盾或校验失败都会在收件箱准入前遭拒。普通共享目录子 agent 不携带此记录，因此初始提供方注销后仍可冷恢复。提供方只校验执行数据；管理器保留全部 Agent 生命周期职责。参见[自有执行目录的续行](../../../.agents/notes/implemented/feature/2026-10-07-isolated-writer-continuation.md)。
 
 ## 持久化描述符
 
@@ -58,7 +60,9 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 ## 委派策略
 
-两条进程内委派路径都会通过共享的子 agent 辅助函数，在委派边界固定子 agent 的权限范围。`captureDelegatedPolicyOverrides(parent)` 会为父会话的显式沙箱覆盖项（`sandboxPolicy.overrideOf()`）创建快照，并在审批能力已组合时将子 agent 的审批策略固定为 `'never'`，无论父级自身采用何种策略。这样，被委派的子 agent 只能在继承的沙箱范围内行动，每次审批请求（例如 `sandbox_permissions` 升权）都会被确定性拒绝，而不会等待无人处理的提示（这两个服务都是可选的 `ctx.get` 消费方）。`appendDelegatedPolicyOverrides()` 则在未发布的设置阶段、在任何 fork 种子之后，把每个值作为一条 `source: 'delegation'` 的 `sandbox/mode` 或 `approval/policy` 事件写入子 agent 自己的日志。因此，新捕获的策略会覆盖种子中的陈旧状态，而子 agent 的生效策略始终可以仅凭其日志重建。沙箱的部署默认值绝不复制：未切换的父级不会记录 `sandbox/mode`，其子 agent 会动态跟随部署默认值。可继续启动会在第一次 await 前捕获策略，并且只为全新物化写入这些委派事件；冷恢复只会重放已持久化的委派事件，不会重新捕获父级策略，因此创建之后的父级切换绝不会追溯性地改变持久化子 agent。每个进程内子 agent 还会收到一条作用域内的运行时上下文声明（`subagent:delegation`），告知其权限范围已固定，需要更宽访问的任务应以上报限制收尾，而不是重试。参见[一次性](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md)与[可继续](../../../.agents/notes/implemented/feature/2026-08-10-continuable-subagent-policy-inheritance.md)两篇委派策略 Agent Note。
+两条进程内委派路径都会在第一次 await 前通过 `captureDelegatedPolicyOverrides(parent)` 固定子 agent 的权限范围。可选的[沙箱策略服务](../../sandbox/sandbox-policy/README.md)选择只读委派或继承父级显式覆盖项；部署默认值与一次性授权绝不复制。继承模式下，未切换的父级不记录模式，子 agent 跟随部署默认值。可选的审批服务会将子 agent 固定为 `'never'`，无论父级策略如何，因此 `sandbox_permissions` 升权等审批请求都会被确定性拒绝。
+
+`appendDelegatedPolicyOverrides()` 在未发布的设置阶段、任何 fork 种子之后，把各值记录为带 `source: 'delegation'` 的 `sandbox/mode` 或 `approval/policy` 事件。因此，新策略会覆盖种子中的陈旧状态，并可从子 agent 日志重建。可继续子级的冷恢复会重放这些事件，不会重新捕获父级或部署设置。每个子 agent 还会收到固定权限范围的 `subagent:delegation` 运行时上下文声明：需要更宽访问时应上报限制，而不是重试。参见[一次性](../../../.agents/notes/implemented/feature/2026-07-25-subagent-policy-inheritance.md)与[可继续](../../../.agents/notes/implemented/feature/2026-08-10-continuable-subagent-policy-inheritance.md)两篇委派策略 Agent Note。
 
 ## 一次性所有权与生命周期
 
@@ -88,7 +92,7 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 ## 生命周期事件
 
-服务会为每次一次性运行以及每个已驻留的可继续 Activation 时段发出一对 `subagent/start`/`subagent/end`，因此可继续子 agent 可用与一次性运行相同的词汇观察，且不会暴露管理器是物化、唤醒还是冷恢复了它们。对于一次性启动，它会在同步的 `subagent/start` 之前附加结果观察器，因此即使子 agent 已经结算，也仍会先产生 `subagent/start`，再产生 `subagent/end`；在驻留前失败的可继续时段不会发出这对生命周期事件中的任何一个。这对事件共享由服务生成的 `runId`；`local` 标志根据提供方返回的确切 `localAgent` 是否存在取得快照（可继续子级恒为 true），因此观察器不会根据可复用的提供方名称或会话名称推断运行身份或本地性。`provider` 字段包含子 agent 初次创建时记录的提供方名称，不表示该提供方当前仍在注册：已接受的一次性 run 可在提供方移除后才结算；冷恢复时段会从描述符读取初始提供方名称，不会调用或注册该提供方。
+服务会为每次一次性运行以及每个已驻留的可继续 Activation 时段发出一对 `subagent/start`/`subagent/end`，因此可继续子 agent 可用与一次性运行相同的词汇观察，且不会暴露管理器是物化、唤醒还是冷恢复了它们。对于一次性启动，它会在同步的 `subagent/start` 之前附加结果观察器，因此即使子 agent 已经结算，也仍会先产生 `subagent/start`，再产生 `subagent/end`；在驻留前失败的可继续时段不会发出这对生命周期事件中的任何一个。这对事件共享由服务生成的 `runId`；`local` 标志根据提供方返回的确切 `localAgent` 是否存在取得快照（可继续子级恒为 true），因此观察器不会根据可复用的提供方名称或会话名称推断运行身份或本地性。`provider` 字段包含子 agent 初次创建时记录的提供方名称，不表示该提供方当前仍在注册：已接受的一次性 run 可在提供方移除后才结算；冷恢复时段会从描述符读取初始提供方名称，不启动由该提供方拥有的运行。
 
 运行事件受执行委派的父级作用域约束。每个监听器都独立隔离：同步抛出或返回的 promise 被拒绝时，只会记录日志，不会阻塞同级监听器或改变运行。
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { AgentOfflineReservationError } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -20,7 +21,7 @@ import SubagentRuntime, {
   SubagentError,
   SUBAGENT_DESCRIPTOR_VERSION,
 } from '../src/index.ts'
-import type { SubagentRunEndInfo, SubagentRunInfo } from '../src/index.ts'
+import type { ContinuableExecutionRequest, SubagentProvider, SubagentRunEndInfo, SubagentRunInfo } from '../src/index.ts'
 import * as SubagentInvariant from '../src/invariant.ts'
 
 type Script = ConstructorParameters<typeof MockAdapter>[0]
@@ -166,6 +167,166 @@ function observeCancel(agent: Agent, callback: () => void): void {
     cancel(cause, options)
   })
 }
+
+describe('owned continuable execution', () => {
+  function ownedProvider(parent: Agent, validate?: (request: ContinuableExecutionRequest) => Promise<void>): SubagentProvider {
+    return {
+      name: 'owned', capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      inheritsParentContext: false,
+      start: async () => { throw new Error('one-shot start is not used') },
+      prepareContinuable: async () => ({ execution: {
+        cwd: parent.session.header.cwd ?? process.cwd(), policies: { sandboxMode: 'workspace-write', approvalPolicy: 'never' }, facts: [],
+      } }),
+      ...validate === undefined ? {} : { validateContinuableExecution: validate },
+    }
+  }
+
+  it('validates actual unpublished sessions on creation and cold resume without preparing twice', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('second')])
+    parkParent(ctx, parent)
+    const validate = vi.fn(async (request: ContinuableExecutionRequest) => {
+      expect(ctx.agents.get(request.sessionId)).toBeUndefined()
+      expect(request.meta.cwd).toBe(parent.session.header.cwd ?? process.cwd())
+      expect(request.events.some(event => event.type === 'subagent/execution-provider')).toBe(true)
+    })
+    const provider = ownedProvider(parent, validate)
+    const prepare = vi.spyOn(provider, 'prepareContinuable')
+    ctx.subagents.registerProvider(provider)
+    try {
+      const started = await ctx.subagents.startContinuable(startSpec(parent, 'owned'))
+      await waitNoActivation(ctx, started.childId)
+      await followup(ctx, parent, started.childId, message('second'))
+      await waitNoActivation(ctx, started.childId)
+      expect(prepare).toHaveBeenCalledTimes(1)
+      expect(validate).toHaveBeenCalledTimes(2)
+      expect((await ctx.sessionPersistence.inspect(started.childId)).events
+        .filter(event => event.type === 'subagent/execution-provider')).toHaveLength(1)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('captures the child model before asynchronous execution preparation', async () => {
+    const { ctx, parent } = await setup([textResponse('first')])
+    parkParent(ctx, parent)
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const provider = ownedProvider(parent, async () => {})
+    const prepare = provider.prepareContinuable!.bind(provider)
+    provider.prepareContinuable = async (request) => {
+      entered.resolve(undefined)
+      await release.promise
+      return prepare(request)
+    }
+    ctx.subagents.registerProvider(provider)
+    const models: (string | undefined)[] = []
+    ctx.on('agent/created', ({ agent }) => { if (agent !== parent) models.push(agent.options.model) })
+    try {
+      const starting = ctx.subagents.startContinuable(startSpec(parent, 'owned'))
+      await entered.promise
+      parent.options.model = 'changed-after-preparation'
+      release.resolve(undefined)
+      const started = await starting
+      await waitNoActivation(ctx, started.childId)
+      expect(models).toEqual(['mock'])
+      const descriptor = (await ctx.sessionPersistence.inspect(started.childId)).events
+        .find(event => event.type === 'subagent/descriptor')
+      expect(descriptor?.data).toMatchObject({ agentModel: 'mock' })
+    } finally { release.resolve(undefined); await ctx.fiber.dispose() }
+  })
+
+  it('rejects fresh execution without a validator before publication or inbox acceptance', async () => {
+    const { ctx, parent } = await setup([])
+    ctx.subagents.registerProvider(ownedProvider(parent))
+    try {
+      await expect(ctx.subagents.startContinuable(startSpec(parent, 'owned')))
+        .rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' })
+      expect(ctx.agents.list()).toEqual([parent])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it.each(['removed', 'replaced-without-validator'] as const)('rejects cold execution when its provider is %s', async (mode) => {
+    const { ctx, parent } = await setup([textResponse('first')])
+    parkParent(ctx, parent)
+    const remove = ctx.subagents.registerProvider(ownedProvider(parent, async () => {}))
+    try {
+      const started = await ctx.subagents.startContinuable(startSpec(parent, 'owned'))
+      await waitNoActivation(ctx, started.childId)
+      remove()
+      if (mode === 'replaced-without-validator') ctx.subagents.registerProvider(ownedProvider(parent))
+      await expect(followup(ctx, parent, started.childId, message('not accepted')))
+        .rejects.toMatchObject({ code: mode === 'removed' ? 'NO_PROVIDER' : 'UNSUPPORTED_CAPABILITY' })
+      expect(ctx.agents.get(started.childId)).toBeUndefined()
+      expect(userTexts((await ctx.sessionPersistence.inspect(started.childId)).events)).toEqual(['child task'])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it.each(['validation', 'publication'] as const)('rejects provider removal during %s before publishing', async (stage) => {
+    const { ctx, parent } = await setup([])
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const remove = ctx.subagents.registerProvider(ownedProvider(parent, async () => {
+      if (stage === 'validation') {
+        entered.resolve(undefined)
+        await release.promise
+      }
+    }))
+    if (stage === 'publication') ctx.subagents.registerContinuableSetup(() => {
+      remove()
+      return () => {}
+    })
+    const result = ctx.subagents.startContinuable(startSpec(parent, 'owned'))
+    const rejected = expect(result).rejects.toMatchObject({ code: 'NO_PROVIDER' })
+    try {
+      if (stage === 'validation') {
+        await entered.promise
+        remove()
+        release.resolve(undefined)
+      }
+      await rejected
+      expect(ctx.agents.list()).toEqual([parent])
+    } finally { release.resolve(undefined); await ctx.fiber.dispose() }
+  })
+
+  it('rolls back cancellation while execution validation is awaiting live state', async () => {
+    const { ctx, parent } = await setup([])
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    ctx.subagents.registerProvider(ownedProvider(parent, async () => {
+      entered.resolve(undefined)
+      await release.promise
+    }))
+    const controller = new AbortController()
+    const result = ctx.subagents.startContinuable(startSpec(parent, 'owned', controller.signal))
+    const rejected = expect(result).rejects.toThrow('validation cancelled')
+    try {
+      await entered.promise
+      expect(ctx.agents.list()).toEqual([parent])
+      controller.abort(new Error('validation cancelled'))
+      release.resolve(undefined)
+      await rejected
+      expect(ctx.agents.list()).toEqual([parent])
+    } finally { release.resolve(undefined); await ctx.fiber.dispose() }
+  })
+
+  it('rejects an execution owner that contradicts the actual descriptor', async () => {
+    const { ctx, parent } = await setup([])
+    const validate = vi.fn(async () => {})
+    const provider = ownedProvider(parent, validate)
+    ctx.subagents.registerProvider(provider)
+    try {
+      const manager = (ctx.subagents as unknown as { continuations: { ownerCtx: Context } }).continuations
+      const agents = manager.ownerCtx.agents
+      const create = agents.create.bind(agents)
+      // Simulates descriptor drift between manager preparation and actual factory setup.
+      vi.spyOn(agents, 'create').mockImplementation(options => create({ ...options,
+        seed: options.seed!.map(event => event.type === 'subagent/descriptor'
+          ? { ...event, data: { ...event.data, provider: 'other' } } : event),
+      }))
+      await expect(ctx.subagents.startContinuable(startSpec(parent, 'owned'))).rejects.toMatchObject({ code: 'NOT_RESUMABLE' })
+      expect(validate).not.toHaveBeenCalled()
+      expect(ctx.agents.list()).toEqual([parent])
+    } finally { vi.restoreAllMocks(); await ctx.fiber.dispose() }
+  })
+})
 
 describe('SubagentRuntime.startContinuable', () => {
   it('returns both identities at inbox acceptance, without waiting for the turn or the log', async () => {
@@ -476,6 +637,32 @@ describe('SubagentRuntime.followup residency routing', () => {
     expect(userTexts(loaded.events)).toEqual(['child task', 'continue please'])
     // One descriptor only: cold resume never re-seeds it.
     expect(loaded.events.filter(event => event.type === 'subagent/descriptor')).toHaveLength(1)
+  })
+
+  it('refuses a reserved cold child delivery without accepting its message and retries after release', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('after release')])
+    try {
+      const started = await ctx.subagents.startContinuable(startSpec(parent))
+      await waitNoActivation(ctx, started.childId)
+      const before = await ctx.sessionPersistence.inspect(started.childId)
+      let created = 0
+      ctx.on('agent/created', ({ agent }) => { if (agent.id === started.childId) created += 1 })
+      await ctx.agents.withOfflineSessions([started.childId], async () => {
+        await expect(followup(ctx, parent, started.childId, message('not accepted')))
+          .rejects.toSatisfy((error: unknown) => error instanceof SubagentError
+            && error.code === 'NOT_RESUMABLE' && error.cause instanceof AgentOfflineReservationError)
+        expect(ctx.agents.get(started.childId)).toBeUndefined()
+        expect((await ctx.sessionPersistence.inspect(started.childId)).events).toEqual(before.events)
+      })
+      expect(created).toBe(0)
+      await expect(followup(ctx, parent, started.childId, message('after release'))).resolves.toBeTypeOf('string')
+      await waitNoActivation(ctx, started.childId)
+      expect(created).toBe(1)
+      const loaded = await ctx.sessionPersistence.inspect(started.childId)
+      expect(userTexts(loaded.events)).toEqual(['child task', 'after release'])
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('cold-resumes after the initial provider unregisters', async () => {

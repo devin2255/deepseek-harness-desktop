@@ -549,7 +549,9 @@ describe('a switch survives the session', () => {
     try {
       // The api-proxy's select does exactly this pair while the session is blank.
       await ctx.agentPresets.recompose(handle.agent.ctx, 'minimal')
-      handle.agent.session.append('agent-preset/selected', { agentPreset: 'minimal' })
+      const composition = ctx.agentPresets.composition(handle.agent.ctx)
+      if (composition === undefined) throw new Error('the minimal preset did not join the agent')
+      handle.agent.session.append('agent-preset/selected', composition)
 
       // The header keeps the creation fact; the log carries what it runs.
       expect(handle.agent.session.header.agentPreset).toBe('standard')

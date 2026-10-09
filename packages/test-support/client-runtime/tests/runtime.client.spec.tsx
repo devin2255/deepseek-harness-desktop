@@ -222,6 +222,7 @@ describe('sessions', () => {
       .toMatchObject({ displayTitle: 'renamed', running: true })
     runtime.sessions.setSubagentCatalogOpen('s2' as SessionId, true)
     await runtime.sessions.refreshSubagents('s2' as SessionId)
+    await runtime.sessions.refresh()
     // The confirmed-switch write-back lands on the row it names and ignores
     // one the fixture never added, exactly as production's list upsert does.
     runtime.sessions.noteAgentPreset('s1' as SessionId, 'minimal')
@@ -243,6 +244,7 @@ describe('sessions', () => {
       { method: 'openSubagent', args: [address] },
       { method: 'setSubagentCatalogOpen', args: ['s2', true] },
       { method: 'refreshSubagents', args: ['s2'] },
+      { method: 'refresh', args: [] },
       { method: 'open', args: ['s1'] },
       { method: 'clear', args: [] },
       { method: 'fork', args: [{ sessionId: 's1', atSeq: 7, increaseTitle: true }] },
@@ -365,9 +367,11 @@ describe('workspaces', () => {
     expect(view.container.textContent).toContain('ws:pending')
 
     runtime.workspaces.startSession('w1' as WorkspaceId)
+    await runtime.workspaces.refresh()
     await expect(runtime.workspaces.connectWorkspace('w2' as WorkspaceId)).resolves.toBe('session-of-w2')
     expect(runtime.workspaces.calls).toEqual([
       { method: 'startSession', args: ['w1'] },
+      { method: 'refresh', args: [] },
       { method: 'connectWorkspace', args: ['w2'] },
     ])
     const stub = vi.fn(() => Promise.resolve('other' as never))
@@ -587,6 +591,9 @@ describe('workspaces action face', () => {
     expect(ws.list.getSnapshot().archivedSessionIds).toEqual(['s1'])
     expect(ws.calls.map(c => c.method)).toEqual(
       ['create', 'create', 'pickDirectory', 'rename', 'delete', 'openPath', 'insertBefore', 'insertSessionBefore', 'archiveSession'])
+    await ws.unarchiveSession('s1' as SessionId)
+    expect(ws.list.getSnapshot().archivedSessionIds).toEqual([])
+    await ws.archiveSession('s1' as SessionId)
 
     ws.stub('create', () => Promise.resolve({ workspaceId: 'ws-x', title: 'X', path: '/x', sessionIds: [] } as never))
     ws.stub('pickDirectory', () => Promise.resolve('/picked'))
@@ -597,6 +604,7 @@ describe('workspaces action face', () => {
     ws.stub('insertBefore', insertBefore)
     ws.stub('insertSessionBefore', () => Promise.resolve({ workspaceId: 'w1', title: '', path: '', sessionIds: [] } as never))
     ws.stub('archiveSession', () => Promise.resolve())
+    ws.stub('unarchiveSession', () => Promise.resolve())
     expect((await ws.create({ path: '/y' })).title).toBe('X')
     await expect(ws.pickDirectory()).resolves.toBe('/picked')
     expect((await ws.rename('w1' as WorkspaceId, 'z')).title).toBe('S')
@@ -607,6 +615,7 @@ describe('workspaces action face', () => {
     expect((await ws.insertSessionBefore('w1' as WorkspaceId, 's1' as SessionId)).sessionIds).toEqual([])
     // The stub replaces the default set mutation: the set stays as-is.
     await ws.archiveSession('s2' as SessionId)
+    await ws.unarchiveSession('s1' as SessionId)
     expect(ws.list.getSnapshot().archivedSessionIds).toEqual(['s1'])
     await runtime.dispose()
   })

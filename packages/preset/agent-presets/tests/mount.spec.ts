@@ -130,6 +130,33 @@ describe('composing an agent from a preset', () => {
     expect(toolNames(ctx, agent)).toEqual(['alpha'])
   })
 
+  it('records the joined plugin rows without recording plugin config', async () => {
+    const agent = await agentOn(ctx, 'sess-composition', 'standard')
+    const [recorded] = agent.session.events.filter(event => event.type === 'agent-preset/composed')
+
+    expect(recorded?.data).toEqual({ agentPreset: 'standard', entries: [
+      { entryId: 'alpha', moduleName: '../../plugins/contribute.js', enabled: true },
+      { entryId: 'alpha-extra', moduleName: '../../plugins/contribute.js', enabled: false },
+    ] })
+    expect(JSON.stringify(recorded)).not.toContain('tool')
+  })
+
+  it('retains an equal recorded composition and corrects a stale snapshot', async () => {
+    const agent = await agentOn(ctx, 'sess-composition-replayed', 'standard')
+    const first = agent.session.events.find(event => event.type === 'agent-preset/composed')
+    if (first === undefined) throw new Error('the initial composition was not recorded')
+
+    // A cold resume announces an agent against existing session events.
+    ctx.emit('agent/created', { agent })
+    expect(agent.session.events.filter(event => event.type === 'agent-preset/composed')).toEqual([first])
+
+    agent.session.append('agent-preset/selected', { agentPreset: 'standard', entries: [] })
+    ctx.emit('agent/created', { agent })
+    const records = agent.session.events.filter(event => event.type === 'agent-preset/composed')
+    expect(records).toHaveLength(2)
+    expect(records[1]?.data).toEqual(first.data)
+  })
+
   it('lets two sessions share one preset without colliding', async () => {
     const first = await agentOn(ctx, 'sess-first', 'standard')
     const second = await agentOn(ctx, 'sess-second', 'standard')
@@ -178,11 +205,13 @@ describe('composing a child agent from its parent', () => {
     const parent = await agentOn(ctx, 'sess-shared', 'standard')
     const before = livePresetMounts().length
 
-    await childOf(ctx, 'sess-shared-child', parent)
+    const child = await childOf(ctx, 'sess-shared-child', parent)
 
     // A remount would compose a second copy of every row in the preset; the
     // child must run on the plugin instances its parent already runs on.
     expect(livePresetMounts()).toHaveLength(before)
+    expect(ctx.agentPresets.composition(parent.ctx))
+      .toEqual(ctx.agentPresets.composition(child.ctx))
   })
 
   it('keeps the child composed after its parent is disposed', async () => {
@@ -465,7 +494,7 @@ describe('replacing a composition', () => {
       selected.push([sessionId, agentPreset])
     })
 
-    agent.session.append('agent-preset/selected', { agentPreset: 'minimal' })
+    agent.session.append('agent-preset/selected', { agentPreset: 'minimal', entries: [] })
 
     expect(selected).toEqual([[SessionId('sess-selected'), 'minimal']])
   })
@@ -631,6 +660,7 @@ describe('editing a composition file', () => {
     const { scoped, path } = await editable('edited')
     const first = await agentOn(scoped, 'sess-gen-first', 'edited')
     expect(toolNames(scoped, first)).toEqual(['before'])
+    const firstRecord = first.session.events.find(event => event.type === 'agent-preset/composed')
 
     // Files are the only composition editor now (authoring is copy/delete),
     // so the standing mount notices the file's stamp changing on its own.
@@ -640,6 +670,8 @@ describe('editing a composition file', () => {
     expect(toolNames(scoped, second)).toEqual(['afterwards'])
     // The joined session keeps the generation it runs on.
     expect(toolNames(scoped, first)).toEqual(['before'])
+    expect(first.session.events.find(event => event.type === 'agent-preset/composed')).toBe(firstRecord)
+    expect(second.session.events.some(event => event.type === 'agent-preset/composed')).toBe(true)
   })
 
   it('gives two sessions racing the refreshed file one shared new generation', async () => {

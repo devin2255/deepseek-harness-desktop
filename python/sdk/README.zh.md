@@ -43,6 +43,16 @@ with DeepSeekHarness(
 
 `HarnessClient` 会在运行时进程的整个生命周期内保留已发现的 subagent 谱系。每次执行 `Session.run()` 时，`RunResult.notifications` 与 `on_notification` 会按协议传输顺序收到根会话及所有已知后代的通知，其中包括嵌套 subagent 的生命周期事件与会话事件。`RunResult.events` 只包含根会话事件，因此后代消息不会覆盖根会话回复。底层 `session_prompt()` 会立即返回已排队消息的 `MessageId`；绕过 `Session.run()` 的调用方必须自行负责后续的活动边界。
 
+`DeepSeekHarness` 和 `HarnessClient` 提供 `list_tasks()`、`define_task()`、`update_task_criterion()`、`record_task_risk()` 与 `review_task()`。隔离 Task 还提供 `get_task_review_summary()`、`get_task_review_diff()`、`commit_task()`、`apply_task()` 与 `discard_task()`，其协议词汇与 TypeScript SDK 完全一致。Pydantic 会校验每个 Task 基线、审查摘要、文件 Diff、已提交完整行、可选的 `execution_workspace` 和交付回执，同时原样保留源路径、Worktree 路径、分支、协议标识与判别字段；无效响应会抛出 `SdkProtocolError`。SDK 不执行 Git 操作，也不在 SDK 侧维护 Task 缓存。
+
+Discard 回执标识当前授权的审查和保留的 Task 分支，不一定等于较早的 Commit revision 或提交。后续编辑和后代提交仍是独立恢复事实；Host 根据变更前授权验证它们。
+
+可选的 `integrations` 包含类型化尝试，结果区分运行中、未确认、失败、已集成或冲突。校验会检查有序日志标识、完整回执、所选后代，以及 `resolved_by` 指定的后续贡献者覆盖关系。未知发布结果保持未知；历史结果不授权另一次 Git 变更。
+
+两层客户端都提供 `retry_task_delivery_checkpoint(session_id, operation_id)`，用于提供给调用方的 `retryable_delivery_checkpoint`。即使 worktree 已被丢弃，它仍能保存现有实时回执，不追加事件，也不执行 Git。回执缺失或被替换时会拒绝；Provider 结果丢失时需要检查 Git，而不是使用此重试。
+
+两层客户端都提供 `inspect_task_delivery(session_id, operation_id)`，用于没有回执的未完成授权。`TaskDeliveryInspection` 通过类型化授权与效果区分当前已完成、缺失和不确定的证据；它绝不确认交付或解除执行限制。校验拒绝不匹配的请求身份、不一致的效果、额外字段和执行时间戳。缺失表示此刻效果不存在，不表示 Git 从未变化。服务器要求所选组合提供 Task 与 Review 服务。
+
 也可以通过 `DSH_CORDIS_CONFIG` 为运行时子进程指定配置。注入逻辑位于 `HarnessClient.start()`，因此底层客户端按默认方式启动时也具有该行为：如果启动方式最终解析为内置运行时，且既没有设置 `cordis`，也没有设置非空的 `DSH_CORDIS_CONFIG`（运行时将空值视为未设置，注入检查也是如此），系统就会使用内置默认配置；显式指定 `runtime_bin`、`bridge_bin` 或 `launch_args_override` 时，则会完全禁用该注入。运行时载体（生产用 exe 与仅限开发的 `node` 闭包）及其获取方式见 [sdk-runtime README](https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk-runtime/README.md)。
 
 `cwd` 与 `runtime_cwd` 会在启动子进程、注入环境变量和协议握手前解析为绝对路径。公开 API 只暴露由 SDK 直接应用的选项：部署 persona 和持久化配置应在 `cordis.yml` 中定义；`session_root` 则保留为设置 `DSH_SESSION_ROOT` 的高层便捷参数。

@@ -29,7 +29,6 @@ const windowsUnsupportedPackages = process.platform === 'win32'
       'packages/shell/bash-sandbox',
       'packages/shell/tool-bash',
       'packages/hooks/*',
-      'packages/terminal/terminal-bash',
       'packages/sandbox/sandbox-local',
     ]
   : []
@@ -37,11 +36,13 @@ const windowsUnsupportedPackages = process.platform === 'win32'
 const windowsUnsupportedTests = process.platform === 'win32'
   ? [
       ...windowsUnsupportedPackages.map(path => `${path}/tests/**/*.spec.ts`),
+      // Only this terminal suite allocates a POSIX PTY; parser and lifecycle
+      // tests use the portable subprocess interface and must run on Windows.
+      'packages/terminal/terminal-shell/tests/local.spec.ts',
       'packages/subprocess/subprocess/tests/**/*.spec.ts',
       'packages/subprocess/subprocess-local/tests/local.spec.ts',
       'packages/subprocess/subprocess-local/tests/process-inspector.spec.ts',
       'packages/subprocess/subprocess-local/tests/spawn.spec.ts',
-      'packages/subprocess/subprocess-local/tests/terminal.spec.ts',
     ]
   : []
 
@@ -56,6 +57,7 @@ const windowsUnsupportedCoveragePackages = process.platform === 'win32'
 const windowsOnlyCoverageExclusions = process.platform !== 'win32'
   ? [
       'packages/sandbox/sandbox-windows-acl/src/**/*.ts',
+      'packages/subprocess/subprocess-local/src/windows-pty.ts',
     ]
   : []
 

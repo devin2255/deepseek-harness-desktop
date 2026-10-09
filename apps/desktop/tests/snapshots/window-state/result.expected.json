@@ -1,0 +1,37 @@
+[
+  {
+    "step": "move-and-resize",
+    "normalBoundsPersisted": true,
+    "version": 1,
+    "maximized": false
+  },
+  {
+    "step": "reopen-window",
+    "normalBoundsRestored": true,
+    "harnessLaunches": 1
+  },
+  {
+    "step": "maximize",
+    "maximizedPersisted": true,
+    "normalBoundsPreserved": true
+  },
+  {
+    "step": "cold-start",
+    "maximizedRestored": true,
+    "normalBoundsRestored": true
+  },
+  {
+    "step": "unmaximize-and-quit",
+    "normalBoundsRestored": true,
+    "finalStatePublishedBeforeExit": true
+  },
+  {
+    "step": "removed-display",
+    "entireWindowVisibleOnPrimary": true
+  },
+  {
+    "step": "invalid-preference",
+    "applicationUsable": true,
+    "failureDiagnosed": true
+  }
+]

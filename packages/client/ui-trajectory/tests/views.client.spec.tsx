@@ -144,7 +144,7 @@ function fakeSession(nodes: ConversationSnapshot['nodes']) {
 /** Empty sessions-list hook; breadcrumbs therefore fall back to the raw id. */
 function emptySessions() {
   const store = createSnapshotStore<SessionListState>(
-    { ids: [], byId: {}, current: undefined, phase: 'ready', subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined })
+    { ids: [], byId: {}, current: undefined, phase: 'ready', state: 'idle', error: null, subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined })
   return bindSnapshotSelector(store)
 }
 

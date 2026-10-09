@@ -22,6 +22,7 @@ import {
   SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS,
   truncateUnicodeCodePoints,
 } from './session-search.ts'
+import { taskWorktreeAssignmentSchema } from './tasks.schema.ts'
 
 /** SessionId: one brand cast after schema validation (the only cast point in this domain). */
 export const sessionIdSchema = z.string().min(1) as unknown as z.ZodType<SessionId>
@@ -104,16 +105,24 @@ export const sessionCreateRequestSchema = z.object({
   cwd: z.string().optional(),
   sessionId: sessionIdSchema.optional(),
   agentPreset: z.string().optional(),
+  isolation: z.enum(['direct', 'worktree']).optional(),
 }).refine(
   payload => payload.workspaceId === undefined || payload.cwd === undefined,
   { message: 'session.create accepts workspaceId or cwd, not both' },
+).refine(
+  payload => payload.isolation !== 'worktree' || payload.workspaceId !== undefined,
+  { message: 'session.create worktree isolation requires workspaceId' },
 ) satisfies z.ZodType<Wire<RequestPayload<'session.create'>>>
 
 /** session.create response value. */
 export const sessionCreateValueSchema = z.object({
   sessionId: sessionIdSchema,
   agentPreset: z.string().optional(),
-}) satisfies z.ZodType<Wire<ResponseValue<'session.create'>>>
+  executionWorkspace: taskWorktreeAssignmentSchema.optional(),
+}).refine(
+  value => value.executionWorkspace === undefined || value.executionWorkspace.taskId === value.sessionId,
+  'executionWorkspace must match sessionId',
+) as unknown as z.ZodType<Wire<ResponseValue<'session.create'>>>
 
 /** session.rename request payload (raw title; host-side normalization decides acceptance). */
 export const sessionRenameRequestSchema = z.object({

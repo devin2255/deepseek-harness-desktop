@@ -1,0 +1,67 @@
+{
+  "operations": [
+    "commit",
+    "apply",
+    "discard",
+    "commit",
+    "commit"
+  ],
+  "commitTarget": {
+    "notified": true,
+    "completedTreeMatches": true,
+    "lostTreeMatches": true
+  },
+  "correlatedReceipts": [
+    "commit",
+    "apply",
+    "discard",
+    "commit"
+  ],
+  "status": "settled",
+  "sourceHeadPreserved": true,
+  "sourceContentApplied": true,
+  "worktreeRemoved": true,
+  "branchRetained": true,
+  "laterDiscard": {
+    "currentReviewUsed": true,
+    "preflightNotified": true,
+    "uncommittedLoss": true,
+    "currentHeadRetained": true,
+    "originalCommitRetained": true,
+    "coldReceiptRetained": true
+  },
+  "checkpointRetry": {
+    "advertised": true,
+    "operationIdMatched": true,
+    "attentionCleared": true,
+    "noEventAppended": true,
+    "gitCommitPreserved": true,
+    "coldReceiptRetained": true
+  },
+  "missingReceiptRetryRejected": {
+    "live": true,
+    "cold": true
+  },
+  "inspection": {
+    "live": "completed",
+    "cold": "completed",
+    "absence": "not-completed",
+    "removedWorktree": "completed",
+    "externalEdit": "ambiguous",
+    "authorizedTargetsMatched": true,
+    "observationRevisionRetained": true,
+    "noReceiptFabricated": true,
+    "pendingRowsUnchanged": true,
+    "indexesUnchanged": true
+  },
+  "unconfirmed": {
+    "status": "needs-attention",
+    "attention": [
+      "delivery-unconfirmed"
+    ],
+    "operationIdRetained": true,
+    "receiptAbsent": true,
+    "retryRejected": true,
+    "gitCommitPreserved": true
+  }
+}

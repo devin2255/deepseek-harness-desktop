@@ -8,6 +8,7 @@
  * presenter, which projects ctx.theme snapshots onto document.body.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { PanelActions } from './service.ts'
 import { AppFrame } from './AppFrame.tsx'
@@ -24,6 +25,14 @@ export { LayoutController } from './service.ts'
 export type { ILayout } from './service.ts'
 
 declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Explicit center navigation, including gestures targeting the current page.
+     * @mode emit
+     * @param page - requested presentation page.
+     */
+    'layout/navigate'(page: 'home' | 'conversation' | 'review' | 'studio'): void
+  }
   interface Context {
     /** The outward face only; the concrete service stays inside this plugin. */
     layout: import('./service.ts').ILayout
@@ -32,6 +41,12 @@ declare module '@deepseek-ai/cordis' {
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /** Optional root home surface; no occupant leaves the conversation visible. */
+    'shell.home': { kind: 'single'; scope: 'root' }
+    /** Optional separate Task Review workspace. */
+    'shell.review': { kind: 'single'; scope: 'root' }
+    /** Optional read-only runtime inspection workspace for the selected task. */
+    'shell.studio': { kind: 'single'; scope: 'session-maybe'; owner: StudioOwnerProps }
     // The 'root' entry itself is the runtime's built-in slot (declared
     // there); these four are the frame's children, declared by the same
     // register() call that contributes AppFrame. Session owners never pass
@@ -104,6 +119,12 @@ export interface ConvOwnerProps {}
 /** Details owner share: empty — sessionId arrives as a framework-standard prop. */
 export interface DetailsOwnerProps {}
 
+/** Studio owner share: active only while its center workspace is visible. */
+export interface StudioOwnerProps {
+  /** Host inventory reads are permitted only while Studio is visible. */
+  active: boolean
+}
+
 /** Required services (cordis fiber inject — the loader passes all module exports as an object plugin). */
 export const inject = ['slots', 'theme']
 
@@ -114,12 +135,27 @@ export const inject = ['slots', 'theme']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const layout = new LayoutController()
+  const layout = new LayoutController((page) => { ctx.emit('layout/navigate', page) })
+  const homeAvailable: HostObservable<boolean> = {
+    getSnapshot: () => ctx.slots.entries('shell.home').length > 0,
+    subscribe: listener => ctx.slots.subscribe('shell.home', listener),
+  }
+  const reviewAvailable: HostObservable<boolean> = {
+    getSnapshot: () => ctx.slots.entries('shell.review').length > 0,
+    subscribe: listener => ctx.slots.subscribe('shell.review', listener),
+  }
+  const studioAvailable: HostObservable<boolean> = {
+    getSnapshot: () => ctx.slots.entries('shell.studio').length > 0,
+    subscribe: listener => ctx.slots.subscribe('shell.studio', listener),
+  }
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
     const disposeRegistration = ctx.slots.register({
       name: 'root',
       children: {
+        'shell.home': { kind: 'single', scope: 'root' },
+        'shell.review': { kind: 'single', scope: 'root' },
+        'shell.studio': { kind: 'single', scope: 'session-maybe' },
         'sidebar': { kind: 'single', scope: 'root' },
         'conversation': { kind: 'single', scope: 'session-maybe' },
         'details': { kind: 'single', scope: 'session' },
@@ -132,7 +168,7 @@ export function apply(ctx: ClientContext): void {
       // conversation business actions belong to their registrants.
       inject: (actions: PanelActions) => {
         layout.attachPanels(actions)
-        return {}
+        return { hooks: { homeAvailable, reviewAvailable, studioAvailable } }
       },
     }, AppFrame)
     return () => {

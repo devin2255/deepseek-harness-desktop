@@ -26,6 +26,10 @@
       "types": "./lib/types/list-agents.d.ts",
       "default": "./lib/types/list-agents.js"
     },
+    "./integrate": {
+      "types": "./lib/types/integrate.d.ts",
+      "default": "./lib/types/integrate.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -37,6 +41,13 @@
   ],
   "license": "MIT",
   "peerDependencies": {
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:^",
+    "@deepseek-ai/dsh-task": "workspace:^",
+    "@deepseek-ai/dsh-task-review": "workspace:^",
+    "@deepseek-ai/dsh-task-worktree": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
@@ -45,6 +56,10 @@
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-sandbox-policy": "workspace:^",
+    "@deepseek-ai/dsh-task": "workspace:^",
+    "@deepseek-ai/dsh-task-review": "workspace:^",
+    "@deepseek-ai/dsh-task-worktree": "workspace:^",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-loop": "workspace:^",
     "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
@@ -54,6 +69,7 @@
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-jsonl": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
+    "@deepseek-ai/dsh-task-session": "workspace:^",
     "@deepseek-ai/dsh-subagent": "workspace:^",
     "@deepseek-ai/dsh-subagent-spawn-in-process": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",

@@ -8,11 +8,12 @@
 // Zero model calls: everything is pure client + persistence state on a blank
 // frame, so there is no fixture and a stray stream would fail loud on the
 // open llm seam.
-import { readFile } from 'node:fs/promises'
+import fs, { readFile } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
 import { join } from 'node:path'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import {
@@ -26,6 +27,21 @@ const DIALOG_EXPECTED = join(SNAPSHOT_DIR, 'dialog.expected.md')
 const PLUGINS_EXPECTED = join(SNAPSHOT_DIR, 'plugins.expected.md')
 const PLUGIN_ROW_SELECTOR = '[data-plugin-entry$="ui-settings"]'
 const MODE = webSnapshotMode()
+
+const replacementFault = { target: '', remaining: 0, attempts: 0 }
+const rename = fs.rename
+const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+  if (args[1] === replacementFault.target) {
+    replacementFault.attempts += 1
+    if (process.platform === 'win32' && replacementFault.remaining > 0) {
+      replacementFault.remaining -= 1
+      throw Object.assign(new Error('temporary settings replacement contention'), { code: 'EPERM' })
+    }
+  }
+  return rename(...args)
+})
+// Loader imports native ESM outside Vitest's module mock registry.
+syncBuiltinESMExports()
 
 describe('web e2e: settings modal and General preferences', () => {
   let scaffold: WebScaffold
@@ -45,8 +61,19 @@ describe('web e2e: settings modal and General preferences', () => {
   }, 120_000)
 
   afterAll(async () => {
-    await browser?.close()
-    await scaffold?.close()
+    try {
+      await browser?.close()
+      await scaffold?.close()
+    } finally {
+      renameSpy.mockRestore()
+      syncBuiltinESMExports()
+    }
+  })
+
+  afterEach(() => {
+    replacementFault.target = ''
+    replacementFault.remaining = 0
+    replacementFault.attempts = 0
   })
 
   it('opens the settings dialog, switches sections, and closes by every path', async () => {
@@ -184,10 +211,15 @@ describe('web e2e: settings modal and General preferences', () => {
     await page.getByRole('button', { name: '设置', exact: true }).click()
     const initialDialog = page.getByRole('dialog', { name: '设置' })
     const darkCube = initialDialog.getByRole('button', { name: '深色' })
+    replacementFault.target = join(scaffold.harnessHome, 'settings.yaml')
+    replacementFault.remaining = 2
     await darkCube.click()
     await expect.poll(() => darkCube.getAttribute('aria-pressed'), { timeout: 5_000 }).toBe('true')
     await expect.poll(async () => readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8'), { timeout: 5_000 })
       .toMatch(/ui-theme:\n\s+preference: dark/)
+    expect(replacementFault.attempts).toBeGreaterThanOrEqual(process.platform === 'win32' ? 3 : 1)
+    expect(replacementFault.remaining).toBe(process.platform === 'win32' ? 0 : 2)
+    replacementFault.target = ''
     await page.keyboard.press('Escape')
 
     // Hold real plugin bundles so the shell-owned loading page remains observable.

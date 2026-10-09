@@ -3,12 +3,10 @@
 // api-proxy recomputes presentation views from logged args/result content)
 // must render with the same terminal card layout as bash and show the parsed exit-status
 // pill — not a generic console-fenced card. The seed is authored, not
-// recorded: its header line carries no `cwd`
-// field (seedSession writes the session cwd itself, and a Windows temp path
-// substituted into the header would not round-trip through its JSON parse),
-// and no event references the workspace, so the lane replays on any host
+// recorded: its header leaves `cwd` to seedSession, and no event references
+// the workspace, so the lane replays on any host
 // with a usable `pwsh` — the lane mounts the pwsh stack through an overlay
-// (the shipped tree keeps the bash stack).
+// (the shipped POSIX tree keeps the bash stack).
 import { spawnSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -92,10 +90,6 @@ describe.skipIf(MODE === 'record' || !HAS_PWSH)('web e2e: pwsh calls use the bas
     expect(text).toContain('Get-Item : Cannot find path')
     expect(text).not.toContain('[exit code: 1]')
     const snapshot = (await captureStableAria(page, '[data-terminal]', scaffold.workspaceCwd))
-      // normalizeAria collapses the workspace basename with a '/' split, which
-      // misses Windows temp paths; collapse it here too (a no-op on POSIX) so
-      // the golden is platform-independent.
-      .split(scaffold.workspaceCwd.split(/[\\/]/).pop()!).join('{{workspace}}')
       .split(SEED_ID).join('{{seededId}}')
     await compareOrRefreshGolden(TERMINAL_EXPECTED, snapshot, MODE)
   }, 60_000)

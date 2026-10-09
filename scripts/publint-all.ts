@@ -7,10 +7,11 @@ import {
   statSync,
 } from 'node:fs'
 import { availableParallelism } from 'node:os'
-import { dirname, relative, resolve, sep } from 'node:path'
+import { dirname, posix, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 import { publint, type Message, type PackFile } from 'publint'
 import { formatMessage } from 'publint/utils'
+import ts from 'typescript'
 
 const CONCURRENCY_ENV = 'DSH_PUBLINT_CONCURRENCY'
 const repositoryRoot = resolve(import.meta.dirname, '..')
@@ -103,16 +104,49 @@ function addPath(path: string, paths: Set<string>): void {
   }
 }
 
+function missingRelativeImports(files: readonly PackFile[]): string[] {
+  const published = new Set(files.map(file => file.name))
+  const missing: string[] = []
+  for (const file of files) {
+    if (!/\.(?:cjs|js|mjs)$/.test(file.name)) continue
+    const source = typeof file.data === 'string' ? file.data : new TextDecoder().decode(file.data)
+    const imports = ts.preProcessFile(source, true, true).importedFiles
+    for (const imported of imports) {
+      if (!imported.fileName.startsWith('.')) continue
+      const base = posix.normalize(posix.join(posix.dirname(file.name), imported.fileName))
+      const candidates = posix.extname(base) === ''
+        ? [base, `${base}.cjs`, `${base}.js`, `${base}.mjs`, `${base}/index.cjs`, `${base}/index.js`, `${base}/index.mjs`]
+        : [base]
+      if (candidates.some(candidate => published.has(candidate))) continue
+      missing.push(`${file.name.slice('package/'.length)} -> ${imported.fileName}`)
+    }
+  }
+  return missing.sort()
+}
+
 async function runPublint(target: PackageTarget): Promise<PublintResult> {
   try {
+    const files = publicationFiles(target)
+    const missing = missingRelativeImports(files)
     const result = await publint({
       pkgDir: 'package',
-      pack: { files: publicationFiles(target) },
+      pack: { files },
     })
     const manifest = result.pkg as Record<string, unknown>
-    return result.messages.some(message => message.type === 'error')
-      ? { path: target.path, status: 'failed', messages: result.messages, manifest }
-      : { path: target.path, status: 'passed', messages: result.messages, manifest }
+    const hasPublintError = result.messages.some(message => message.type === 'error')
+    if (missing.length === 0 && !hasPublintError) {
+      return { path: target.path, status: 'passed', messages: result.messages, manifest }
+    }
+    const failure = missing.length > 0
+      ? `Published JavaScript references files omitted by package.json files:\n${missing.join('\n')}`
+      : undefined
+    return {
+      path: target.path,
+      status: 'failed',
+      messages: result.messages,
+      manifest,
+      ...(failure === undefined ? {} : { failure }),
+    }
   } catch (error: unknown) {
     return {
       path: target.path,

@@ -94,6 +94,18 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Application-owned execution directories for concurrent root Tasks. The
+    # Provider injects the base layer's subprocess service; the API row below
+    # consumes taskWorktrees only when a caller explicitly requests isolation.
+    - id: task-worktree-local
+      name: '@deepseek-ai/dsh-task-worktree-local'
+
+    # Inspect, commit, apply, and discard isolated Task worktrees. Keeping the
+    # provider before the gateway makes the complete Task review capability
+    # available when the transport starts serving browser requests.
+    - id: task-review-local
+      name: '@deepseek-ai/dsh-task-review-local'
+
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
     - id: api-gateway
@@ -218,6 +230,9 @@
 
     - id: ui-workspace
       name: '@deepseek-ai/dsh-client-ui-workspace'
+
+    - id: ui-task-review
+      name: '@deepseek-ai/dsh-client-ui-task-review'
 
     # Input triggers: the '/' | '@' pipeline (ui-input-trigger), the command surface over
     # it (ui-commands), and the two reference sources (ui-skill / ui-subagent).

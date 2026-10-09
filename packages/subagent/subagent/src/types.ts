@@ -12,9 +12,17 @@
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionEventType, SessionHeader, SessionId, SurfaceEventType } from '@deepseek-ai/dsh-session'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SubagentDescriptorData } from './descriptor.ts'
+import type { DelegatedPolicyOverrides } from './child-agent.ts'
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** Model-hidden provider whose execution validation is required before every activation publishes. */
+    'subagent/execution-provider': { readonly provider: string }
+  }
+}
 
 /** Identifies one accepted subagent run across its lifecycle event pair. */
 export type SubagentRunId = Branded<'SubagentRunId'>
@@ -37,10 +45,10 @@ export interface SubagentRunInfo {
   /** Unique identity shared with the paired terminal event. */
   readonly runId: SubagentRunId
   /**
-   * Provider name recorded when the child was first created. The provider may
-   * be absent when an accepted one-shot run becomes ready or a persisted
-   * Activation cold-resumes, because neither lifecycle depends on continued
-   * registration.
+   * Provider name recorded when the child was first created. Accepted one-shot
+   * runs and ordinary shared-child cold resumes do not require continued
+   * registration; explicit owned execution requires its recorded validator
+   * before publication.
    */
   readonly provider: string
   /** The child agent's id. */
@@ -189,6 +197,32 @@ export interface ContinuableCreateSpec {
    * `CreateAgentOptions.seed`: contiguous from seq 0, lossless JSON, balanced.
    */
   readonly seed?: readonly SessionEvent[]
+  /** Owned execution data requiring this provider's validation before every publication. */
+  readonly execution?: ContinuableExecutionSpec
+}
+
+/** One provider-owned initialization fact that adds no conversation surface row. */
+export type SubagentInitializationEvent = {
+  [K in Exclude<SessionEventType, SurfaceEventType>]: Readonly<Pick<SessionEvent<K>, 'type' | 'data'>>
+}[Exclude<SessionEventType, SurfaceEventType>]
+
+/** Detached execution inputs for the first activation of an owned workspace. */
+export interface ContinuableExecutionSpec {
+  /** Exact execution directory persisted in the child's immutable header. */
+  readonly cwd: string
+  /** Captured child authority, appended after any inherited history. */
+  readonly policies: DelegatedPolicyOverrides
+  /** Model-hidden execution facts appended before publication. */
+  readonly facts: readonly SubagentInitializationEvent[]
+}
+
+/** Actual unpublished session data presented for execution validation. */
+export interface ContinuableExecutionRequest {
+  readonly sessionId: SessionId
+  readonly parent: Agent
+  readonly meta: SessionHeader
+  readonly events: readonly SessionEvent[]
+  readonly signal: AbortSignal
 }
 
 /**
@@ -307,18 +341,25 @@ export interface SubagentProvider {
   start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>
   /**
    * OPTIONAL (continuable-creation capability): contribute the detached
-   * creation inputs that distinguish this provider's continuable children —
-   * only whether the child session is seeded with parent history. Method
+   * creation inputs: optional parent-history seed and owned execution data. Method
    * presence IS the capability: the service rejects continuable starts on
    * providers without it, while a provider that has it may still serve
    * ordinary one-shot delegations.
    *
-   * This is the provider's ONLY participation in a continuable child. The
-   * continuation manager owns identity reservation, composition, Agent
-   * creation, prompt delivery, cold resume, ownership, and disposal, so a
-   * provider never sees the child's Agent, handle, turns, or teardown.
+   * The continuation manager owns identity reservation, composition, Agent
+   * creation, prompt delivery, cold resume, ownership, and disposal. A provider
+   * supplying execution data also validates the unpublished session before
+   * each activation; it never owns the child's Agent, handle, turns, or teardown.
    * Distinct preparations may overlap; each follows its own signal and returns
    * data belonging only to `request.sessionId`.
    */
   prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  /**
+   * Validate provider-owned execution facts against the actual unpublished session and live workspace.
+   * Required when preparation supplies execution data; invoked on initial creation and cold resume.
+   * Missing registration or validation capability rejects publication. This method owns no Agent lifecycle.
+   * @param request - actual header, events, direct parent, and publication cancellation.
+   * @returns after recorded authority and execution identity have been verified.
+   */
+  validateContinuableExecution?(request: ContinuableExecutionRequest): Promise<void>
 }

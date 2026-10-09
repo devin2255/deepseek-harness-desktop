@@ -58,7 +58,7 @@ interface TerminalBackendSession {
 
 ## Send and retained output
 
-One live session accepts one active send. Its operation exposes a consuming output cursor for generic background jobs and one terminal result for a foreground caller. `TerminalReadResult` separately pages the bounded session scrollback.
+One live session accepts one active send. Its operation exposes a consuming output cursor for generic background jobs and one terminal result for a foreground caller. Cancellation accepts only its first request and does not prove command exit. `TerminalReadResult` separately pages the bounded session scrollback.
 
 ```ts type-equiv
 /** Live backend-owned send; exactly one may be active per PTY session. */
@@ -67,7 +67,7 @@ interface TerminalSendOperation {
   done: Promise<TerminalSendResult>
   /** Consume output produced since the prior call. */
   readOutput(): TerminalSendRead
-  /** Request `SIGINT`; returns false after the operation settled. */
+  /** Request one native terminal interrupt; false after settlement or an earlier request. */
   cancel(): boolean
 }
 ```

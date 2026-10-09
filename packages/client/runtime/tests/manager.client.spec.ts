@@ -76,6 +76,65 @@ describe('instances', () => {
 })
 
 describe('list lifecycle', () => {
+  it('marks retained rows unsynchronized on disconnect even without pending interactions', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1)] as never[] }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+    manager.handleDisconnected()
+    expect(manager.getListSnapshot()).toMatchObject({ phase: 'ready', state: 'loading' })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+  })
+
+  it('starts a new baseline after reconnect while an older list pull remains pending', async () => {
+    const api = new FakeApiClient()
+    const old = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    const fresh = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    api.onList = () => old.promise
+    const manager = new SessionManager(api, fakeRemote())
+    const oldRequest = manager.refreshList()
+    manager.handleDisconnected()
+    api.onList = () => fresh.promise
+    manager.handleConnected()
+    const newRequest = manager.refreshList()
+    expect(api.callsOf('session.list')).toHaveLength(2)
+
+    old.resolve(ok({ items: [summary(S1)] as never[] }))
+    await oldRequest
+    expect(manager.getListSnapshot()).toMatchObject({ phase: 'pending', state: 'loading', items: [] })
+    expect(manager.refreshList()).toBe(newRequest)
+    manager.handleHostEnvelope({
+      rpcId: 'new-generation' as never,
+      payload: { type: 'host/session-added', sessionId: S2, blank: false },
+    })
+    fresh.resolve(ok({ items: [] }))
+    await newRequest
+    expect(manager.getListSnapshot()).toMatchObject({ phase: 'ready', state: 'idle', error: null })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S2])
+  })
+
+  it.each(['success', 'failure', 'rejection'] as const)('ignores obsolete list %s after the new baseline fails', async (outcome) => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S2)] as never[] }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+    const old = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    api.onList = () => old.promise
+    const oldRequest = manager.refreshList()
+    manager.handleDisconnected()
+    const failure = { code: 'internal' as const, message: 'fresh pull failed', details: {} }
+    api.onList = () => Promise.resolve(err(failure))
+    manager.handleConnected()
+    expect(api.callsOf('session.list')).toHaveLength(3)
+    await manager.refreshList()
+    if (outcome === 'success') old.resolve(ok({ items: [summary(S1)] as never[] }))
+    else if (outcome === 'failure') old.resolve(err({ ...failure, message: 'obsolete failure' }))
+    else old.reject(new Error('obsolete transport failure'))
+    await oldRequest
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'error', error: failure })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S2])
+  })
+
   it('single-flights refreshList and preserves the Host baseline order', async () => {
     const api = new FakeApiClient()
     const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()

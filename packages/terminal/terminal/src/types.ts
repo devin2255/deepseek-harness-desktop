@@ -96,7 +96,7 @@ export interface TerminalSendOperation {
   done: Promise<TerminalSendResult>
   /** Consume output produced since the prior call. */
   readOutput(): TerminalSendRead
-  /** Request `SIGINT`; returns false after the operation settled. */
+  /** Request one native terminal interrupt; false after settlement or an earlier request. */
   cancel(): boolean
 }
 

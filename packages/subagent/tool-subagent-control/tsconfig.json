@@ -8,6 +8,13 @@
     "src"
   ],
   "references": [
+    { "path": "../../core/agent" },
+    { "path": "../../sandbox/sandbox-policy" },
+    { "path": "../../session/session-persistence" },
+    { "path": "../subagent-spawn-in-process" },
+    { "path": "../../task/task" },
+    { "path": "../../task/task-review" },
+    { "path": "../../task/task-worktree" },
     {
       "path": "../../../vendor/cosmokit"
     },

@@ -97,6 +97,24 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'taskReview',
+    pkg: 'task-review',
+    title: 'Task worktree review and delivery',
+    mode: 'seam',
+    implementations: ['task-review-local'],
+    consumers: ['apiproxy', 'sdk-jsonrpc-server'],
+    note: 'Providers inspect and mutate only the recorded application-owned worktree assignment; Host consumers authorize lifecycle transitions and persist completed delivery receipts.',
+  },
+  {
+    key: 'taskWorktrees',
+    pkg: 'task-worktree',
+    title: 'Application-owned Task worktrees',
+    mode: 'seam',
+    implementations: ['task-worktree-local'],
+    consumers: ['apiproxy'],
+    note: 'The Host requests isolated Git checkouts; the Provider returns immutable assignment facts for the Task log and inspects live registration without repair.',
+  },
+  {
     key: 'attachments',
     pkg: 'attachment',
     title: 'Durable binary attachment storage',
@@ -355,6 +373,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Folds revisioned objective state from the session log and keeps live continuation activation process-local.',
   },
   {
+    key: 'tasks',
+    pkg: 'task',
+    title: 'Root task projection seam',
+    mode: 'seam',
+    implementations: ['task-session'],
+    consumers: ['apiproxy'],
+    note: 'Projects one root Session and its uninterrupted subagent descendants into durable acceptance state plus generation-scoped activity and attention.',
+  },
+  {
     key: 'e2b',
     pkg: 'e2b',
     title: 'E2B sandbox lifecycle owner',
@@ -368,7 +395,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Subprocess seam',
     mode: 'seam',
     implementations: ['subprocess-local', 'subprocess-e2b'],
-    consumers: ['bash-local', 'bash-sandbox', 'terminal-bash', 'lsp-stdio', 'subagent-acp', 'subagent-codex', 'subagent-claude-code'],
+    consumers: ['bash-local', 'bash-sandbox', 'terminal-shell', 'lsp-stdio', 'subagent-acp', 'subagent-codex', 'subagent-claude-code'],
     note: 'The bash executors, the PTY shell backend, the LSP host, and the out-of-process ACP, Codex, and Claude Code subagent backends spawn through ctx.subprocess; the service owns process coordinates, tree/session lifetime, stdio dispositions, terminal mechanics, and kill escalation.',
   },
   {
@@ -393,7 +420,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'terminal',
     title: 'Persistent PTY session registry',
     mode: 'seam',
-    implementations: ['terminal-bash'],
+    implementations: ['terminal-shell'],
     consumers: ['tool-terminal'],
     note: 'The registry owns exact-Agent session identity and cleanup; backends own terminal mechanics, while tool-terminal exposes the owner-scoped model tools.',
   },
@@ -403,7 +430,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Process-sandbox seam',
     mode: 'seam',
     implementations: ['sandbox-local'],
-    consumers: ['bash-sandbox', 'terminal-bash'],
+    consumers: ['bash-sandbox', 'terminal-shell'],
     note: 'Consumers hand over the exact argv they are about to spawn; same-world backends wrap it under a per-call policy and report enforcement.',
   },
   {
@@ -412,7 +439,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Sandbox policy home',
     mode: 'core',
     implementations: [],
-    consumers: ['bash-sandbox', 'fs-sandbox', 'terminal-bash'],
+    consumers: ['bash-sandbox', 'fs-sandbox', 'terminal-shell'],
     note: 'The one home for the deployment default mode + workspace root; only the sandboxed executor and provider read the service (the tool layers use the pure `sandbox/mode` fold it also exports). Both enforcing families read it so bash and fs cannot confine to different roots.',
   },
   {

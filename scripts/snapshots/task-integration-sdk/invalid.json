@@ -1,0 +1,289 @@
+[
+  {
+    "name": "empty-history",
+    "path": "integrations",
+    "value": []
+  },
+  {
+    "name": "non-array-history",
+    "path": "integrations",
+    "value": {}
+  },
+  {
+    "name": "non-object-node",
+    "path": "integrations/0",
+    "value": null
+  },
+  {
+    "name": "unknown-node-field",
+    "path": "integrations/0/extra",
+    "value": true
+  },
+  {
+    "name": "negative-sequence",
+    "path": "integrations/0/callSeq",
+    "value": -1
+  },
+  {
+    "name": "future-sequence",
+    "path": "integrations/0/callSeq",
+    "value": 8
+  },
+  {
+    "name": "wrong-node-id",
+    "path": "integrations/0/id",
+    "value": "other:integration:1"
+  },
+  {
+    "name": "unordered-sequence",
+    "path": "integrations/1/callSeq",
+    "value": 0
+  },
+  {
+    "name": "duplicate-node",
+    "path": "integrations/1/id",
+    "value": "task-root:integration:1"
+  },
+  {
+    "name": "negative-start",
+    "path": "integrations/0/startedAt",
+    "value": -1
+  },
+  {
+    "name": "negative-finish",
+    "path": "integrations/0/finishedAt",
+    "value": -1
+  },
+  {
+    "name": "non-array-writers",
+    "path": "integrations/0/writerSessionIds",
+    "value": null
+  },
+  {
+    "name": "blank-writer",
+    "path": "integrations/0/writerSessionIds",
+    "value": [
+      " "
+    ]
+  },
+  {
+    "name": "duplicate-writer",
+    "path": "integrations/0/writerSessionIds",
+    "value": [
+      "writer-a",
+      "writer-a"
+    ]
+  },
+  {
+    "name": "non-object-outcome",
+    "path": "integrations/0/outcome",
+    "value": null
+  },
+  {
+    "name": "unknown-outcome",
+    "path": "integrations/0/outcome/kind",
+    "value": "success"
+  },
+  {
+    "name": "pending-extra",
+    "path": "integrations/1/outcome/extra",
+    "value": true
+  },
+  {
+    "name": "unconfirmed-extra",
+    "path": "integrations/2/outcome/extra",
+    "value": true
+  },
+  {
+    "name": "blank-failure",
+    "path": "integrations/3/outcome/message",
+    "value": " "
+  },
+  {
+    "name": "failure-extra",
+    "path": "integrations/3/outcome/extra",
+    "value": true
+  },
+  {
+    "name": "missing-result",
+    "path": "integrations/0/outcome/result",
+    "value": null
+  },
+  {
+    "name": "wrong-result-kind",
+    "path": "integrations/0/outcome/result/kind",
+    "value": "integrated"
+  },
+  {
+    "name": "extra-result",
+    "path": "integrations/0/outcome/result/extra",
+    "value": true
+  },
+  {
+    "name": "foreign-task",
+    "path": "integrations/0/outcome/result/taskId",
+    "value": "other"
+  },
+  {
+    "name": "foreign-workspace",
+    "path": "integrations/0/outcome/result/workspaceId",
+    "value": "other"
+  },
+  {
+    "name": "bad-operation",
+    "path": "integrations/0/outcome/result/operationId",
+    "value": "invalid"
+  },
+  {
+    "name": "nil-operation",
+    "path": "integrations/0/outcome/result/operationId",
+    "value": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+    "name": "uppercase-operation",
+    "path": "integrations/0/outcome/result/operationId",
+    "value": "FFFFFFFF-FFFF-4FFF-8FFF-FFFFFFFFFFFF"
+  },
+  {
+    "name": "max-operation",
+    "path": "integrations/0/outcome/result/operationId",
+    "value": "ffffffff-ffff-ffff-ffff-ffffffffffff"
+  },
+  {
+    "name": "bad-revision",
+    "path": "integrations/0/outcome/result/reviewRevision",
+    "value": "HEAD"
+  },
+  {
+    "name": "bad-head-before",
+    "path": "integrations/0/outcome/result/headBefore",
+    "value": "HEAD"
+  },
+  {
+    "name": "empty-contributors",
+    "path": "integrations/0/outcome/result/contributors",
+    "value": []
+  },
+  {
+    "name": "non-object-contributor",
+    "path": "integrations/0/outcome/result/contributors/0",
+    "value": null
+  },
+  {
+    "name": "extra-contributor",
+    "path": "integrations/0/outcome/result/contributors/0/extra",
+    "value": true
+  },
+  {
+    "name": "wrong-contributor",
+    "path": "integrations/0/outcome/result/contributors/0/sessionId",
+    "value": "writer-b"
+  },
+  {
+    "name": "foreign-descendants",
+    "path": "descendantSessionIds",
+    "value": []
+  },
+  {
+    "name": "blank-branch",
+    "path": "integrations/0/outcome/result/contributors/0/branch",
+    "value": " "
+  },
+  {
+    "name": "bad-writer-commit",
+    "path": "integrations/0/outcome/result/contributors/0/commit",
+    "value": "HEAD"
+  },
+  {
+    "name": "bad-writer-revision",
+    "path": "integrations/0/outcome/result/contributors/0/reviewRevision",
+    "value": "HEAD"
+  },
+  {
+    "name": "foreign-conflict",
+    "path": "integrations/0/outcome/result/conflictingSessionId",
+    "value": "writer-b"
+  },
+  {
+    "name": "empty-paths",
+    "path": "integrations/0/outcome/result/paths",
+    "value": []
+  },
+  {
+    "name": "absolute-path",
+    "path": "integrations/0/outcome/result/paths",
+    "value": [
+      "/tmp/a"
+    ]
+  },
+  {
+    "name": "drive-path",
+    "path": "integrations/0/outcome/result/paths",
+    "value": [
+      "C:/tmp/a"
+    ]
+  },
+  {
+    "name": "parent-path",
+    "path": "integrations/0/outcome/result/paths",
+    "value": [
+      "../a"
+    ]
+  },
+  {
+    "name": "backslash-path",
+    "path": "integrations/0/outcome/result/paths",
+    "value": [
+      "src\\a"
+    ]
+  },
+  {
+    "name": "nul-path",
+    "path": "integrations/0/outcome/result/paths",
+    "value": [
+      "src/\u0000a"
+    ]
+  },
+  {
+    "name": "negative-conflict-time",
+    "path": "integrations/0/outcome/result/detectedAt",
+    "value": -1
+  },
+  {
+    "name": "bad-head-after",
+    "path": "integrations/4/outcome/result/headAfter",
+    "value": "HEAD"
+  },
+  {
+    "name": "negative-integrated-time",
+    "path": "integrations/4/outcome/result/integratedAt",
+    "value": -1
+  },
+  {
+    "name": "resolution-on-success",
+    "path": "integrations/4/resolvedBy",
+    "value": "task-root:integration:5"
+  },
+  {
+    "name": "missing-coverage",
+    "path": "integrations/0/resolvedBy",
+    "value": null
+  },
+  {
+    "name": "wrong-resolution",
+    "path": "integrations/0/resolvedBy",
+    "value": "task-root:integration:2"
+  },
+  {
+    "name": "unrelated-resolution",
+    "path": "integrations/5/resolvedBy",
+    "value": "task-root:integration:5"
+  },
+  {
+    "name": "later-coverage-missing",
+    "path": "integrations/4/writerSessionIds",
+    "value": [
+      "writer-b"
+    ]
+  }
+]

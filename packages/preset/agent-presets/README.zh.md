@@ -16,6 +16,7 @@
 - `ctx.agentPresets.mount(agentCtx, id?): Promise<AgentPreset>` 用一个 preset 组装一个 agent——确保其常驻挂载（并发去重）并把 agent 的 scope key 认父到它——返回该 preset 供调用方记录。对损坏的 preset 直接以发现时记下的原因拒绝，所以每种不可加载的形态都在加载器介入之前以同一方式失败。
 - `ctx.agentPresets.composeFrom(agentCtx, parentCtx): string | undefined` 让一个 agent 加入另一个 agent 已在运行的常驻组装，返回所加入的 preset id——父方未加入任何 preset 时返回 `undefined`，那是无 roster 的部署，不是错误。这是认父而非挂载，因此同步、且自身没有组装失败模式；调用方用错（上下文无 scope、agent 已加入过）仍会拒绝。
 - `ctx.agentPresets.composedPreset(agentCtx): string | undefined` 某个**活着的** agent 正在运行的 preset，从其 scope 链读取而不是从其会话读取——对于持久化 header 尚在构建中的 agent，这是唯一能拿到的答案。
+- `ctx.agentPresets.composition(agentCtx): PresetComposition | undefined` 所加入常驻挂载的插件身份和实际启用状态，在该代际完成挂载时捕获；不返回插件配置或凭据。
 - `ctx.agentPresets.recompose(agentCtx, id): Promise<AgentPreset>` 把一个 agent 重链到另一个 preset 的常驻组装。仅在该 agent 尚无任何产出时合法——**由调用方负责该检查**；新挂载在链移动之前确保完成，失败时 agent 原封不动。与 `mount()` 一样拒绝损坏的 preset。
 - `ctx.agentPresets.standingKeyFor(id?): Promise<ScopeKey>` 没有 agent 的宿主读取方（冷读记录）解析 preset 注册所用的常驻 scope key；确保挂载而不启动任何 agent、会话或轮次。与 `mount()` 一样拒绝损坏的 preset。
 - `ctx.agentPresets.roots: readonly PresetRoot[]` 本 roster 实际扫描的根目录——全部已配置根目录按序在前，随后是推导出的 harness home 根目录。它不是 `config.roots`：判断「是否已组装 roster」应读它，从而由同一处推导决定。
@@ -42,11 +43,11 @@ subagent 的子 agent 通过 `composeFrom()` 加入其父方的常驻组装，�
 
 创建头部记录的是会话**以什么开始**，`resolveSessionPreset(session)` 给出的才是它**实际运行的**。空白会话一旦切换过，两者就不同，因此所有重建路径——选择器读取的摘要、resume、fork——都走解析，而非直接读头部。
 
-头部保持冻结，因为它是创建期事实。切换以 `agent-preset/selected` 会话事件记录，在替换提交之后追加；这正是 model-visible ⟺ logged 规则的要求：preset 决定模型看到的工具 schema 与提示词段落，因此必须能从日志重建。服务会把这项已提交事实重新发为不带 scope 的 cordis 事件 `agent-preset/selected(sessionId, agentPreset)`，其声明位于 client-safe 的 `./types` 出口，使远端消费方无需导入 Host 运行时类型即可让会话派生状态失效。只读头部会让切换过的会话按创建时的组装重建，从而重放新工具集无法执行的历史——这正是「仅空白可切」那道锁要防的危险。
+头部保持冻结，因为它是创建期事实。已加入的 agent 发布时，若最新日志里的组成不同，便以 `agent-preset/composed` 记录挂载的插件身份；恢复的 agent 若组成改变，也会在下一个轮次前记录新身份。空白会话切换在重链提交后追加一条 `agent-preset/selected`，原子记录所选 preset 与这些插件身份。两个事件都不含插件配置值。preset 决定模型可见的工具 schema 和提示词段落，因此所选 id 必须能从日志重建。服务把已提交的切换重新发为不带 scope 的 cordis 事件 `agent-preset/selected(sessionId, agentPreset)`，声明位于 client-safe 的 `./types` 出口，让远端消费方失效该会话的派生状态。只读头部会把已切换会话按创建时的组成重建。
 
 ### 切换空白 agent
 
-`recompose()` 先卸载已装入的子树、再装入新的，因为两份组装无法共存——它们会把相同的工具名注册进同一个层。挂载失败会恢复先前的组装，而不是让 agent 一无所有；未知 id 则在任何东西被拆除之前就被拒绝。
+`recompose()` 先确保新的常驻挂载可用，再把 agent 的 scope 父链重指向它；旧代际仍服务其他已加入的 agent。新挂载失败时父链不变；未知 id 同样在重链前被拒绝。
 
 "仅限尚未产出任何内容的 agent"是一条产品规则而非机制约束：在对话进行中调换工具，会留下新组装无法执行的、已被记录的工具调用。该规则由网关在传输层执行（[`dsh-apiproxy`](../../host/apiproxy/README.md) 返回 `agent-preset-locked`），因为会话历史在那里才拿得到。
 

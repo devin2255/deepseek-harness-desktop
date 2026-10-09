@@ -16,17 +16,17 @@ The existing `bash`, `read`, `write`, and `edit` tools remain the reliable defau
 
 The optional `packages/terminal/` capability family exposes agent-owned, persistent, line-oriented PTY sessions. It follows the repository's [capability pattern](../../implemented/architecture/2026-06-13-capability-seams.md), coexists with the existing command and filesystem tools, and does not change `agent-loop`.
 
-The implementation supports interactive shells and line-oriented REPLs on Linux and macOS. Full-screen terminal applications, keystroke sequences, BEL-triggered control flow, session restoration after process loss, and cross-agent session sharing are explicitly deferred.
+The implementation supports interactive shells and line-oriented REPLs on Linux, macOS, and Windows; the [PowerShell decision](2026-10-09-persistent-powershell-terminal.md) owns Windows startup and confined interruption. Full-screen terminal applications, keystroke sequences, BEL-triggered control flow, session restoration after process loss, and cross-agent session sharing are explicitly deferred.
 
 ### Package topology
 
 | Package | Role | ctx key |
 |---|---|---|
 | `dsh-terminal` | `TerminalSessionService`, branded `TerminalSessionId`, backend registry, owner-scoped session contract, and result types | `ctx.terminals` |
-| `dsh-terminal-bash` | Persistent-shell backend over `ctx.subprocess.spawnTerminal()`: readiness, bounded terminal buffers, sandbox resolution, and owner-aware session lifecycle | registers a backend on `ctx.terminals` |
+| `dsh-terminal-shell` | Persistent-shell backend over `ctx.subprocess.spawnTerminal()`: readiness, bounded terminal buffers, sandbox resolution, and owner-aware session lifecycle | registers a backend on `ctx.terminals` |
 | `dsh-tool-terminal` | Six model-facing tools, task-runtime integration for background sends, guidance, and UI render intents | registers on `ctx.tools` |
 
-Readiness remains PTY-backend behavior, not a second public contract. The terminal-process provider supplies only substrate facts such as the foreground process group and whether it can prove that group is waiting on input; `dsh-terminal-bash` combines those facts with prompt and silence evidence into the common send result.
+Readiness remains PTY-backend behavior, not a second public contract. The terminal-process provider supplies only substrate facts such as the foreground process group and whether it can prove that group is waiting on input; `dsh-terminal-shell` combines those facts with prompt and silence evidence into the common send result.
 
 ### Agent ownership and identity
 
@@ -38,14 +38,14 @@ Agent-scope disposal closes registrations first, then awaits quiescent teardown 
 
 ### Security and process boundary
 
-A registered `shell` backend constrains how a terminal starts; it does not constrain commands typed after startup. `dsh-terminal-bash` therefore applies two protections before spawning:
+A registered `shell` backend constrains how a terminal starts; it does not constrain commands typed after startup. `dsh-terminal-shell` therefore applies two protections before spawning:
 
 - It supplies only terminal-specific environment overrides; the mounted subprocess provider applies the shared credential-shaped-name scrub before merging them.
 - It requires the shared `ctx.sandboxPolicy`. At spawn, the backend resolves the owner's effective session mode over the deployment default; `danger-full-access` starts the shell directly, while confined modes require a same-world `ctx.sandbox` provider and wrap the shell argv once. That mode and workspace root remain the process boundary for the PTY lifetime. A write that would change the effective `sandbox/mode` is rejected before commit while the owner has any open PTY or unpublished spawn, with an instruction to wait for creation to settle and close those sessions first; same-effective-mode writes remain valid. The pending reservation spans backend setup through publication, so there is no race in which a wider terminal appears after a downgrade. `danger-full-access` is the existing explicit unconfined choice rather than a PTY-specific bypass.
 
 Sandboxing confines local process effects but does not make arbitrary shell input safe: network calls and other external side effects remain governed by deployment policy. Tool descriptions state that PTY sessions are less auditable than one-shot tools and should be used only when persistence or interactive stdin is necessary.
 
-The local subprocess terminal primitive uses only public `node-pty` capabilities: child PID, `data` and `exit` notifications, `write`, and `kill`. It does not assume access to the native master fd or call `waitpid` from TypeScript. Platform process inspectors below that primitive derive foreground process groups and parent/child identity from `/proc` on Linux and `ps` on macOS. The [portable execution-world decision](../architecture/2026-07-28-portable-execution-world-consumers.md) owns this process/consumer split.
+The POSIX local subprocess terminal primitive uses only public `node-pty` capabilities: child PID, `data` and `exit` notifications, `write`, and `kill`. It does not assume access to the native master fd or call `waitpid` from TypeScript. Platform process inspectors below that primitive derive foreground process groups and parent/child identity from `/proc` on Linux and `ps` on macOS. Windows allocation and cleanup use [ConPTY Job ownership](../architecture/2026-10-08-windows-conpty-job-ownership.md), without POSIX foreground identities. The [portable execution-world decision](../architecture/2026-07-28-portable-execution-world-consumers.md) owns this process/consumer split.
 
 ### Six model-facing tools
 
@@ -60,11 +60,11 @@ The local subprocess terminal primitive uses only public `node-pty` capabilities
 
 The UI render contract is exact and location-free. `terminal_send` uses terminal call/result cards only for foreground sends; its background form is generic `execute`. `terminal_open`, `terminal_read`, `terminal_signal`, `terminal_close`, and `terminal_list` use generic `execute`, `read`, `execute`, `delete`, and `read` cards respectively. No PTY tool emits `locations`.
 
-`terminal_send({ sessionId, text, submit?, run_in_background? })` treats `text` as UTF-8 bytes and resolves `submit` to `true` in the tool implementation. When `submit` is true it writes the platform Enter sequence after the text; when false it writes only the text, allowing control characters and REPL fragments without hidden content heuristics. Cancellation marks queued input before signaling the real foreground group, so input cannot execute if an asynchronous pre-write inspection settles afterward. The canceled send retains its reservation until asynchronous foreground signalling settles, so a successor cannot become that signal's target. `enableRunInBackground` defaults to true; false removes `run_in_background` from the schema and rejects the same undeclared argument if a caller forces it through execution.
+`terminal_send({ sessionId, text, submit?, run_in_background? })` treats `text` as UTF-8 bytes and resolves `submit` to `true` in the tool implementation. When `submit` is true it writes the platform Enter sequence after the text; when false it writes only the text, allowing control characters and REPL fragments without hidden content heuristics. Cancellation marks queued input before requesting [native interruption](2026-10-09-terminal-interruption-results.md), so input cannot execute if an asynchronous pre-write inspection settles afterward. The POSIX Bash backend still delivers real foreground `SIGINT`. Only the first cancellation is accepted, and the canceled send retains its reservation until asynchronous interruption settles, so a successor cannot become its target. `enableRunInBackground` defaults to true; false removes `run_in_background` from the schema and rejects the same undeclared argument if a caller forces it through execution.
 
 Foreground sends return a bounded rendered delta and two independent facts: `waitReason` (`stdin_read | inferred_idle | timeout | session_exit`) and `sessionStatus` (`running` or `exited` with exit code or signal). `session_exit` refers to the PTY's top-level shell process, not an arbitrary foreground command whose status the shell consumes. A timeout never implies process exit. `dsh-tool-terminal.maxResultBytes` defaults to 262144, rejects values below 64 so creation acknowledgements retain registry-issued ids, and caps each single-text UTF-8 result after normalized tool or pipeline errors, wait, session, pagination, truncation, generic task-status wrappers, policy denials or short-circuits, and post-execute replacements or blocks; the terminal definitions' last-mile `finalizeContent` callback leaves deliberately structured multi-block policy content unchanged. The renderer reserves suffix space and preserves code-point boundaries instead of treating the backend payload cap as the final model bound.
 
-With `run_in_background: true`, `dsh-tool-terminal` registers the in-flight send on `ctx.jobs` and returns immediately with `jobId`. The producer places `maxResultBytes` on the task snapshot so `job_output`, terminal kill status, and completion notices enforce the same complete-result cap after generic metadata. `job_output(wait: true)` waits, reads incremental output, and records the final result; `job_kill` resolves the current foreground PGID and delivers a real `SIGINT`, including when the application has disabled terminal `ISIG`, and escalates only through the PTY backend's owned teardown path. If the task surface is absent, background mode fails before writing input. No PTY-specific `sleep` tool or general wake-up API is added.
+With `run_in_background: true`, `dsh-tool-terminal` registers the in-flight send on `ctx.jobs` and returns immediately with `jobId`. The producer places `maxResultBytes` on the task snapshot so `job_output`, terminal kill status, and completion notices enforce the same complete-result cap after generic metadata. `job_output(wait: true)` waits, reads incremental output, and records the final result; `job_kill` requests native interruption (real foreground `SIGINT` on POSIX, including raw mode; Ctrl+C input on Windows) and escalates only through the PTY backend's owned teardown path. If the task surface is absent, background mode fails before writing input. No PTY-specific `sleep` tool or general wake-up API is added.
 
 `terminal_read` pages backward from the newest retained line. The backend enforces both line and UTF-8 byte caps on retained scrollback and the returned page payload, so one oversized line cannot bypass the backend bound; the tool then caps the fully rendered page including pagination and truncation metadata. `truncated` distinguishes retention loss from an ordinary viewport delta.
 
@@ -77,6 +77,8 @@ The local backend first recognizes a private OSC prompt marker emitted by its co
 On Linux, the inspector reads the shell's terminal foreground PGID from `/proc/<shellPid>/stat`, enumerates every process and thread in that process group, and probes their current syscalls. A positive Tier 1 result requires an observed stdin wait: direct `read(0)`, a permitted read of a `select`/`pselect6` or `poll`/`ppoll` argument containing fd 0, or an epoll interest list containing fd 0. A wait already present before terminal input is not post-write readiness: the same PGID must be observed outside that wait before re-entering it, while a changed foreground PGID is new evidence. Unreadable process memory and unrecognized syscalls are misses, never positive guesses. Architecture tables contain only syscall numbers defined by the corresponding Linux UAPI; unsupported architectures skip Tier 1.
 
 On macOS there is no exact syscall tier. Output silence returns `inferred_idle` for any foreground process group, including Python and `gdb`; `ps`-derived terminal PGID is used for signaling, not as proof that only the shell can be idle. Pure process-inspector logic is injectable and unit-tested on Linux, while a macOS CI job exercises the real PTY and process-table path.
+
+Prompt readiness requires a currently observed foreground group matching the shell group. Two missing group values are not evidence of that relationship, including before startup first captures a shell group. When inspection cannot identify a group, prompt text alone leaves silence or timeout as the only readiness result; later observed ownership restores exact prompt readiness.
 
 Tier 2 returns `inferred_idle` after `idleSilenceMs` without output. A sleeping or network-blocked command can therefore look ready. When a prompt marker was already seen, Tier 2 waits a further `handoffGraceMs` so a bash foreground handoff that lands on the silence boundary still settles as the exact `stdin_read` attribution instead of the weaker inference; the grace is a deployment-owned config field validated to cover at least one `pollIntervalMs`, because a grace shorter than the poll period cannot contain a single readiness poll and so cannot change any outcome. It bounds only sends that saw a marker, so its cost is the interactive return latency of that one case rather than every send. Tier 3 returns `timeout` after `timeoutMs` so a foreground tool call cannot hold the agent indefinitely. The result preserves the distinction; callers may wait through `ctx.jobs`, signal the foreground group, or inspect from another session.
 
@@ -109,7 +111,7 @@ plugins:
       workspaceRoot: .
   '@deepseek-ai/dsh-terminal':
   '@deepseek-ai/dsh-subprocess-local':
-  '@deepseek-ai/dsh-terminal-bash':
+  '@deepseek-ai/dsh-terminal-shell':
     config:
       scrollbackLines: 10000
       scrollbackMaxBytes: 4194304
@@ -126,7 +128,7 @@ plugins:
       maxResultBytes: 262144
 ```
 
-The package ships concise tool guidance explaining persistent state, owner isolation, uncertain idle results, cleanup, and the preference for existing one-shot tools when interaction is unnecessary. It does not mount PTY in the base shipped examples: PTY is opt-in through the dedicated composition, while ACP and headless snapshot overlays exercise it. Within an enabled `dsh-tool-terminal` instance, the six tools and `run_in_background` are enabled by default; deployments may disable only the background argument with config.
+The package ships concise tool guidance explaining persistent state, owner isolation, uncertain idle results, cleanup, and the preference for existing one-shot tools when interaction is unnecessary. The base shipped examples keep PTY opt-in through dedicated compositions; the local desktop profile mounts it explicitly, while ACP and headless snapshot overlays exercise it. Within an enabled `dsh-tool-terminal` instance, the six tools and `run_in_background` are enabled by default; deployments may disable only the background argument with config.
 
 ### Deferred work
 
@@ -134,7 +136,6 @@ The package ships concise tool guidance explaining persistent state, owner isola
 - Declarative per-agent startup requires an agent-setup composition point; plugin-load global sessions remain prohibited.
 - Session restoration across harness-process loss requires an out-of-process owner and a versioned protocol.
 - Network-egress policy and rollback of external side effects are broader than PTY and remain separate security work.
-- Windows/ConPTY support requires a backend with Windows-native process ownership and signaling semantics.
 
 ## Alternatives considered
 
@@ -146,7 +147,7 @@ The package ships concise tool guidance explaining persistent state, owner isola
 
 **Signal every member of the root PID's POSIX session.** Rejected. `node-pty` may expose a helper PID whose session belongs to the launcher, so SID-wide teardown can signal unrelated harness or desktop processes. A PID-identity-fenced descendant tree is narrower and safe by construction.
 
-**Publish `TerminalIdleDetector` as a replaceable registry.** Rejected. Substrate-specific foreground facts come from the mounted terminal-process primitive, while prompt/silence readiness remains one private policy in `dsh-terminal-bash`. The filesystem/subprocess execution-world replacement is the necessary extension point.
+**Publish `TerminalIdleDetector` as a replaceable registry.** Rejected. Substrate-specific foreground facts come from the mounted terminal-process primitive, while prompt/silence readiness remains one private policy in `dsh-terminal-shell`. The filesystem/subprocess execution-world replacement is the necessary extension point.
 
 **Add a PTY-specific `sleep` tool.** Rejected. `ctx.jobs` already owns bounded waiting, cancellation, completion notices, and model-facing collection. A second general wake mechanism would cross the agent-loop boundary and duplicate that contract.
 
@@ -160,6 +161,7 @@ The package ships concise tool guidance explaining persistent state, owner isola
 - Subprocess process fixtures cover non-leader and non-main-thread stdin waits, zombie quiescence, unreadable process state, supported syscall tables, unsupported architectures, and false-positive rejection; macOS inspector logic is injected into the same unit suite.
 - Real `node-pty` and PTY-consumer tests jointly exercise shell state, shared sandbox policy, environment scrubbing, raw-mode foreground `SIGINT`, a TERM-ignoring descendant, and immediate post-disposal quiescence on supported hosts.
 - A Loader-driven `cordis.yml` test mounts the real three-package composition. ACP and headless snapshots pin the six schemas, bounded results, and errors through opt-in overlays; TUI snapshots pin terminal and generic card presentation.
+- The headless terminal-readiness transcript uses the real backend and tools with only the OS terminal transport controlled; it distinguishes unavailable foreground facts from restored ownership. Portable parser, configuration, and lifecycle tests run on Windows; only the real POSIX-PTY suite is excluded there. Windows process ownership has separate native acceptance; POSIX foreground signaling remains unsupported there.
 - Package contracts, the architecture map, subsystem pages, generated catalogs, and the website API describe the same shipped surface.
 
 ## Consequences

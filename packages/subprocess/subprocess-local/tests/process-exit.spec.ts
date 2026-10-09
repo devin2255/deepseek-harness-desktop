@@ -86,13 +86,13 @@ function cleanupTree(state: TreeState | undefined, identities: ProcessIdentity[]
   }
 }
 
-async function runScenario(kind: ManagedKind, trigger: ExitTrigger) {
+async function runScenario(kind: ManagedKind, trigger: ExitTrigger, publication?: 'partial', killHost = false) {
   const root = await mkdtemp(join(tmpdir(), `dsh-subprocess-host-exit-${kind}-${trigger}-`))
   const launch = resolveExampleLaunch({
     srcBin: hostScript,
     mode: 'src',
     tsconfigPath: join(repoRoot, 'tsconfig.json'),
-    configArgs: [kind, trigger, root],
+    configArgs: [kind, trigger, root, ...(publication === undefined ? [] : [publication])],
   })
   const child = execa(launch.command, launch.args, {
     cwd: repoRoot,
@@ -106,13 +106,27 @@ async function runScenario(kind: ManagedKind, trigger: ExitTrigger) {
   let settled = false
   let treeGone = false
   try {
+    if (publication === 'partial') {
+      await vi.waitFor(() => readFile(join(root, 'partial-read'), 'utf8'), {
+        interval: 10,
+        timeout: scenarioTimeoutMs,
+      })
+      await writeFile(join(root, 'publish'), 'publish')
+    }
     state = await readTree(join(root, 'tree.json'))
     await vi.waitFor(() => readFile(join(root, 'ready'), 'utf8'), {
       interval: 10,
       timeout: scenarioTimeoutMs,
     })
     if (process.platform !== 'win32') identities = await captureIdentities(createProcessInspector(), state)
-    await writeFile(join(root, 'proceed'), 'proceed')
+    if (killHost) {
+      if (child.pid === undefined) throw new Error('fixture host has no process id')
+      // Direct process termination runs no JavaScript exit listener. Windows Job
+      // ownership, not the provider's final callback, must reap this tree.
+      process.kill(child.pid, 'SIGKILL')
+    } else {
+      await writeFile(join(root, 'proceed'), 'proceed')
+    }
     const outcome = await child
     settled = true
     await waitForGone(state)
@@ -139,6 +153,13 @@ async function runScenario(kind: ManagedKind, trigger: ExitTrigger) {
 }
 
 describe('synchronous cleanup on host exit', () => {
+  it('waits for complete process identities before normal disposal', { timeout: 45_000 }, async () => {
+    const { outcome, disposeCounts } = await runScenario('ordinary', 'dispose', 'partial')
+    expect(outcome.exitCode).toBe(0)
+    expect(outcome.stderr).toBe('')
+    expect(disposeCounts?.listenersAfterDispose).toBe(disposeCounts?.listenersBefore)
+  })
+
   it.each([
     { trigger: 'direct' as const, expectedCode: 23, diagnostic: undefined },
     { trigger: 'uncaught-exception' as const, expectedCode: 1, diagnostic: 'host-exit-uncaught-exception' },
@@ -154,7 +175,7 @@ describe('synchronous cleanup on host exit', () => {
     if (diagnostic !== undefined) expect(outcome.stderr).toContain(diagnostic)
   })
 
-  it.skipIf(process.platform === 'win32')(
+  it(
     'removes a terminal root and descendant after direct exit',
     { timeout: 45_000 },
     async () => {
@@ -169,5 +190,19 @@ describe('synchronous cleanup on host exit', () => {
     expect(outcome.exitCode).toBe(0)
     expect(disposeCounts?.listenersAfterLoad).toBe((disposeCounts?.listenersBefore ?? 0) + 1)
     expect(disposeCounts?.listenersAfterDispose).toBe(disposeCounts?.listenersBefore)
+  })
+
+  it.skipIf(process.platform !== 'win32')('reaps a native terminal Job when the host cannot execute JavaScript', { timeout: 45_000 }, async () => {
+    const { outcome } = await runScenario('terminal', 'direct', undefined, true)
+    expect(outcome.failed).toBe(true)
+  })
+
+  it.skipIf(process.platform !== 'win32').each([
+    { trigger: 'dispose' as const, expectedCode: 0 },
+    { trigger: 'uncaught-exception' as const, expectedCode: 1 },
+    { trigger: 'unhandled-rejection' as const, expectedCode: 1 },
+  ])('reaps a native terminal Job after $trigger', { timeout: 45_000 }, async ({ trigger, expectedCode }) => {
+    const { outcome } = await runScenario('terminal', trigger)
+    expect(outcome.exitCode).toBe(expectedCode)
   })
 })

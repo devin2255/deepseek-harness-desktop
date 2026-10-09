@@ -8,6 +8,12 @@ The spawn provider creates a fresh child `Agent` in the current process. The chi
 
 `start(request)` delegates to [`startInProcessRun`](../subagent-in-process-driver/README.md) with no seed and awaits publication before returning. The child receives parent working-directory/session lineage and inherits the parent model unless overridden, but starts with an empty conversation.
 
+With `workspaceMode: isolated-worktree`, only a writable root Task executing in its recorded managed worktree may delegate. The provider requires Task, worktree, review, sandbox-policy, and approval services, inspects a clean committed integration baseline, and creates a distinct branch and directory with the child's reserved Session id. A moved HEAD or dirty source rejects creation. The child records its execution assignment before publication, uses that directory as its immutable cwd, and receives `workspace-write` with approval `never`, even when the root has full access. Ordinary shared children retain the deployment's delegation policy.
+
+The integration baseline may include committed root work and prior integrated writers; only uncommitted changes prevent another writer wave. `subagent/worktree-assigned` is model-hidden execution data; `foldSubagentWorktree` strictly decodes its unique assignment for cold inspection. Creation failures and cancellation preserve any created checkout for explicit recovery rather than deleting it. The holder still owns the published Agent lifecycle, not automatic worktree cleanup.
+
+`prepareContinuable()` also supports isolated writers. The continuation manager records detached cwd, policies, assignment, and the required `subagent/execution-provider` identity before publication. Initial creation and cold resume validate the actual unpublished Session against its direct root Task, recorded permissions, and live Git worktree identity. Missing or detached worktrees, contradictory metadata, elevated authority, and an absent or incapable validation provider reject before publication or message acceptance. Dirty child files are retained and do not prevent continuation; a changed parent permission does not widen child authority. See [owned-execution continuation](../../../.agents/notes/implemented/feature/2026-10-07-isolated-writer-continuation.md).
+
 The shared driver owns depth checking, persona and tool-filter setup, structured output, required-signal cancellation, one-shot execution, result reading, and quiescent disposal. A startup rejection leaves no published child; provider unload after fulfillment does not revoke the holder-owned run.
 
 ## Capabilities
@@ -19,6 +25,7 @@ Spawn advertises `{ outputSchema: true, depthLimit: true, toolFilter: true, pers
 | Key | Meaning |
 |---|---|
 | `providerName` | Registry name on `ctx.subagents` (default `spawn`). |
+| `workspaceMode` | `shared` (default), or `isolated-worktree` for one-shot or continuable writers. |
 
 ## Model Experience
 
@@ -53,3 +60,4 @@ Append-only; newly visible content follows the reusable request prefix and does 
 ## Known Limitations and Deferred Work
 
 - **Fresh means no parent transcript** — the child inherits cwd, lineage, model, and explicitly configured persona/tool restrictions, but none of the parent's conversation; use the fork provider when completed-turn context is required.
+- **Execution is not integration** — isolated writers support continuation; separate [writer tools](../tool-subagent-control/README.md#isolated-writer-results) own review and batch integration. Conflict-resolution UI and orphan recovery remain incomplete. This option is not enabled in the desktop's shipped tool roster.

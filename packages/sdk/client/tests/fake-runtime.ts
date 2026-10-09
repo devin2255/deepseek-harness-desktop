@@ -11,6 +11,7 @@
  * - `FAKE_STATUS`: the `session.finished` status (default `ok`).
  * - `FAKE_REASON_KIND`: the `session.finished` reason kind (default `completed`; `none` omits the reason).
  * - `FAKE_SUBAGENT`: also emit a child session (subagent.started + child event + subagent.finished).
+ * - `FAKE_WRITER_ASSIGNMENT`: with `FAKE_SUBAGENT`, emit the JSON file's child execution assignment.
  * - `FAKE_ECHO_CWD`: prefix the assistant text with the process cwd.
  * - `FAKE_ECHO_ENV`: comma-separated env names to echo as `name=value` lines in the assistant text.
  * - `FAKE_MALFORMED`: `initialize` returns `{}` (no serverInfo); `prompt` returns `{}` (no accepted).
@@ -42,9 +43,12 @@
  * - `FAKE_STDERR`: write this line to stderr at boot (diagnostics-tail probe).
  * - `FAKE_STDERR_NO_NEWLINE`: write this to stderr WITHOUT a newline (buffer-flush probe).
  * - `FAKE_RECORD_INIT`: append each `initialize` params JSON to this file (handshake probe).
+ * - `FAKE_TASK_CASE`: select a Task projection or review-response validation
+ *   probe; `FAKE_TASK_INVALID` switches probes with valid optional fields to
+ *   their malformed counterpart.
  */
 
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import process from 'node:process'
 import { createInterface } from 'node:readline'
 
@@ -130,6 +134,12 @@ function runTurn(sessionId: string): void {
   if (env.FAKE_SUBAGENT !== undefined) {
     const childId = `${sessionId}-child`
     notify('subagent.started', { parentSessionId: sessionId, childSessionId: childId })
+    if (env.FAKE_WRITER_ASSIGNMENT !== undefined) {
+      event(childId, 'subagent/worktree-assigned', JSON.parse(readFileSync(env.FAKE_WRITER_ASSIGNMENT, 'utf8')) as object)
+    }
+    if (env.FAKE_WRITER_EXECUTION !== undefined) {
+      event(childId, 'subagent/execution-provider', JSON.parse(readFileSync(env.FAKE_WRITER_EXECUTION, 'utf8')) as object)
+    }
     event(childId, 'assistant/message', {
       turn: 0,
       step: 0,
@@ -222,6 +232,160 @@ reader.on('line', (line) => {
       respond({ messageId })
       return
     }
+    case 'task/list':
+      if (env.FAKE_TASK_INTEGRATION !== undefined) {
+        respond({ generation: 4, tasks: [JSON.parse(readFileSync(env.FAKE_TASK_INTEGRATION, 'utf8'))] })
+        return
+      }
+      if (env.FAKE_MALFORMED_TASK !== undefined) {
+        respond({ generation: 'wrong', tasks: [{}] })
+        return
+      }
+      if (env.FAKE_TASK_CASE === 'snapshot-non-record') {
+        respond({ generation: 4, tasks: [null] })
+        return
+      }
+      {
+        const task: Record<string, unknown> = {
+          taskId: 'task-root', workspaceId: 'workspace-root', descendantSessionIds: [], status: 'running', freshness: 'live',
+          executionWorkspace: env.FAKE_MALFORMED_TASK_WORKTREE !== undefined
+            ? { kind: 'git-worktree', path: 42 }
+            : {
+              kind: 'git-worktree', taskId: 'task-root', workspaceId: 'workspace-root',
+              sourcePath: 'D:\\source\\project', path: 'D:\\harness\\worktrees\\task-root',
+              branch: 'dsh/task-0123456789abcdef01234567', baseCommit: '0'.repeat(40),
+              sourceHead: '0'.repeat(40), sourceDirty: false,
+              sourceStatusDigest: 'a'.repeat(64), createdAt: 1,
+            },
+          attention: [], risks: [], updatedAt: 1, asOfSeq: 0,
+        }
+        if (env.FAKE_TASK_CASE === 'review-decision-number') task.reviewDecision = 1
+        if (env.FAKE_TASK_CASE === 'review-decision-invalid') task.reviewDecision = 'approved'
+        if (env.FAKE_TASK_CASE === 'commit-receipt-invalid') task.commitReceipt = {}
+        if (env.FAKE_TASK_CASE === 'apply-receipt-invalid') task.applyReceipt = {}
+        if (env.FAKE_TASK_CASE === 'discard-receipt-invalid') task.discardReceipt = {}
+        if (env.FAKE_TASK_CASE?.startsWith('checkpoint-')) {
+          const operationId = '00000000-0000-4000-8000-000000000001'
+          task.retryableDeliveryCheckpoint = env.FAKE_TASK_CASE === 'checkpoint-invalid-id' ? 'invalid' : operationId
+          task.attention = env.FAKE_TASK_CASE === 'checkpoint-no-attention' ? [] : [{
+            id: 'pending', taskId: 'task-root', ownerSessionId: env.FAKE_TASK_CASE === 'checkpoint-child-owner' ? 'child' : 'task-root',
+            kind: env.FAKE_TASK_CASE === 'checkpoint-other-kind' ? 'review-request' : 'delivery-unconfirmed',
+            severity: 'error', summary: 'Save receipt', createdAt: 1, actionable: true,
+            sourceId: env.FAKE_TASK_CASE === 'checkpoint-other-operation' ? 'different' : operationId,
+          }]
+        }
+        respond({ generation: 4, tasks: [task] })
+      }
+      return
+    case 'task/define':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'reviewing', freshness: 'live',
+        definition: {
+          goal: frame.params?.goal,
+          criteria: [{ id: 'criterion', text: 'Works', status: 'pending', evidence: [] }],
+        },
+        attention: [], risks: [], updatedAt: 2, asOfSeq: 1,
+      })
+      return
+    case 'task/updateCriterion':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'reviewing', freshness: 'live',
+        definition: { goal: 'Ship SDK', criteria: [frame.params?.criterion] },
+        attention: [], risks: [], updatedAt: 3, asOfSeq: 2,
+      })
+      return
+    case 'task/recordRisk':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'reviewing', freshness: 'live',
+        definition: { goal: 'Ship SDK', criteria: [] },
+        attention: [], risks: [frame.params?.risk], updatedAt: 4, asOfSeq: 3,
+      })
+      return
+    case 'task/review':
+      respond({
+        taskId: sessionIdOf(frame.params), descendantSessionIds: [], status: 'ready', freshness: 'live',
+        definition: { goal: 'Ship SDK', criteria: [] }, reviewDecision: frame.params?.decision,
+        attention: [], risks: [], updatedAt: 5, asOfSeq: 4,
+      })
+      return
+    case 'task/reviewSummary':
+      if (env.FAKE_TASK_CASE === 'summary-non-record') {
+        respond(null as unknown as object)
+        return
+      }
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', revision: 'b'.repeat(64),
+        baseCommit: '0'.repeat(40), headCommit: '0'.repeat(40), sourceHead: '0'.repeat(40), sourceDirty: false,
+        branch: 'dsh/task-0123456789abcdef01234567', dirty: true, truncated: false,
+        files: [{
+          path: 'src/app.ts',
+          ...(env.FAKE_TASK_CASE === 'summary-previous-path'
+            ? { previousPath: env.FAKE_TASK_INVALID === undefined ? 'src/old.ts' : '../old.ts' }
+            : {}),
+          status: 'modified', binary: false, additions: 2, deletions: 1,
+        }],
+        additions: 2, deletions: 1,
+      })
+      return
+    case 'task/reviewDiff':
+      if (env.FAKE_TASK_CASE === 'diff-non-record') {
+        respond(null as unknown as object)
+        return
+      }
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', revision: frame.params?.expectedRevision,
+        path: frame.params?.path,
+        ...(env.FAKE_TASK_CASE === 'diff-previous-path'
+          ? { previousPath: env.FAKE_TASK_INVALID === undefined ? 'src/old.ts' : '../old.ts' }
+          : {}),
+        binary: false, truncated: false, patch: '@@ -1 +1 @@\n-old\n+new\n',
+      })
+      return
+    case 'task/commit':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], reviewDecision: 'ready', updatedAt: 6, asOfSeq: 5,
+        commitReceipt: {
+          kind: 'commit', operationId: '00000000-0000-4000-8000-000000000001', taskId: sessionIdOf(frame.params),
+          workspaceId: 'workspace-root', reviewRevision: frame.params?.expectedRevision,
+          committedRevision: 'c'.repeat(64), branch: 'dsh/task-0123456789abcdef01234567',
+          commit: '1'.repeat(40), committedAt: 6,
+        },
+      })
+      return
+    case 'task/apply':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], reviewDecision: 'ready', updatedAt: 7, asOfSeq: 6,
+        applyReceipt: {
+          kind: 'apply', operationId: '00000000-0000-4000-8000-000000000002', taskId: sessionIdOf(frame.params),
+          workspaceId: 'workspace-root', reviewRevision: frame.params?.expectedRevision, commit: frame.params?.commit,
+          sourceHeadBefore: frame.params?.expectedSourceHead, sourceHeadAfter: frame.params?.expectedSourceHead, appliedAt: 7,
+        },
+      })
+      return
+    case 'task/retryDeliveryCheckpoint':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], updatedAt: 8, asOfSeq: 7,
+      })
+      return
+    case 'task/discard':
+      respond({
+        taskId: sessionIdOf(frame.params), workspaceId: 'workspace-root', descendantSessionIds: [], status: 'settled',
+        freshness: 'live', attention: [], risks: [], reviewDecision: 'ready', updatedAt: 8, asOfSeq: 7,
+        discardReceipt: {
+          kind: 'discard', operationId: '00000000-0000-4000-8000-000000000003', taskId: sessionIdOf(frame.params),
+          workspaceId: 'workspace-root', reviewRevision: frame.params?.expectedRevision,
+          branch: 'dsh/task-0123456789abcdef01234567', branchPreserved: true, worktreeRemoved: true,
+          uncommittedChangesDiscarded: frame.params?.confirmedUncommittedLoss,
+          ...(env.FAKE_TASK_CASE === 'discard-recoverable'
+            ? { recoverableCommit: env.FAKE_TASK_INVALID === undefined ? '3'.repeat(40) : 'bad' }
+            : {}),
+          discardedAt: 8,
+        },
+      })
+      return
     case 'shutdown':
       respond({})
       // An EOF-ignoring fake also refuses the protocol exit, so the client's

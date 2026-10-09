@@ -49,7 +49,8 @@ import {
 import type { DelegatedPolicyOverrides } from './child-agent.ts'
 import { assertSubagentMaxDepth } from './depth.ts'
 import { seedDescriptorTurn } from './descriptor-seed.ts'
-import type { ContinuableCreateRequest, ContinuableCreateSpec, SubagentResult, SubagentStartRequest } from './types.ts'
+import type { ContinuableCreateRequest, ContinuableCreateSpec, ContinuableExecutionRequest, ContinuableExecutionSpec, SubagentResult, SubagentStartRequest } from './types.ts'
+import { executionProviderOf } from './execution-provider.ts'
 import type { ActivationObserver, ActivationTerminal } from './lifecycle.ts'
 import { SubagentError } from './error.ts'
 import type SubagentActivationSetupRegistry from './activation-setup-registry.ts'
@@ -173,6 +174,8 @@ interface ContinuationHost {
    * @returns the provider's detached creation spec.
    */
   prepareContinuable(name: string, request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>
+  /** Validate the actual unpublished execution before either creation or resume can publish. */
+  validateContinuableExecution(name: string, request: ContinuableExecutionRequest): Promise<AgentSetupCommit>
   /**
    * Build the lifecycle observer for one Activation's residency epoch.
    * @param provider - the provider name recorded in the durable descriptor.
@@ -254,6 +257,7 @@ interface MaterializeInputs {
     meta: NonNullable<CreateAgentOptions['meta']>
     /** Policy captured at the delegation boundary: the parent's sandbox override plus the approval pin. */
     delegatedPolicies: DelegatedPolicyOverrides
+    execution?: ContinuableExecutionSpec
   }
   agentOptions: AgentOptions
   composition: { persona?: string | undefined; toolFilter?: ToolRestriction | undefined }
@@ -424,6 +428,7 @@ export class SubagentContinuationManager {
     // Capture before the first await: a later parent switch belongs to the
     // parent's future, not to this child.
     const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
+    const agentOptions = resolveChildAgentOptions(parent, request.agentOptions, childDepth)
 
     const prepared = await this.host.prepareContinuable(spec.provider, {
       sessionId: childId,
@@ -440,8 +445,14 @@ export class SubagentContinuationManager {
         childId,
         provider: spec.provider,
         parent,
-        create: { seed, meta: childSessionMeta(parent, childDepth, lineageSeedLength), delegatedPolicies },
-        agentOptions: resolveChildAgentOptions(parent, request.agentOptions, childDepth),
+        create: {
+          seed,
+          meta: { ...childSessionMeta(parent, childDepth, lineageSeedLength),
+            ...prepared.execution === undefined ? {} : { cwd: prepared.execution.cwd } },
+          delegatedPolicies,
+          ...prepared.execution === undefined ? {} : { execution: prepared.execution },
+        },
+        agentOptions,
         composition: { persona: request.persona, toolFilter: request.toolFilter },
         signal: spec.signal,
       })
@@ -876,9 +887,9 @@ export class SubagentContinuationManager {
   /**
    * Cold-resume a persisted child: inspect and authorize its Session, fold the
    * generic descriptor, create the Activation through `ctx.agents.resume()`,
-   * and submit the waiting turn. This never dispatches through a subagent
-   * provider — the persisted Session already holds the initial prefix and the
-   * descriptor is the whole reconstruction input.
+   * and submit the waiting turn. Persisted execution-provider records require
+   * live validation; ordinary shared children resume independently of their
+   * original provider registration. Neither path calls provider creation.
    */
   private async coldResume(
     parent: Agent,
@@ -993,15 +1004,38 @@ export class SubagentContinuationManager {
     // `AgentRegistry.enter()` is the authoritative collision boundary for an id
     // some other owner holds — a duplicate would reject there with rollback.
     inputs.signal.throwIfAborted()
-    const setup = (childCtx: Context): AgentSetupCommit => {
+    const setup = async (childCtx: Context): Promise<AgentSetupCommit> => {
+      const session = (childCtx.agent as Agent).session
       // Only fresh creation seeds the delegation policy onto the child's own
       // log (after any fork seed, so fresh policy wins stale seed state); a
       // cold resume replays those persisted events instead.
       if (create !== undefined) {
-        appendDelegatedPolicyOverrides((childCtx.agent as Agent).session, create.delegatedPolicies)
+        appendDelegatedPolicyOverrides(session, create.execution?.policies ?? create.delegatedPolicies)
+        if (create.execution !== undefined) {
+          for (const fact of create.execution.facts) session.append(fact.type, fact.data)
+          session.append('subagent/execution-provider', { provider })
+        }
+      }
+      this.authorizeLineage(parent, childId, session.header.parentSession)
+      const ownEvents = session.events.slice(session.header.seedLength ?? 0)
+      const executionProvider = executionProviderOf(ownEvents)
+      let executionCommit: AgentSetupCommit | undefined
+      if (executionProvider !== undefined) {
+        if (executionProvider !== foldSubagentDescriptor(ownEvents)?.provider) {
+          throw new SubagentError('execution provider does not match the child descriptor', 'NOT_RESUMABLE')
+        }
+        executionCommit = await this.host.validateContinuableExecution(executionProvider, {
+          sessionId: childId, parent, meta: session.header, events: session.events, signal: inputs.signal,
+        })
+        inputs.signal.throwIfAborted()
+        this.assertAdmitting(parent)
       }
       applyChildComposition(childCtx, parent, inputs.composition)
-      return this.setupRegistry.apply(childCtx)
+      const compositionCommit = this.setupRegistry.apply(childCtx)
+      return { commit: () => {
+        executionCommit?.commit()
+        compositionCommit.commit()
+      } }
     }
     const observer = this.host.observeActivation(provider, childId, parent)
     // Agent creation owns rollback before handle transfer. A rejection leaves

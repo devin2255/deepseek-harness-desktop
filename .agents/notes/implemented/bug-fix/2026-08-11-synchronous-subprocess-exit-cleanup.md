@@ -17,7 +17,7 @@ The public subprocess seam correctly promises awaited quiescence during normal d
 The listener uses local-only final operations that are absent from the public `SubprocessHandle` and `SubprocessTerminalHandle` interfaces:
 
 - An ordinary handle immediately sends SIGKILL to its detached POSIX process group or runs synchronous `taskkill /PID <pid> /T /F` on Windows.
-- A terminal handle synchronously signals every captured and currently observable descendant with SIGKILL, kills the PTY root, then rescans once for members that became observable during that boundary.
+- A POSIX terminal handle synchronously signals every captured and currently observable descendant with SIGKILL, kills the PTY root, then rescans once for members that became observable during that boundary. A Windows terminal closes its exact kill-on-close Job handle.
 - The service contains each target's failure and continues with the remaining handles. The callback creates no promise or timer, writes no diagnostic, and does not change the original exit code or error.
 
 Normal disposal remains the [subprocess seam's](../architecture/2026-07-26-subprocess-seam.md) terminate-and-join path: ordinary trees receive TERM, the configured grace, then KILL, and every ordinary or terminal cleanup is awaited to quiescence. The synchronous path requests final termination but does not publish a completion result or claim the OS tree is already gone when the callback returns. Remote providers retain their own sandbox ownership and do not inherit a local Node listener.
@@ -31,6 +31,8 @@ Normal disposal remains the [subprocess seam's](../architecture/2026-07-26-subpr
 ## Verification
 
 A parent test starts an isolated TypeScript host through the repository source launcher, waits until exact root and descendant process identities are observable, then allows the host to take each fatal path. Direct exit, default uncaught exception, and default unhandled rejection cover ordinary TERM-resistant trees; direct exit also covers a real terminal root and descendant. The parent asserts the original host exit category and waits for every recorded process to disappear, while failure cleanup targets only recorded identities or the recorded Windows tree.
+
+The fixture host waits for complete JSON process identities, not merely the state file's existence. A controlled partial publication holds the writer until the host observes incomplete JSON, then verifies normal disposal and listener removal. This distinguishes asynchronous file publication from provider cleanup without increasing the scenario deadline or weakening external process-liveness assertions.
 
 Unit evidence pins synchronous POSIX group and Windows taskkill delivery, terminal scans before and after the PTY root kill, repeated finalization, per-target failure containment, normal TERM-to-KILL disposal, live-set retention during pending disposal, and listener removal after disposal.
 
@@ -48,4 +50,4 @@ Unit evidence pins synchronous POSIX group and Windows taskkill delivery, termin
 
 Each active local subprocess service contributes one process-global exit listener, removed with the service effect. Fatal exit gives up grace, output draining, and an in-process quiescence proof in exchange for issuing the strongest available local termination before the host disappears. Normal disposal keeps those guarantees and costs unchanged.
 
-The listener cannot cover failures that do not execute JavaScript, and it cannot discover a terminal descendant that escaped before the provider ever observed it; that separate ownership gap remains tracked by Issue #1726.
+The listener cannot cover failures that do not execute JavaScript, and it cannot discover a POSIX terminal descendant that escaped before the provider ever observed it; that separate ownership gap remains tracked by Issue #1726. [Windows ConPTY Job ownership](../architecture/2026-10-08-windows-conpty-job-ownership.md) supplies an OS-owned lifetime independently of this callback.

@@ -27,6 +27,15 @@ describe('CI workflow', () => {
     }
   })
 
+  it('prepares Linux sandboxing from the current distribution package and probes confinement', () => {
+    const script = readFileSync(resolve(root, 'scripts/prepare-ci-bubblewrap.sh'), 'utf8')
+
+    expect(script).toContain('sudo apt-get update -qq')
+    expect(script).toContain('sudo apt-get install -y -qq --no-install-recommends bubblewrap')
+    expect(script).toContain('bwrap --ro-bind / / --dev /dev --proc /proc --die-with-parent -- true')
+    expect(script).not.toContain('BUBBLEWRAP_URL')
+  })
+
   it('keeps a required Wine Windows job, a non-blocking native Windows job with failover, and a master-only standby', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     if (!isRecord(workflow.jobs)
@@ -61,6 +70,8 @@ describe('CI workflow', () => {
     expect(windows.name).toBe('windows node 24 / wine blocking')
     expect(windows.if).toBe("github.event_name == 'pull_request'")
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
+    const installWine = commandSteps.find(step => step.name === 'Install Wine')
+    expect(installWine?.run.trimStart().startsWith('sudo apt-get update\n')).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
     // Its pool is resolved by the Windows-specific switch.
@@ -70,6 +81,7 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('self-hosted')
     expect(windowsNative['runs-on']).toContain('dsh-win-ci')
     expect(windowsNative['runs-on']).toContain('dsh-windows-2025-16core')
+    expect(windowsNative['runs-on']).toContain("github.repository != 'deepseek-harness/deepseek-harness' && 'windows-2025'")
     expect(windowsNative.name).toBe('windows node 24 / native complete')
     expect(windowsNative.if).toBe("github.event_name == 'pull_request'")
     expect(windowsNative.env).toMatchObject({
@@ -85,7 +97,7 @@ describe('CI workflow', () => {
     expect(wineAptCache['runs-on']).toBe('ubuntu-latest')
 
     // serial-windows: master-only standby, self-hosted, non-blocking.
-    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+    expect(serialWindows.if).toBe("github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'")
     expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
     expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
 
@@ -102,10 +114,19 @@ describe('CI workflow', () => {
       expect(job['runs-on'], `${jobName} runs-on must use the Linux failover switch`).toContain('DSH_CI_FAILOVER_LINUX')
       expect(job['runs-on'], `${jobName} runs-on must not use the Windows failover switch`).not.toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(job['runs-on']).toContain('vm-backup')
+      expect(job['runs-on']).toContain("github.repository != 'deepseek-harness/deepseek-harness' && 'ubuntu-24.04'")
     }
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')
+    expect(aggregate['runs-on']).toContain("github.repository != 'deepseek-harness/deepseek-harness' && 'ubuntu-24.04'")
+    expect(node24.env).toMatchObject({ DSH_GATE_CONCURRENCY: "${{ github.repository == 'deepseek-harness/deepseek-harness' && '8' || '2' }}" })
+    expect(String(isRecord(node24Coverage.env) && node24Coverage.env.DSH_COVERAGE_MAX_WORKERS)).toContain(
+      "github.repository != 'deepseek-harness/deepseek-harness' && '2'",
+    )
+    expect(String(isRecord(node24Consumers.env) && node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY)).toContain(
+      "github.repository != 'deepseek-harness/deepseek-harness' && '2'",
+    )
   })
 
   it('exempts push from cancellation, so one master merge does not cancel the running drill', () => {
@@ -132,7 +153,7 @@ describe('CI workflow', () => {
       if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
       expect(job.concurrency).toBeUndefined()
       // Both stay master-push-only; that is what makes the push carve-out safe.
-      expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+      expect(job.if).toBe("github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'")
     }
 
     // What bounds the cost of exempting push: a master push may only carry the
@@ -146,8 +167,8 @@ describe('CI workflow', () => {
     const NOT_PUSH_REACHABLE = new Set([
       "github.event_name == 'pull_request'",
       "always() && github.event_name == 'pull_request'",
-      "github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'",
-      "github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'",
+      "github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'",
+      "github.repository == 'deepseek-harness/deepseek-harness' && github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'",
     ])
     const pushReachable = Object.entries(workflow.jobs)
       .filter(([, job]) => {
@@ -172,6 +193,7 @@ describe('CI workflow', () => {
       }
       expect(job.strategy['max-parallel']).toBe(12)
       expect(job['timeout-minutes']).toBe(15)
+      expect(job.if).toContain("github.repository == 'deepseek-harness/deepseek-harness'")
     }
   })
 
@@ -181,6 +203,14 @@ describe('CI workflow', () => {
     expect(config).not.toContain('packages/lsp/lsp-stdio/src/connection.ts')
     expect(config).not.toContain('packages/lsp/lsp-stdio/src/index.ts')
     expect(config).not.toContain('packages/lsp/lsp-stdio/src/instance.ts')
+  })
+
+  it('runs portable terminal lifecycle tests and coverage on Windows', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).not.toContain("'packages/terminal/terminal-shell',")
+    expect(config).not.toContain("'packages/terminal/terminal-shell/tests/**/*.spec.ts'")
+    expect(config).toContain("'packages/terminal/terminal-shell/tests/local.spec.ts'")
   })
 
   it('requires one release-shaped Python runtime target on every pull request', () => {
@@ -356,6 +386,33 @@ describe('Python release workflows', () => {
     expect(JSON.stringify(manylinuxSmoke)).toContain('-e DSH_TELEMETRY_DISABLED')
   })
 
+  it('validates built-workspace Task delivery before production deploy rewrites dependency links', () => {
+    const build = workflowJob(loadWorkflow('.github/workflows/build-exe-for-python-sdk.yml'), 'build')
+    if (!Array.isArray(build.steps)) throw new TypeError('Python runtime builder must define steps')
+    const steps = build.steps.filter(isRecord)
+    const install = steps.findIndex(step => step.run === 'pnpm install --frozen-lockfile')
+    const compile = steps.findIndex(step => step.run === 'pnpm run build')
+    const delivery = steps.findIndex(step => typeof step.run === 'string'
+      && step.run.includes('scripts/smoke-python-task-delivery.py'))
+    const pack = steps.findIndex(step => typeof step.run === 'string'
+      && step.run.includes('scripts/build-exe-for-python-sdk.ts'))
+    const executableSmoke = steps.findIndex(step => typeof step.run === 'string'
+      && step.run.includes('scripts/smoke-python-runtime.py') && step.run.includes('--scenario all'))
+
+    expect(install).toBeGreaterThanOrEqual(0)
+    expect(compile).toBeGreaterThan(install)
+    expect(delivery).toBeGreaterThan(compile)
+    expect(pack).toBeGreaterThan(delivery)
+    expect(executableSmoke).toBeGreaterThan(pack)
+    expect(steps[delivery]).toMatchObject({
+      run: 'uv run --python 3.10 --group test --project python/sdk python scripts/smoke-python-task-delivery.py',
+    })
+    expect(steps[delivery]?.if).toBeUndefined()
+    expect(steps[pack]?.run).toBe(
+      'pnpm exec tsx scripts/build-exe-for-python-sdk.ts --skip-build --targets=${{ matrix.target }}',
+    )
+  })
+
   it('uses the shared macOS deployment-target check in GitLab', () => {
     const workflow = loadWorkflow('.gitlab-ci.yml')
     const runtimeWheel = workflow['.runtime-wheel']
@@ -388,9 +445,21 @@ describe('Issue lifecycle workflow', () => {
     expect(lifecyclePullRequest.types).toContain('review_requested')
     expect(lifecycleReview.types).toEqual(['submitted'])
     expect(lifecycleJob.if).toBe(
-      "${{ github.event_name != 'pull_request_review' || (github.event.action == 'submitted' && github.event.review.state == 'changes_requested') }}",
+      "${{ github.repository == 'deepseek-harness/deepseek-harness' && (github.event_name != 'pull_request_review' || (github.event.action == 'submitted' && github.event.review.state == 'changes_requested')) }}",
     )
     expect(policyPullRequest.types).toContain('ready_for_review')
+  })
+
+  it('does not run upstream project automation in forks', () => {
+    const lifecycle = loadWorkflow('.github/workflows/issue-lifecycle.yml')
+    const policy = loadWorkflow('.github/workflows/issue-policy.yml')
+
+    expect(workflowJob(lifecycle, 'lifecycle').if).toContain(
+      "github.repository == 'deepseek-harness/deepseek-harness'",
+    )
+    expect(workflowJob(policy, 'policy').if).toBe(
+      "${{ github.repository == 'deepseek-harness/deepseek-harness' }}",
+    )
   })
 })
 

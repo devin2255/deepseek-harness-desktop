@@ -2,6 +2,96 @@
   "comment": "Maps each primary ` ```ts type-equiv ` or ` ```ts public-api ` block (by doc + declared symbol + projection) to the source declaration and original JSDoc it must match. Paired `.zh.md` blocks are byte-identical derivatives checked through their unsuffixed sibling and have no duplicate entry. Omit projection for the complete declaration; use public-api with a ` ```ts public-api ` block for a body-stripped public class declaration. verify-type-equiv.ts enforces a 1:1 correspondence between primary blocks and entries. Add an entry when you add a primary source-equivalence block; remove it when you remove the block.",
   "entries": [
     {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskCommitPreflight",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskDiscardPreflight",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subprocess.md",
+      "symbol": "SubprocessTerminalInterruptResult",
+      "source": "packages/subprocess/subprocess/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationOutcome",
+      "source": "packages/task/task/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationNode",
+      "source": "packages/task/task/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationInput",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "IntegrateTaskReviewRequest",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationContributor",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationReceipt",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationConflict",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "TaskIntegrationResult",
+      "source": "packages/task/task-review/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "SubagentInitializationEvent",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "ContinuableExecutionSpec",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "ContinuableExecutionRequest",
+      "source": "packages/subagent/subagent/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "SubagentWorktreeData",
+      "source": "packages/subagent/subagent-spawn-in-process/src/worktree.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "InProcessRunOptions",
+      "source": "packages/subagent/subagent-in-process-driver/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/subagent.md",
+      "symbol": "PreparedInProcessChild",
+      "source": "packages/subagent/subagent-in-process-driver/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/task.md",
+      "symbol": "CreateTaskWorktreeRequest",
+      "source": "packages/task/task-worktree/src/types.ts"
+    },
+    {
       "doc": "docs/subsystems/core.md",
       "symbol": "Branded",
       "source": "packages/util/brand/src/index.ts"

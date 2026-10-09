@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { writeFile } from 'node:fs/promises'
+import { access, writeFile } from 'node:fs/promises'
 
-const [statePath] = process.argv.slice(2)
+const [statePath, publicationPermit] = process.argv.slice(2)
 if (statePath === undefined) throw new Error('usage: managed-tree.ts <state-path>')
 
 process.on('SIGTERM', () => {})
@@ -12,5 +12,18 @@ const descendant = spawn(process.execPath, [
 ], { stdio: 'ignore' })
 if (descendant.pid === undefined) throw new Error('managed descendant did not publish a pid')
 
+if (publicationPermit !== undefined) {
+  // The parent releases publication only after the host observes incomplete JSON.
+  await writeFile(statePath, '{')
+  for (;;) {
+    try {
+      await access(publicationPermit)
+      break
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }
+}
 await writeFile(statePath, JSON.stringify({ root: process.pid, descendant: descendant.pid }))
 setInterval(() => {}, 60_000)

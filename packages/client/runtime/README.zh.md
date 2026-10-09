@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-客户端 cordis 启动与不依赖 React 的对象服务：SlotRegistry 包装 SlotCore 并提供 renderer 数据源；SessionRuntime 拥有 Session 对象、列表与 scope 状态，以及供已注册 conversation view target 共用的事件窗口与历史分页。WorkspaceRuntime 依赖 SessionRuntime，拥有 Workspace 对象、列表／操作、默认目标派生，以及 New Session 空会话复用入口（`connectWorkspace`）。运行时把共享 Host 流分发给 Session 与 Workspace 所有者，并把每个通用 `host/remote-event` 帧交给 `ctx.remote.$dispatch`；各领域包通过 `ctx.remote.$on` 订阅自身 owner 事件，并自行决定使哪些缓存或会话行失效。客户端会话一律由 Host 创建（一次 `session.create` 同时产生 Session、agent（智能体）和 cwd）；客户端不持有任何实体化之前的会话状态——agent scope（host dsh-scope 的客户端镜像，以 agent/session 共用 id 为键）在会话行进入列表镜像时创建，并随 prune 销毁。约定：api-contracts v3 §4。每个 `Session` 持有一个通用的 `ProjectionValueStore`，由历史记录尾部的 `projections` 块播种，并经 `session/projection` 帧按 seq 高者胜更新；领域键（含 `todos`）经 `projections.faceOf`／`useProjection` 读取，不经 `ConversationSnapshot`。该 store 还会通过 `SessionSummary.projectionValues` 发布一份引用稳定的完整值映射，使全局列表消费方无需为每个会话创建订阅，即可复用同一组投影。
+客户端 cordis 启动与不依赖 React 的对象服务：SlotRegistry 包装 SlotCore 并提供 renderer 数据源；SessionRuntime 拥有 Session 对象、列表与 scope 状态，以及供已注册 conversation view target 共用的事件窗口与历史分页。WorkspaceRuntime 依赖 SessionRuntime，拥有 Workspace 对象、列表／操作、默认目标派生，以及 New Session 空会话复用入口（`connectWorkspace`）。TaskRuntime 拥有跨会话 Task 列表投影及其变更命令。运行时把共享 Host 流分发给 Session、Workspace 与 Task 所有者，并把每个通用 `host/remote-event` 帧交给 `ctx.remote.$dispatch`；各领域包通过 `ctx.remote.$on` 订阅自身 owner 事件，并自行决定使哪些缓存或会话行失效。客户端会话一律由 Host 创建（一次 `session.create` 同时产生 Session、agent（智能体）和 cwd）；客户端不持有任何实体化之前的会话状态——agent scope（host dsh-scope 的客户端镜像，以 agent/session 共用 id 为键）在会话行进入列表镜像时创建，并随 prune 销毁。约定：api-contracts v3 §4。每个 `Session` 持有一个通用的 `ProjectionValueStore`，由历史记录尾部的 `projections` 块播种，并经 `session/projection` 帧按 seq 高者胜更新；领域键（含 `todos`）经 `projections.faceOf`／`useProjection` 读取，不经 `ConversationSnapshot`。该 store 还会通过 `SessionSummary.projectionValues` 发布一份引用稳定的完整值映射，使全局列表消费方无需为每个会话创建逐会话订阅，即可复用同一组投影。
 
 对于每条可到达本地根 Agent 或可继续子 Agent 的提示词，运行时都会采样浏览器当前的 `Intl.DateTimeFormat().resolvedOptions().timeZone`，并只把该值附加到这一次 Session 或 subagent 提示词 RPC。该值既不缓存，也不包含在 Session 创建或 fork 状态中，因此旅行与并发标签页都能保留消息本地的来源信息。浏览器若无法提供非空时区，会在本地拒绝该提示词，而不会悄然使用部署状态代替。
 
@@ -16,13 +16,17 @@
 
 ## Workspace 与 Session 列表
 
+`SessionListState.phase` 记录首次成功的列表基线是否已经到达。其 `state` 和 `error` 通过同一个可观察数据源投影列表同步状态：刷新失败会保留此前的行和选择，并设置 `state: 'error'`，即使 `phase` 已经是 `ready`。启动下一个请求会清除 `error` 并发布 `loading`；成功时发布 `idle`。断连使进行中的 Session 和 Workspace 列表响应失效，保留行并发布 `loading`；过期响应不能清除更新的请求或错误。重连启动新基线。消费者需结合连接服务的 Host 描述判断行是否为当前状态；列表状态和未读提醒都不能证明任务结果。两个公开列表服务均通过现有单飞请求所有者暴露 `refresh()`；失败保留在各自快照中。
+
 Workspace 和 Session 列表各自具有单调的 `pending` → `ready` 基线阶段，也有各自的刷新活动／错误状态。列表请求期间到达的增量插入或更新／移除／顺序帧与一元变更回显会在其响应之上回放。每次成功的 Workspace 基线都会重新建立 Host 持久 Workspace 顺序，因此重连会接纳该客户端离线期间提交的变更。`WorkspaceRuntime.insertBefore` 会立即安装乐观顺序；只有最新一元回声可以替换它，更新的 Host 顺序帧优先于旧回声，而最新请求被拒时会恢复最近一次由 Host 确认的顺序，不会恢复更早且尚未提交的拖拽。已移除的 Workspace id 会保留进程本地删除标记，避免延迟到达的 changed 帧将其复活。Workspace 新近程度只在两条基线都 ready 后派生，且绝不改变 Workspace 列表顺序。
+
+`TaskRuntime` 暴露独立的 `pending` → `ready` Task 基线，以及加载、错误和新鲜度状态。刷新失败与断连都会保留既有行，但将其标为 stale；重连会启动一条受代次隔离的新基线，因此过期的成功或失败不能替换更新状态。完整行 `task/changed` 帧仅在其 Host 代次匹配已安装基线时更新或移除单个 Task，请求进行期间收到的帧会回放到响应之上。定义任务、更新验收条件、记录风险和评审命令均返回结构化 RPC 结果，并且仅在 Host 接受变更后刷新列表。独立审查投影拥有选中的 Task、受限摘要、保留的文件选择、精确 revision Diff、操作状态与最新已确认 Task 行。断连会使读取失效但保留过期内容；重连会重新加载已打开的审查。要求修改、Commit、Apply 与 Discard 只调用对应的类型化 Host 方法，并在接受后刷新 Task 基线。
 
 `SessionSummary.pendingInteraction` 将阻塞 Session 的实时用户操作分类为 `approval`、`plan-review` 或 `question`。`SessionManager` 依据稳定的请求标识跟踪可应答请求的 requested/resolved mux 帧，即使 `Session` 对象尚未实例化也不例外；实例化前的缓冲会保留每个仍有效的请求，替换回放产生的重复项，并移除已解决的请求，因此打开 Session 时，列表状态始终有一个对应的可应答 `PendingWait`。审批与问题并发时，第一个 pending 问题具有更高的呈现优先级，以匹配 composer 路由；只有满足 plan-review composer 二元呈现约束的请求才会保留独立的 `plan-review` 状态。该状态的作用域限定在连接代次内：断连时清除，mux 打开时的回放只恢复仍处于 pending 的请求。
 
 `WorkspaceRuntime.delete(workspaceId)` 在一元响应成功后从客户端投影中移除注册记录；对应的 `host/workspace-removed` 帧具有幂等性，并负责同步其他标签页。Session 状态与当前 Session selection 相互独立，因此 Workspace 消失后，其已纳入客户端投影的 Session 会立即投影到 Ungrouped 下。
 
-`WorkspaceListState.archivedSessionIds` 镜像 Host 的注册表级全局归档集合（一个按 Host 顺序的 `readonly SessionId[]`，仅在成员变化时才替换；需要 O(1) 查询的消费方自建临时 Set）。它是全快照状态：`workspace.list` 基线、`archiveSession` 一元回声和 `host/archived-sessions-changed` 帧各自安装完整集合。`WorkspaceRuntime.archiveSession(sessionId)` 通过 wire 归档；投影层在当前 selection 落入归档集合时统一清空为 New Session 视图状态——一条规则同时覆盖本地回声、其他标签页的帧、以及重连基线恢复出一个离线期间被归档的 selection。在 `workspace.list` 请求进行中安装的集合还会取代该过期基线携带的集合。各分组视图在所有位置隐藏集合成员，而会话行本身仍留在列表 store 中。
+`WorkspaceListState.archivedSessionIds` 镜像 Host 的注册表级全局归档集合（一个按 Host 顺序的 `readonly SessionId[]`，仅在成员变化时才替换；需要 O(1) 查询的消费方自建临时 Set）。它是全快照状态：`workspace.list` 基线、`archiveSession` 和 `unarchiveSession` 一元回声和 `host/archived-sessions-changed` 帧各自安装完整集合。`WorkspaceRuntime.archiveSession(sessionId)` 通过 wire 归档；投影层在当前 selection 落入归档集合时统一清空为 New Session 视图状态——一条规则同时覆盖本地回声、其他标签页的帧、以及重连基线恢复出一个离线期间被归档的 selection。在 `workspace.list` 请求进行中安装的集合还会取代该过期基线携带的集合。各分组视图在所有位置隐藏集合成员，而会话行本身仍留在列表 store 中。
 
 SlotRegistry 分别为 renderer 提供 `useSessions` 与 `useWorkspaces` 的裸 observable；web-react 创建钩子。Workspace 业务状态不会进入 `SessionListState` 或条目 store。
 
@@ -32,9 +36,15 @@ SlotRegistry 分别为 renderer 提供 `useSessions` 与 `useWorkspaces` 的裸 
 
 `SessionRuntime.search(query, signal)` 是基于 `session.search` RPC 的无状态单次操作。它返回经过排序的会话／snippet 对，但不会将查询条件、加载状态或错误状态写入共享 Session 列表，因此每个 UI 所有者都自行负责防抖、取消、抑制陈旧响应和回退呈现。`searchResultLimit` 将 `SESSION_SEARCH_RESULT_LIMIT`——即响应 schema 自身强制执行的上限——作为注入的呈现数据重新公开，使客户端插件无需复制该值。它是协议常量而非逐连接状态，因此连接 handle 不携带它。
 
+`openReview(rootId, writerSessionId?)` 将根任务交付身份与可选的子结果身份分开。子级读取仍以父级寻址；任一身份切换都会使此前摘要和 Diff 响应失效。交付要求新鲜的根任务审查且没有活动操作，交付期间切换会被拒绝。开始变更操作后，保留的摘要标记为过期，直到新摘要读取成功；拒绝或不确定结果也遵循此规则。迟到的变更响应不能替换更新的审查代次。投影刷新失败时，已接受的回执仍保留，刷新错误独立展示。
+
+`retryDeliveryCheckpoint(operationId)` 使用同一个根审查操作所有者，但不要求可读取的审查摘要。它把提供给调用方的 id 转发给 Host，不在本地重建 Git 回执，并在接受后刷新 Task 状态。选择子结果或已有活动操作时会拒绝。
+
+`inspectDelivery(operationId)` 将只读 Git 核验与根交付串行化，不要求可读取的摘要。`TaskReviewState.deliveryInspection` 和 `deliveryInspectionError` 分别独立于交付回执和审查错误。核验不刷新 Task 状态或改变审查新鲜度。刷新、断线、交付、对象选择，以及所选 Task 的权威替换或移除会使证据失效，并抑制在途响应；无关 Task 变化保留证据。观察不能清除注意事项或授权执行。
+
 ## New Session 与 blank 镜像
 
-`WorkspaceRuntime.connectWorkspace(workspaceId)` 解析 New Session 流程最终落入的会话：先在列表镜像中复用该 workspace 的既有空会话（`blank && cwd == workspace.path && sessionIds.includes(id)`——host 自己的成员规则，绝不只按 cwd，避免劫持 cwd 匹配但未入账的空白会话），未命中则调用 `session.create({workspaceId})`，返回会话 id 由调用方 open。共享的 `startSession` 操作优先使用明确指定的 Workspace，其次使用当前 Session 所属 Workspace，再其次使用派生的最近活跃 Workspace；一个 Workspace 都没有时则清空选择，进入空白 New Session 页面。`SessionSummary.blank` 镜像主机派生的空日志位，在客户端只降不升：由 `session.list`／`host/session-added` 帧播种，本地首次获 Host 接受的 `prompt()`（RPC 成功响应时——受理即证明用户消息已入主机日志；首讯被拒则会话保持 blank、保持可复用）与任何 `running: true` 状态帧翻为 false，每次列表重拉重新对齐。列表界面隐藏 blank 行；store 保留全部行。`SessionRuntime.create` 接受可选的、由调用方预先分配的 SessionId，失败时抛出 `SessionCreateError`（携带 `requestedSessionId`）。
+`WorkspaceRuntime.connectWorkspace(workspaceId, isolation)` 要求调用方明确选择 `direct` 或 `worktree`。直接模式会从列表镜像复用该 Workspace 的既有空 Session（`blank && cwd == workspace.path && sessionIds.includes(id)`——Host 自己的成员规则，绝不只按 cwd，避免劫持 cwd 匹配但未入账的空白 Session），未命中则调用 `session.create({workspaceId, isolation: 'direct'})`。Worktree 模式绝不接纳直接模式的空 Session，而会始终要求 Host 创建隔离 Session；返回的 Worktree 路径会原样保留为即时 Session cwd，完整分配仍以 Task 投影为权威。共享的 `startSession` 和启动选择操作会明确使用直接模式。`SessionSummary.blank` 镜像 Host 派生的空日志位，在客户端只降不升：由 `session.list`／`host/session-added` 帧播种，本地首次获 Host 接受的 `prompt()`（RPC 成功响应时——受理即证明用户消息已入 Host 日志；首讯被拒则 Session 保持 blank、保持可复用）与任何 `running: true` 状态帧翻为 false，每次列表重拉重新对齐。列表界面隐藏 blank 行；store 保留全部行。`SessionRuntime.create` 接受可选的、由调用方预先分配的 SessionId 和隔离模式，失败时抛出 `SessionCreateError`（携带 `requestedSessionId`）。
 
 `Session.composerPhase` 把任何可见的非命令 Chat Node 视为对话内容，因此客户端插件可以在不打开轮次的情况下投影持久用户输入，而仅包含通用命令行的窗口仍保持 Host blank 状态。列表隐藏和空白会话复用仍遵循 Host blank 位。缺少插件输入 Node 的历史窗口会恢复该空白状态，直到加载更早页面后该 Node 恢复。
 

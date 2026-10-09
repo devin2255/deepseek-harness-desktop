@@ -10,6 +10,40 @@
     surfaceContext: false
     trustedHosts: []
 
+# The Host API waits for the desktop's Task Provider even though this overlay
+# appends the Provider after the Web bundle's existing API row.
+- id: api-gateway
+  inject: [tasks]
+
+- id: sandbox-policy
+  config:
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+    workspaceRoot: !!js process.cwd()
+    delegationMode: read-only
+
+# The in-app browser accepts an exact host path without launching a native
+# dialog worker, including on Windows installations where that worker fails.
+- id: directory-picker
+  disabled: true
+
 - insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
     - id: desktop-app
       name: '@deepseek-ai/dsh-desktop-app'
+    - id: terminals
+      name: '@deepseek-ai/dsh-terminal'
+    - id: terminal-shell
+      name: '@deepseek-ai/dsh-terminal-shell'
+      config:
+        shell: !!js "process.platform === 'win32' ? 'powershell' : 'bash'"
+    - id: tool-terminal
+      name: '@deepseek-ai/dsh-tool-terminal'
+    - id: task-session
+      name: '@deepseek-ai/dsh-task-session'
+    - id: ui-task-overview
+      name: '@deepseek-ai/dsh-client-ui-task-overview'
+    - id: ui-harness-studio
+      name: '@deepseek-ai/dsh-client-ui-harness-studio'

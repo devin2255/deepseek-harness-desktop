@@ -8,6 +8,12 @@ the deliberate composition divergences from `dsh web` — are documented in
 [`scaffold.ts`](scaffold.ts) and the
 [browser e2e Agent Note](../../../.agents/notes/implemented/testing/2026-07-24-web-gui-browser-e2e-lane.md).
 
+## Platform coverage
+
+The required full browser lane targets POSIX fixtures and runs in Linux CI; its recorded `bash` calls do not qualify Windows behavior. Direct shipped-composition assertions use the host's actual shell (`pwsh` on Windows, `bash` elsewhere). Cold-session seeding JSON-escapes replacement identities and workspace paths, including Windows backslashes and quoted directory names, before passing the log to the real persistence parser. These input replacements do not normalize or rewrite expected browser output. Native desktop acceptance remains separate.
+
+Run-local aria roots tokenize both plain and JSON-escaped path spellings; unrelated paths, command text, and tool failures remain literal. Keyboard paging targets an explicitly focused history action instead of depending on a recorded tool's presenter being available. The HMR scenario starts the existing `dev:web` script through Node without a shell-dependent package-manager shim and pins the browser language to its English assertions.
+
 ## These are Host-face tests
 
 They type-check in the root `tsconfig.host.json`, not in the Client aggregate,

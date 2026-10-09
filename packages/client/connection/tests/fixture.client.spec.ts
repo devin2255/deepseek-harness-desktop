@@ -9,6 +9,7 @@ import type { SessionId, WorkspaceId } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 import type { HostFrame, MuxFrame, RpcMessage, RpcRequest } from '../src/client/api.ts'
 import { FixtureApiClient, createFixtureApi } from '../src/client/fixture.ts'
+import { TaskReviewOperationId } from '@deepseek-ai/dsh-task-review'
 
 const sid = (id: string): SessionId => id as SessionId
 const req = <P>(payload: P): RpcRequest<P> => ({ rpcId: RpcId(`t-${Math.abs(Math.sin(reqCount++)).toString(36).slice(2, 10)}`), payload })
@@ -52,6 +53,14 @@ async function collect<F>(stream: AsyncIterable<RpcRequest<F>>, abort: AbortCont
 }
 
 describe('createFixtureApi', () => {
+  it('rejects delivery inspection without durable Git authorization in both fixture carriers', async () => {
+    const payload = { sessionId: sid('fx-alpha'), operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000009') }
+    const request = req(payload)
+    const response = await createFixtureApi().tasks.inspectDelivery(request, new AbortController().signal)
+    expect(response.rpcId).toBe(request.rpcId)
+    expect(response.result).toMatchObject({ ok: false, error: { code: 'task-delivery-pending', details: { sessionId: payload.sessionId } } })
+    expect((await new FixtureApiClient().tasks.inspectDelivery(payload)).result).toEqual(response.result)
+  })
   it('serves the session list sorted by updatedAt desc and echoes rpcIds on every unary', async () => {
     const api = createFixtureApi()
     const request = req({})
@@ -1092,7 +1101,117 @@ describe('FixtureApiClient (protocol-level fake carrier)', () => {
     expect(rejected.result).toMatchObject({ ok: false, error: { code: 'agent-busy' } })
   })
 
-  it('maps attach-failure and dropped-response query scenarios', async () => {
+  it('maps the explicit task-overview roster to authoritative child metadata', async () => {
+    vi.stubGlobal('location', { search: '?fixture=task-overview' })
+    const client = new FixtureApiClient()
+    const listed = await client.sessions.list({})
+    if (!listed.result.ok) throw new Error('session list failed')
+    expect(listed.result.value.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sessionId: 'fx-child-running', parentSessionId: 'fx-alpha', origin: 'subagent', running: true }),
+      expect.objectContaining({ sessionId: 'fx-child-waiting', parentSessionId: 'fx-alpha', origin: 'subagent', running: false }),
+      expect.objectContaining({ sessionId: 'fx-gamma', running: true }),
+    ]))
+    const catalog = await client.subagents.list({ parentSessionId: sid('fx-alpha') })
+    expect(catalog.result).toMatchObject({
+      ok: true,
+      value: {
+        parentAvailable: true,
+        entries: [
+          { kind: 'child', id: 'fx-child-running', mode: 'continuable', label: 'Running child', activity: 'running' },
+          { kind: 'child', id: 'fx-child-waiting', mode: 'continuable', label: 'Waiting child', activity: 'inactive' },
+        ],
+      },
+    })
+    const tasks = await client.tasks.list({})
+    expect(tasks.result).toMatchObject({
+      ok: true,
+      value: {
+        tasks: [
+          {
+            taskId: 'fx-alpha', status: 'needs-attention',
+            descendantSessionIds: ['fx-child-running', 'fx-child-waiting'],
+            attention: [{ ownerSessionId: 'fx-child-waiting', kind: 'question' }],
+          },
+          { taskId: 'fx-gamma', status: 'running' },
+          { taskId: 'fx-beta', status: 'settled' },
+        ],
+      },
+    })
+    const abort = new AbortController()
+    const questions: RpcRequest<MuxFrame>[] = []
+    const consuming = (async () => {
+      for await (const envelope of client.events.mux({}, abort.signal)) {
+        if (envelope.payload.type !== 'question/requested' && envelope.payload.type !== 'question/resolved') continue
+        questions.push(envelope)
+        if (envelope.payload.type === 'question/resolved') abort.abort()
+      }
+    })()
+    await vi.waitFor(() => {
+      expect(questions.some(envelope =>
+        envelope.payload.type === 'question/requested'
+        && envelope.payload.sessionId === sid('fx-child-waiting'))).toBe(true)
+    })
+    const requested = questions.find(envelope => envelope.payload.type === 'question/requested')
+    if (requested === undefined) throw new Error('fixture question missing')
+    expect(await client.respond({
+      type: 'client-response', rpcId: requested.rpcId, result: { ok: true, value: {} },
+    })).toEqual({ accepted: true })
+    await consuming
+    expect(questions.some(envelope =>
+      envelope.payload.type === 'question/resolved'
+      && envelope.payload.sessionId === sid('fx-child-waiting'))).toBe(true)
+  })
+
+  it('maps isolation, attach-failure, and dropped-response query scenarios', async () => {
+    vi.stubGlobal('location', { search: '?fixture=task-overview' })
+    const successful = new FixtureApiClient()
+    const isolatedResult = await successful.sessions.create({
+      workspaceId: 'fx-ws-fixture' as WorkspaceId,
+      isolation: 'worktree',
+    })
+    expect(isolatedResult.result).toMatchObject({
+      ok: true,
+      value: {
+        executionWorkspace: {
+          kind: 'git-worktree',
+          workspaceId: 'fx-ws-fixture',
+          sourcePath: '/tmp/fixture',
+          sourceDirty: false,
+        },
+      },
+    })
+    if (!isolatedResult.result.ok) throw new Error('isolated fixture create failed')
+    const isolatedSessionId = isolatedResult.result.value.sessionId
+    const isolatedExecutionWorkspace = isolatedResult.result.value.executionWorkspace
+    const isolatedTask = await successful.tasks.list({})
+    expect(isolatedTask.result.ok).toBe(true)
+    if (!isolatedTask.result.ok) throw new Error('isolated fixture task projection failed')
+    expect(isolatedTask.result.value.generation).toBe(1)
+    expect(isolatedTask.result.value.tasks.find(task => task.taskId === isolatedSessionId)).toMatchObject({
+      taskId: isolatedSessionId,
+      workspaceId: 'fx-ws-fixture',
+      executionWorkspace: isolatedExecutionWorkspace,
+    })
+    const isolatedWorkspaces = await successful.workspace.list({})
+    expect(isolatedWorkspaces.result.ok).toBe(true)
+    if (!isolatedWorkspaces.result.ok) throw new Error('isolated fixture Workspace projection failed')
+    expect(isolatedWorkspaces.result.value.items[0]?.sessionIds).not.toContain(isolatedSessionId)
+
+    vi.stubGlobal('location', { search: '?fixture&fixtureIsolation=fail' })
+    const isolated = new FixtureApiClient()
+    const isolationFailure = await isolated.sessions.create({
+      workspaceId: 'fx-ws-fixture' as WorkspaceId,
+      isolation: 'worktree',
+    })
+    expect(isolationFailure.result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'workspace-isolation-unavailable',
+        message: 'fixture could not create an isolated Git worktree',
+        details: { workspaceId: 'fx-ws-fixture', worktreeCode: 'WORKTREE_GIT_FAILED' },
+      },
+    })
+
     vi.stubGlobal('location', { search: '?fixture&fixtureAttach=fail' })
     const partial = new FixtureApiClient()
     const partialResult = await partial.sessions.create({

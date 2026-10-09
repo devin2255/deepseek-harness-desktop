@@ -18,8 +18,8 @@
  * `followup` delivers later content without exposing whether the child is
  * resident. Continuable children never become a {@link SubagentRun}: the
  * continuation manager holds their `AgentHandle` directly and orders every turn
- * through the child's own inbox, so providers contribute only the detached
- * creation spec and see no handle, turn, or teardown. Child and descendant
+ * through the child's own inbox. Providers supply detached creation data and
+ * optional execution validation, but see no handle, turn, or teardown. Child and descendant
  * discovery read the live session store and optional session persistence
  * directly and do not require that continuation runtime.
  *
@@ -36,11 +36,12 @@ import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentSetupCommit } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
+  ContinuableExecutionRequest,
   ResolvedSubagentStartRequest,
   SubagentCapabilities,
   SubagentProvider,
@@ -74,6 +75,9 @@ export { SubagentRunId } from './types.ts'
 export type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
+  ContinuableExecutionSpec,
+  ContinuableExecutionRequest,
+  SubagentInitializationEvent,
   ResolvedSubagentStartRequest,
   SubagentCapabilities,
   SubagentProvider,
@@ -186,6 +190,7 @@ export class SubagentRuntime extends Service {
     ctx.inject(['agents'], (childCtx: Context) => {
       const manager = new SubagentContinuationManager(childCtx, {
         prepareContinuable: (name, request) => this.prepareContinuable(name, request),
+        validateContinuableExecution: (name, request) => this.validateContinuableExecution(name, request),
         observeActivation: (provider, childId, parent) => this.observeActivation(provider, childId, parent),
       }, this.setupRegistry)
       this.continuations = manager
@@ -452,6 +457,20 @@ export class SubagentRuntime extends Service {
       throw new SubagentError(`no subagent provider registered for "${name}"`, 'NO_PROVIDER')
     }
     return provider
+  }
+
+  /** Require the recorded execution owner before an owned child can publish. */
+  private async validateContinuableExecution(name: string, request: ContinuableExecutionRequest): Promise<AgentSetupCommit> {
+    const provider = this.expectProvider(name)
+    if (provider.validateContinuableExecution === undefined) {
+      throw new SubagentError(`subagent provider "${name}" cannot validate owned execution`, 'UNSUPPORTED_CAPABILITY')
+    }
+    await provider.validateContinuableExecution(request)
+    return { commit: () => {
+      if (this.providers.get(name) !== provider) {
+        throw new SubagentError(`subagent execution provider "${name}" changed before publication`, 'NO_PROVIDER')
+      }
+    } }
   }
 
   /** Resolve the optional continuable-subagent manager or fail loud. */

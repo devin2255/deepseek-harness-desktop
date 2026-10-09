@@ -40,4 +40,6 @@ AppContainer 令牌没有环境读访问：每个可读路径都必须预先通�
 
 ## Related
 
+[持久 PowerShell 决策](2026-10-09-persistent-powershell-terminal.md)负责受限语言提示符启动和 runner 的进程本地 Ctrl+C 监听器；文件权限与授权生命周期保持不变。
+
 [pwsh 执行器决策](2026-08-01-pwsh-tool-and-executor.md)拥有本档所消费的 pwsh-sandbox/tool-pwsh 方言划分。

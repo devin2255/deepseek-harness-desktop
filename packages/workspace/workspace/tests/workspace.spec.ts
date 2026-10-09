@@ -873,6 +873,25 @@ describe('workspace mutation and status', () => {
 })
 
 describe('registry-global session archive', () => {
+  it('restores the retained workspace position durably and ignores repeat restoration', async () => {
+    const dir = await makeDir('archive-restore')
+    const pool = new MemoryMediaPool()
+    const first = await harness({ pool, sessions: [header('a', dir, 100), header('b', dir, 200)] })
+    const position = [...first.registry.list()[0]!.sessionIds]
+    await first.registry.archiveSession(SessionId('a'))
+    await first.registry.archiveSession(SessionId('b'))
+    await first.registry.unarchiveSession(SessionId('a'))
+    expect(first.registry.archivedSessionIds).toEqual(['b'])
+    expect(first.registry.list()[0]!.sessionIds).toEqual(position)
+    const changes = first.changes.filter(change => change.table === '').length
+    await first.registry.unarchiveSession(SessionId('a'))
+    expect(first.changes.filter(change => change.table === '').length).toBe(changes)
+    await first.fiber.dispose()
+    const second = await harness({ pool, sessions: [header('a', dir, 100), header('b', dir, 200)] })
+    expect(second.registry.archivedSessionIds).toEqual(['b'])
+    expect(second.registry.list()[0]!.sessionIds).toEqual(position)
+  })
+
   it('archives durably in order, idempotently skips repeats, and leaves accounting untouched', async () => {
     const dir = await makeDir('archive-home')
     const result = await harness({ sessions: [header('kept', dir, 100), header('gone', dir, 200)] })

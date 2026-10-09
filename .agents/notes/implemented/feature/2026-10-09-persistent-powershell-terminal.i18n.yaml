@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-09-persistent-powershell-terminal.md
+2026-10-09-persistent-powershell-terminal.md: 3527caa75328163dcac4a9f9ae4ef1e79435c30c
+2026-10-09-persistent-powershell-terminal.zh.md: 67850467a4a63144838c82bcac229b2c57e8e6a4

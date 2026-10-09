@@ -16,17 +16,17 @@ harness 可以运行前台与后台命令、编辑文件和委派工作，但无
 
 可选的 `packages/terminal/` 能力家族提供由 agent（智能体）拥有、持久化且面向行式交互的 PTY 会话。它遵循仓库的 [能力模式](../../implemented/architecture/2026-06-13-capability-seams.md)，与现有命令和文件系统工具并存，并且不修改 `agent-loop`。
 
-当前实现在 Linux 和 macOS 上支持交互式 shell 与行式 REPL。全屏终端应用、按键序列、BEL 触发的控制流、进程丢失后的会话恢复以及跨 agent 共享会话都明确推迟。
+当前实现在 Linux、macOS 和 Windows 上支持交互式 shell 与行式 REPL；[PowerShell 决策](2026-10-09-persistent-powershell-terminal.md)负责 Windows 启动与受限中断。全屏终端应用、按键序列、BEL 触发的控制流、进程丢失后的会话恢复以及跨 agent 共享会话都明确推迟。
 
 ### 包拓扑
 
 | 包 | 角色 | ctx key |
 |---|---|---|
 | `dsh-terminal` | `TerminalSessionService`、branded `TerminalSessionId`、后端注册表、按 owner 隔离的会话约定和结果类型 | `ctx.terminals` |
-| `dsh-terminal-bash` | 基于 `ctx.subprocess.spawnTerminal()` 的持久 shell 后端：就绪状态、有界终端缓冲、沙箱解析和感知 owner 的会话生命周期 | 在 `ctx.terminals` 上注册后端 |
+| `dsh-terminal-shell` | 基于 `ctx.subprocess.spawnTerminal()` 的持久 shell 后端：就绪状态、有界终端缓冲、沙箱解析和感知 owner 的会话生命周期 | 在 `ctx.terminals` 上注册后端 |
 | `dsh-tool-terminal` | 6 个面向模型的工具、后台发送的 task 运行时集成、使用指引和 UI 渲染意图 | 注册到 `ctx.tools` |
 
-就绪判定仍属于 PTY 后端行为，不是第二条公共约定。终端进程提供方只提供基底事实，例如前台进程组，以及能否证明该组正在等待输入；`dsh-terminal-bash` 将这些事实与提示符和静默证据组合成统一的发送结果。
+就绪判定仍属于 PTY 后端行为，不是第二条公共约定。终端进程提供方只提供基底事实，例如前台进程组，以及能否证明该组正在等待输入；`dsh-terminal-shell` 将这些事实与提示符和静默证据组合成统一的发送结果。
 
 ### agent 所有权与身份
 
@@ -38,14 +38,14 @@ agent scope dispose（资源释放）时先撤销注册，再等待全部所属 
 
 ### 安全与进程边界
 
-注册的 `shell` 后端只约束终端如何启动，不约束启动后输入的命令。因此 `dsh-terminal-bash` 在 spawn 前应用两层保护：
+注册的 `shell` 后端只约束终端如何启动，不约束启动后输入的命令。因此 `dsh-terminal-shell` 在 spawn 前应用两层保护：
 
 - 它只提供终端专用的环境覆盖；挂载的子进程提供方先清除名称形似凭据的环境变量，再合并这些覆盖。
 - 它要求共享的 `ctx.sandboxPolicy`。后端在 spawn 时，以部署默认值为底折叠 owner 的有效会话模式；`danger-full-access` 会直接启动 shell，受限模式则要求同一执行世界中存在 `ctx.sandbox` 提供方，并只包装一次 shell argv。该模式与 workspace root 在 PTY 的整个生命周期中充当进程边界。只要 owner 有任何已打开的 PTY 或尚未发布的 spawn，任何会改变生效 `sandbox/mode` 的写入都会在提交前被拒绝，并提示先等待创建操作结算，再关闭这些会话；不会改变生效模式的写入仍然有效。这项进行中的预留从后端 setup 持续到发布完成，因此不存在降级后又出现权限更宽的终端这一竞态。`danger-full-access` 是现有的显式无约束选择，不另设 PTY 私有 bypass。
 
 沙箱限制本地进程副作用，但不会让任意 shell 输入自动安全：网络调用和其他外部副作用仍由部署策略治理。工具描述会说明 PTY 会话比一次性工具更难审计，只应在确实需要持久状态或交互式 stdin 时使用。
 
-本地子进程终端原语只使用 `node-pty` 的公开能力：子进程 PID、`data` 与 `exit` 通知、`write` 和 `kill`。它不假设能访问原生 master fd，也不从 TypeScript 调用 `waitpid`。该原语下的平台进程检查器在 Linux 上通过 `/proc`、在 macOS 上通过 `ps` 推导前台进程组和父子进程身份。[可移植执行环境决策](../architecture/2026-07-28-portable-execution-world-consumers.md)负责定义这种进程／消费方拆分。
+POSIX 本地子进程终端原语只使用 `node-pty` 的公开能力：子进程 PID、`data` 与 `exit` 通知、`write` 和 `kill`。它不假设能访问原生 master fd，也不从 TypeScript 调用 `waitpid`。该原语下的平台进程检查器在 Linux 上通过 `/proc`、在 macOS 上通过 `ps` 推导前台进程组和父子进程身份。Windows 分配与清理使用 [ConPTY Job 所有权](../architecture/2026-10-08-windows-conpty-job-ownership.md)，不具有 POSIX 前台身份。[可移植执行环境决策](../architecture/2026-07-28-portable-execution-world-consumers.md)负责定义这种进程／消费方拆分。
 
 ### 6 个面向模型的工具
 
@@ -60,11 +60,11 @@ agent scope dispose（资源释放）时先撤销注册，再等待全部所属 
 
 UI 渲染约定精确且不携带位置信息。`terminal_send` 只为前台发送使用 terminal 调用卡片和结果卡片；后台形式使用通用 `execute` 卡片。`terminal_open`、`terminal_read`、`terminal_signal`、`terminal_close` 和 `terminal_list` 分别使用通用 `execute`、`read`、`execute`、`delete` 和 `read` 卡片。所有 PTY 工具都不发出 `locations`。
 
-`terminal_send({ sessionId, text, submit?, run_in_background? })` 将 `text` 视为 UTF-8 字节，并由工具实现在解析阶段把 `submit` 默认成 `true`。`submit` 为 true 时先写入文本，再写入平台 Enter 序列；为 false 时只写文本，使控制字符和 REPL 片段无需隐藏的内容启发式即可发送。取消会在向真实前台进程组发送信号前将排队输入标记为已取消，因此即使异步的写入前检查随后才结算，该输入也无法执行。被取消的发送会保留其预留，直至异步前台信号发送结算，因此后续发送不会成为该信号的目标。`enableRunInBackground` 默认为 true；设为 false 时，schema 中会移除 `run_in_background`，调用方即使强行把这个未声明参数传入执行流程，也会被拒绝。
+`terminal_send({ sessionId, text, submit?, run_in_background? })` 将 `text` 视为 UTF-8 字节，并由工具实现在解析阶段把 `submit` 默认成 `true`。`submit` 为 true 时先写入文本，再写入平台 Enter 序列；为 false 时只写文本，使控制字符和 REPL 片段无需隐藏的内容启发式即可发送。取消会在请求[原生中断](2026-10-09-terminal-interruption-results.md)前将排队输入标记为已取消，因此即使异步的写入前检查随后才结算，该输入也无法执行。POSIX Bash 后端仍发送真正的前台 `SIGINT`。只有首次取消会被接受，被取消的发送会保留其预留，直至异步中断结算，因此后续发送不会成为它的目标。`enableRunInBackground` 默认为 true；设为 false 时，schema 中会移除 `run_in_background`，调用方即使强行把这个未声明参数传入执行流程，也会被拒绝。
 
 前台发送返回有界的渲染增量和两个独立事实：`waitReason`（`stdin_read | inferred_idle | timeout | session_exit`）与 `sessionStatus`（`running`，或携带退出码或信号的 `exited`）。`session_exit` 指 PTY 顶层 shell 进程退出，不指由 shell 消费状态的任意前台命令。timeout 从不意味着进程已经退出。`dsh-tool-terminal.maxResultBytes` 默认为 262144；低于 64 的值会被拒绝，以确保创建确认保留注册表签发的 id；每个单文本 UTF-8 结果在加入规范化的工具或流水线错误、等待、会话、分页、截断、通用 task 状态包装、策略拒绝或短路以及 post-execute 替换或阻断后，仍受该值限制；终端定义自有的末端 `finalizeContent` callback 会原样保留策略刻意返回的结构化多块内容。渲染器会为后缀预留空间并保持代码点边界，而不会把后端载荷上限当作面向模型结果的最终上限。
 
-当 `run_in_background: true` 时，`dsh-tool-terminal` 在 `ctx.jobs` 上注册进行中的发送，并立即返回 `jobId`。生产方把 `maxResultBytes` 写入 task 快照，使 `job_output`、kill 返回的终态状态和完成通知在加上通用元数据后，仍对完整结果执行同一上限。`job_output(wait: true)` 负责等待、读取增量输出并记录最终结果；`job_kill` 会解析当前前台 PGID 并发送真正的 `SIGINT`，即使应用已禁用终端 `ISIG` 也同样如此，且后续升级仍只通过 PTY 后端拥有的 teardown 路径进行。若 task 对外接口不存在，后台模式必须在写入输入前失败。设计不新增 PTY 专用的 `sleep` 工具或通用唤醒 API。
+当 `run_in_background: true` 时，`dsh-tool-terminal` 在 `ctx.jobs` 上注册进行中的发送，并立即返回 `jobId`。生产方把 `maxResultBytes` 写入 task 快照，使 `job_output`、kill 返回的终态状态和完成通知在加上通用元数据后，仍对完整结果执行同一上限。`job_output(wait: true)` 负责等待、读取增量输出并记录最终结果；`job_kill` 请求原生中断（POSIX 上发送真正的前台 `SIGINT`，包括 raw 模式；Windows 上写入 Ctrl+C 输入），且后续升级仍只通过 PTY 后端拥有的 teardown 路径进行。若 task 对外接口不存在，后台模式必须在写入输入前失败。设计不新增 PTY 专用的 `sleep` 工具或通用唤醒 API。
 
 `terminal_read` 从最新保留行向后分页。后端同时对保留的 scrollback 和返回页载荷执行行数与 UTF-8 字节上限，因此单个超长行无法绕过后端上限；工具随后再限制包含分页与截断元数据的完整渲染页。`truncated` 用于区分保留数据丢失与普通 viewport 增量。
 
@@ -77,6 +77,8 @@ UI 渲染约定精确且不携带位置信息。`terminal_send` 只为前台发�
 在 Linux 上，检查器从 `/proc/<shellPid>/stat` 读取 shell 的终端前台 PGID，枚举该进程组中的每个进程与线程，并检查它们当前的 syscall。Tier 1 只有观察到 stdin 等待才返回正结果：直接 `read(0)`、获准读取且含 fd 0 的 `select`/`pselect6` 或 `poll`/`ppoll` 参数，或者含 fd 0 的 epoll interest list。终端输入前就已存在的等待并不代表写入后就绪：必须先观察到同一 PGID 脱离该等待，之后再次进入等待才能使该次 send 完成；前台 PGID 发生变化则构成新的证据。无法读取的进程内存和未识别的 syscall 都是 miss，绝不作为正向猜测。架构表只包含对应 Linux UAPI 定义的 syscall number；不支持的架构跳过 Tier 1。
 
 macOS 没有精确 syscall 层。任何前台进程组输出静默都会返回 `inferred_idle`，包括 Python 和 `gdb`；从 `ps` 推导的终端 PGID 只用于发送信号，不作为「只有 shell 才能 idle」的证明。纯进程检查逻辑可注入，并在 Linux 上经过单元测试，同时由 macOS CI job 驱动真实 PTY 和进程表路径。
+
+提示符就绪要求当前观察到的前台进程组与 shell 进程组匹配。两个缺失的进程组值不能证明这一关系，包括启动阶段首次捕获 shell 进程组之前。检查无法识别进程组时，仅有提示符文本只允许返回静默或超时就绪结果；随后观察到进程组归属时，精确提示符就绪才恢复可用。
 
 Tier 2 在持续 `idleSilenceMs` 没有输出后返回 `inferred_idle`，因此 sleep 或网络阻塞的命令可能看似 ready。如果此前已经见过 prompt marker，Tier 2 会再等待 `handoffGraceMs`，使恰好落在静默边界上的 bash 前台交接仍然以精确的 `stdin_read` 归因结束，而不是退到较弱的推断；该宽限是由部署方拥有的配置字段，并被校验为至少覆盖一个 `pollIntervalMs`——短于轮询周期的宽限装不下一次就绪轮询，因此不可能改变任何结果。它只约束见过 marker 的 send，代价是这一种情况的交互返回延迟，而不是每一次 send。Tier 3 在 `timeoutMs` 后返回 `timeout`，避免前台工具调用无限占住 agent。结果保留这些区别；调用方可以通过 `ctx.jobs` 等待、向前台组发信号，或从另一个会话排查。
 
@@ -109,7 +111,7 @@ plugins:
       workspaceRoot: .
   '@deepseek-ai/dsh-terminal':
   '@deepseek-ai/dsh-subprocess-local':
-  '@deepseek-ai/dsh-terminal-bash':
+  '@deepseek-ai/dsh-terminal-shell':
     config:
       scrollbackLines: 10000
       scrollbackMaxBytes: 4194304
@@ -126,7 +128,7 @@ plugins:
       maxResultBytes: 262144
 ```
 
-包提供简洁的工具指引，说明持久状态、owner 隔离、不确定的 idle 结果、清理，以及无需交互时优先使用现有一次性工具。已发布的基础示例不挂载 PTY：PTY 仅通过专用组合 opt-in，而 ACP（Agent Client Protocol）与 headless 快照 overlay 会对其进行验证。`dsh-tool-terminal` 实例一旦启用，6 个工具和 `run_in_background` 就会默认启用；部署可通过配置仅禁用后台参数。
+包提供简洁的工具指引，说明持久状态、owner 隔离、不确定的 idle 结果、清理，以及无需交互时优先使用现有一次性工具。已发布的基础示例通过专用组合保持 PTY opt-in；本地桌面 profile 显式挂载它，而 ACP（Agent Client Protocol）与 headless 快照 overlay 会对其进行验证。`dsh-tool-terminal` 实例一旦启用，6 个工具和 `run_in_background` 就会默认启用；部署可通过配置仅禁用后台参数。
 
 ### 推迟的工作
 
@@ -134,7 +136,6 @@ plugins:
 - 声明式 per-agent 启动需要 agent-setup 组合点；仍然禁止插件加载期全局会话。
 - harness 进程丢失后的会话恢复需要进程外 owner 和版本化协议。
 - 网络出口策略与外部副作用回滚超出 PTY 范围，继续作为独立安全工作。
-- Windows/ConPTY 支持需要具备 Windows 原生进程所有权与信号语义的后端。
 
 ## 备选方案
 
@@ -146,7 +147,7 @@ plugins:
 
 **向根 PID 所属 POSIX 会话的全部成员发送信号。**拒绝。`node-pty` 可能暴露属于启动器会话的 helper PID，因此按 SID 清理可能向无关的 harness 或桌面进程发送信号。带 PID 启动身份校验的子孙进程树范围更窄，其安全边界由结构保证。
 
-**发布可替换注册表 `TerminalIdleDetector`。**拒绝。基底专用的前台事实来自挂载的终端进程原语，提示符／静默就绪判定则仍是 `dsh-terminal-bash` 内部的一项私有策略。替换文件系统／子进程执行环境就是所需扩展点。
+**发布可替换注册表 `TerminalIdleDetector`。**拒绝。基底专用的前台事实来自挂载的终端进程原语，提示符／静默就绪判定则仍是 `dsh-terminal-shell` 内部的一项私有策略。替换文件系统／子进程执行环境就是所需扩展点。
 
 **新增 PTY 专用 `sleep` 工具。**拒绝。`ctx.jobs` 已经拥有有界等待、取消、完成通知和面向模型的收集。第二套通用唤醒机制会跨越 agent loop（智能体循环）边界并重复该约定。
 
@@ -160,6 +161,7 @@ plugins:
 - 子进程 fixture（测试前置数据）覆盖非 leader 与非主线程的 stdin 等待、僵尸进程完全停稳、不可读进程状态、受支持的 syscall 表、不支持的架构和误报拒绝；同一单元测试套件通过注入覆盖 macOS 检查器逻辑。
 - 真实 `node-pty` 与 PTY 消费方测试共同在受支持宿主上覆盖 shell 状态、共享沙箱策略、环境清洗、raw mode 前台 `SIGINT`、忽略 `SIGTERM` 的后代进程，以及 dispose 返回后立即完全停稳。
 - Loader 驱动的 `cordis.yml` 测试挂载真实三包组合。ACP 与 headless 快照通过 opt-in overlay 固定 6 个 schema、有界结果和错误；TUI 快照固定 terminal 与 generic 卡片展示。
+- headless 终端就绪 transcript（文本记录）使用真实后端和工具，仅控制操作系统终端传输；它区分前台事实不可用与归属恢复。可移植的解析器、配置和生命周期测试在 Windows 上执行，仅真实 POSIX PTY 套件被排除。Windows 进程所有权有独立的原生验收；该平台仍不支持 POSIX 前台信号。
 - 包约定、架构图、子系统页面、生成目录和 website API 描述同一个已发布接口。
 
 ## 后果

@@ -1510,6 +1510,8 @@ Source: [`packages/sandbox/sandbox-local/src/index.ts:44`](../packages/sandbox/s
 export interface Config {
   /** File-sandbox mode a session starts from (default: `read-only`). */
   mode?: SandboxMode
+  /** In-process child policy: copy the parent's explicit override, or start read-only. Default `inherit`. */
+  delegationMode?: 'inherit' | 'read-only'
   /**
    * Fallback root for agentless calls and sessions without a cwd (default:
    * `process.cwd()`). Normal agent calls use their session cwd instead.
@@ -2194,14 +2196,16 @@ Source: [`packages/subagent/subagent-fork-in-process/src/index.ts:31`](../packag
 Requires: `subagents`
 
 ```ts config-catalog
-/** Config: the registry name to register the provider under. */
+/** Spawn Provider registry identity and execution-directory choice. */
 export interface Config {
   /** Provider name on `ctx.subagents` (default `spawn`). */
   providerName: string
+  /** Shared parent directory, or a distinct writer worktree (default `shared`). */
+  workspaceMode?: 'shared' | 'isolated-worktree'
 }
 ```
 
-Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:25`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
+Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:31`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
 
 <a id="deepseek-aidsh-subprocess-e2b"></a>
 
@@ -2246,9 +2250,65 @@ export interface Config {
 
 Source: [`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
 
-<a id="deepseek-aidsh-terminal-bash"></a>
+<a id="deepseek-aidsh-task-review-local"></a>
 
-## `@deepseek-ai/dsh-terminal-bash`
+## `@deepseek-ai/dsh-task-review-local`
+
+Requires: `subprocess`
+
+```ts config-catalog
+/** User configuration accepted by the local Task review Provider. */
+export interface Config {
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+  /** Maximum UTF-8 bytes returned for one file patch. */
+  maxDiffBytes?: number
+  /** Maximum complete binary patch bytes accepted by Apply. */
+  maxPatchBytes?: number
+  /** Maximum file rows returned in one summary. */
+  maxFiles?: number
+  /** Maximum committed writers accepted in one preflighted integration batch. */
+  maxIntegrationInputs?: number
+}
+```
+
+Source: [`packages/task/task-review-local/src/index.ts:61`](../packages/task/task-review-local/src/index.ts)
+
+<a id="deepseek-aidsh-task-worktree-local"></a>
+
+## `@deepseek-ai/dsh-task-worktree-local`
+
+Requires: `subprocess`
+
+```ts config-catalog
+/** User configuration accepted by the local Task worktree Provider. */
+export interface Config {
+  /** Explicit Harness home; omitted follows `DSH_HOME`, then `~/.dsh`. */
+  dshHome?: string
+  /** Minimum free bytes required on the Harness-home volume. */
+  minFreeBytes?: number
+  /** Bare or absolute Git executable. */
+  gitCommand?: string
+  /** Deadline for each Git subprocess. */
+  commandTimeoutMs?: number
+  /** Termination grace for each Git subprocess tree. */
+  terminateGraceMs?: number
+  /** Per-stream collected-output byte bound. */
+  maxOutputBytes?: number
+}
+```
+
+Source: [`packages/task/task-worktree-local/src/index.ts:31`](../packages/task/task-worktree-local/src/index.ts)
+
+<a id="deepseek-aidsh-terminal-shell"></a>
+
+## `@deepseek-ai/dsh-terminal-shell`
 
 Requires: `terminals` · `sandboxPolicy` · `subprocess`
 
@@ -2257,9 +2317,11 @@ Requires: `terminals` · `sandboxPolicy` · `subprocess`
 export interface Config {
   /** Backend registry type (default: `shell`). */
   backendType?: string
-  /** Interactive shell executable (default: `/bin/bash`). */
+  /** Shell syntax and startup protocol; explicit execution-world choice (default: `bash`). */
+  shell?: 'bash' | 'powershell'
+  /** Shell executable (default: `/bin/bash` for Bash, `powershell.exe` for PowerShell). */
   shellPath?: string
-  /** Shell arguments (default: `--noprofile --norc -i`). */
+  /** Shell arguments; omission installs the selected shell's controlled interactive startup. */
   shellArgs?: string[]
   /** Terminal rows. */
   rows?: number
@@ -2284,12 +2346,12 @@ export interface Config {
   handoffGraceMs?: number
   /** Absolute send wait bound. */
   timeoutMs?: number
-  /** Grace before teardown escalates to `SIGKILL`. */
+  /** Provider-owned terminal teardown grace or deadline. */
   disposeGraceMs?: number
 }
 ```
 
-Source: [`packages/terminal/terminal-bash/src/config.ts:6`](../packages/terminal/terminal-bash/src/config.ts)
+Source: [`packages/terminal/terminal-shell/src/config.ts:8`](../packages/terminal/terminal-shell/src/config.ts)
 
 <a id="deepseek-aidsh-time-context"></a>
 
@@ -3041,6 +3103,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-directory-picker-browse` ([`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-directory-picker-native` ([`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-goal` ([`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-harness-studio` ([`packages/client/ui-harness-studio/src/index.ts`](../packages/client/ui-harness-studio/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-input-trigger` ([`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-jobs` ([`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
@@ -3056,6 +3119,8 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-sidebar` ([`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-skill` ([`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-subagent` ([`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-task-overview` ([`packages/client/ui-task-overview/src/index.ts`](../packages/client/ui-task-overview/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-task-review` ([`packages/client/ui-task-review/src/index.ts`](../packages/client/ui-task-review/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-theme` ([`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-tool` ([`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-trajectory` ([`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts))
@@ -3086,6 +3151,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-storage` ([`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts))
 - `@deepseek-ai/dsh-subagent` ([`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts))
 - `@deepseek-ai/dsh-subprocess-local` ([`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts))
+- `@deepseek-ai/dsh-task-session` — requires `sessions` · `sessionPersistence` ([`packages/task/task-session/src/index.ts`](../packages/task/task-session/src/index.ts))
 - `@deepseek-ai/dsh-terminal` ([`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts))
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
@@ -3112,6 +3178,8 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-shell` — abstract `ShellExecutor` ([`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts))
 - `@deepseek-ai/dsh-spill` — abstract `SpillStore` ([`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts))
 - `@deepseek-ai/dsh-subprocess` — abstract `SubprocessRuntime` ([`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts))
+- `@deepseek-ai/dsh-task-review` — abstract `TaskReviewService` ([`packages/task/task-review/src/index.ts`](../packages/task/task-review/src/index.ts))
+- `@deepseek-ai/dsh-task-worktree` — abstract `TaskWorktreeService` ([`packages/task/task-worktree/src/index.ts`](../packages/task/task-worktree/src/index.ts))
 - `@deepseek-ai/dsh-workflow` — abstract `WorkflowEngine` ([`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts))
 
 ## Library packages (no plugin entry)
@@ -3148,6 +3216,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-session-telemetry` ([`packages/session/session-telemetry/src/index.ts`](../packages/session/session-telemetry/src/index.ts))
 - `@deepseek-ai/dsh-session-title-llm` ([`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts))
 - `@deepseek-ai/dsh-subagent-in-process-driver` ([`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts))
+- `@deepseek-ai/dsh-task` ([`packages/task/task/src/index.ts`](../packages/task/task/src/index.ts))
 - `@deepseek-ai/dsh-timeout` ([`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts))
 - `@deepseek-ai/dsh-typert-generator` ([`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts))
 - `@deepseek-ai/dsh-typert-protocol` ([`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts))

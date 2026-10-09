@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[`@deepseek-ai/dsh-subprocess`](../subprocess/README.md) seam 的本地 Service Provider。`LocalSubprocessRuntime` 解析本地可执行文件，以显式 stdio spawn 普通 detached 进程树，并通过 `node-pty` 加平台进程检查实现终端进程。该实现没有任何配置：每项处置方式、限制、终端尺寸、宽限期与目录都来自调用方能力 seam（[`dsh-bash-local`](../../shell/bash-local/README.md)、[`dsh-lsp-stdio`](../../lsp/lsp-stdio/README.md) 和 [`dsh-terminal-bash`](../../terminal/terminal-bash/README.md)）。
+[`@deepseek-ai/dsh-subprocess`](../subprocess/README.md) seam 的本地 Service Provider。`LocalSubprocessRuntime` 解析本地可执行文件，以显式 stdio spawn 普通 detached 进程树，并通过 POSIX `node-pty` 或 Windows ConPTY 实现终端进程。该实现没有任何配置：每项处置方式、限制、终端尺寸、宽限期与目录都来自调用方能力 seam（[`dsh-bash-local`](../../shell/bash-local/README.md)、[`dsh-lsp-stdio`](../../lsp/lsp-stdio/README.md) 和 [`dsh-terminal-shell`](../../terminal/terminal-shell/README.md)）。
 
 ## 行为
 
@@ -11,9 +11,11 @@
 - **凭据清除 + 显式合并**：以 `process.env` 为基础，移除形似凭据的变量（`*KEY*`／`*PASSWORD*`／`*SECRET*`／`*TOKEN*`）和所有环境中已有的 `DSH_*` 名称；spec 的显式 `env` 在该清除之后合并且不做命名空间校验，因此有意提供的凭据或当前 `DSH_*` 事实会胜出，而陈旧的嵌套 harness 身份无法从环境中隐式漏入。提供的 stdin 会被写入后关闭；否则 fd 0 指向 `/dev/null`。参见 [stdin/env Agent Note](../../../.agents/notes/implemented/architecture/2026-06-30-bash-stdin-env-trusted-plugin-api.md)与[受管环境 Agent Note](../../../.agents/notes/implemented/feature/2026-07-10-agent-session-identity-and-log-location.md)。
 - **基于偏移量的读取**：收集模式的读取器按完整流的字节坐标返回增量；服务自身从不持有游标，因此消费方自有的游标（bash 的后台读取路径）与完整流重读可以共存，结算前后皆然。
 - **可执行文件查找**：`resolveExecutable` 检查绝对文件，或根据平台可执行文件扩展名在清理后的有效 PATH 中搜索；含分隔符的相对路径在该 seam 处被拒绝，相对 PATH 条目从宿主进程 cwd 解析。
-- **终端进程所有权**：`spawnTerminal` 分配 `node-pty`，桥接 UTF-8 终端文本，检查当前前台进程组并向其发送信号，还会公开一项须等待的终止操作，在终止顶层 shell 前后清理后代进程。每次前台检查都会保留根进程树中的精确身份；Linux 还会在 POSIX 会话 leader 退出后枚举该会话。因此，之前观察到的 macOS 后代以及同会话 Linux 成员在重新设定父进程后仍受围栏保护，pid/start 身份则防止清理跟随 PID 复用。上层 PTY 后端负责提示符就绪、缓冲区与面向模型的操作。
+- **POSIX 终端进程所有权**：`spawnTerminal` 分配 `node-pty`，桥接 UTF-8 终端文本，检查当前前台进程组并向其发送信号，还会公开一项须等待的终止操作，在终止顶层 shell 前后清理后代进程。每次前台检查都会保留根进程树中的精确身份；Linux 还会在 POSIX 会话 leader 退出后枚举该会话。因此，之前观察到的 macOS 后代以及同会话 Linux 成员在重新设定父进程后仍受围栏保护，pid/start 身份则防止清理跟随 PID 复用。上层 PTY 后端负责提示符就绪、缓冲区与面向模型的操作。
+- **Windows 终端所有权**：具备 ConPTY 的 64 位 Windows 宿主通过独立读取的 Node socket 连接原生同步管道端点。根进程以暂停状态创建，加入未命名、不可继承且关闭即终止的 Job 后才恢复执行；清理使用精确原生句柄，而不是按数值 PID 终止。终止操作强制停止 Job，核实活动成员归零且根进程退出，通过独立关闭工作线程读取 ConPTY 最终输出，并等待未完成的写入。提供方 dispose 会取消并等待尚未发布的分配。前台检查返回 undefined，所有 POSIX 前台信号都直接拒绝，不写入键盘控制字符。参见 [Windows 所有权决策](../../../.agents/notes/implemented/architecture/2026-10-08-windows-conpty-job-ownership.md)。
+- **终端中断**：`interrupt()` 在 POSIX 上发送真正的前台 `SIGINT`，在 Windows 上通过受追踪的 ConPTY 输入写入 Ctrl+C。结果记录交付，不代表命令完成。POSIX 清理阻止新的写入和前台操作，等待在途信号发送，并在异步检查后重新检查关闭状态，避免清理后才发送延迟信号。Windows 清理会等待中断写入及其他输入。消费方必须观察就绪后再发送后续 shell 命令；PowerShell 可能在前台子进程退出后重置输入缓冲。参见[中断决策](../../../.agents/notes/implemented/feature/2026-10-09-terminal-interruption-results.md)。
 - **先终止再等待退出的 dispose（资源释放）**：服务保留存活句柄，使自身的 dispose 能对每个仍在运行的进程树执行升级并等待其退出；完全停稳与 spawn 失败的句柄会在整棵进程树或 terminal session 清理完成后离开存活集合。
-- **同步宿主退出最终清理**：服务 effect 仍有效时，Node `exit` listener 会强制终止同一组存活集合中仍存在的每棵普通进程树和可观察 terminal session。这些仅供本地实现使用的操作会向受管 POSIX 进程组发送 SIGKILL、在 Windows 运行 `taskkill /T /F`，并在终止 PTY root 前后同步向已捕获及当前可观察的 terminal 身份发送信号；它们不会创建 Promise 或 timer，不改变宿主退出码与诊断，会分别包含每个目标的失败，也不会声称已经完全停稳。正常 dispose 仍使用上面的须等待温和路径。参见[宿主退出清理决策](../../../.agents/notes/implemented/bug-fix/2026-08-11-synchronous-subprocess-exit-cleanup.md)。
+- **同步宿主退出最终清理**：服务 effect 仍有效时，Node `exit` listener 会强制终止同一组存活集合中仍存在的每棵普通进程树和可观察 terminal session。普通进程树接收 POSIX 进程组 SIGKILL 或 Windows `taskkill /T /F`；POSIX 终端在终止 PTY root 前后向已捕获及当前可观察的身份发送信号，Windows 终端则关闭精确的关闭即终止 Job 句柄。这些仅供本地实现使用的操作不会创建 Promise 或 timer，不改变宿主退出码与诊断，会分别包含每个目标的失败，也不会声称已经完全停稳。正常 dispose 仍使用上面的须等待路径。参见[宿主退出清理决策](../../../.agents/notes/implemented/bug-fix/2026-08-11-synchronous-subprocess-exit-cleanup.md)。
 
 ## 模型体验
 
@@ -25,10 +27,10 @@
 
 ## 已知限制与暂缓事项
 
-- **Windows 进程树支持仅为尽力而为**：终止经由 `taskkill /PID <pid> /T /F` 完成，所有结果都被就地吸收，不向外抛出（进程树已不存在、竞态、二进制缺失），存活探测则回退到直接子进程边界。
-- **终端进程检查仅支持 Linux／macOS**：检查器没有受支持的平台实现时，终端原语会失败；Linux 精确探针覆盖 x64 与 arm64，macOS 则使用 `ps` 快照。
+- **普通 Windows 子进程树支持仅为尽力而为**：终止经由 `taskkill /PID <pid> /T /F` 完成，所有结果都被就地吸收，不向外抛出（进程树已不存在、竞态、二进制缺失），存活探测则回退到直接子进程边界。Windows 终端改用精确的 Job 所有权。
+- **前台进程组检查仅支持 Linux／macOS**：Windows 已支持终端分配、中断输入与清理，但 ConPTY 不提供 POSIX 进程组身份。具有就绪检测的 Windows 原生持久 shell 消费方仍待实现；该原语不会使 `dsh-terminal-shell` 成为受支持的 Windows 后端。
 - **守护化的终端后代仍可能逃出可观察边界**：在 macOS 上，子进程如果在任何前台检查快照之前重新设定父进程，将无法再从 `node-pty` 根进程发现；在 Linux 上，调用 `setsid` 的子进程会同时离开进程树与自有终端会话。本地提供方不会新增持续进程表监视器。
-- **进程内清理要求退出阶段仍能执行 JavaScript**：直接 `process.exit()`、默认未捕获异常和默认未处理 rejection 会发出 Node 同步 `exit` 事件。未安装 handler 时，`SIGTERM`、`SIGINT` 或 `SIGHUP` 的默认 OS 处置不会发出该事件；应用只有安装执行正常 dispose 或调用 `process.exit()` 的 handler 才能覆盖这些信号。`SIGKILL`、fatal OOM、`process.abort()`、native crash、断电，以及任何无法运行 JavaScript 的故障，都需要外部 supervisor、容器 init 或等价的 OS 所有者负责。
+- **依赖回调的清理要求退出阶段仍能执行 JavaScript**：直接 `process.exit()`、默认未捕获异常和默认未处理 rejection 会发出 Node 同步 `exit` 事件。未安装 handler 时，`SIGTERM`、`SIGINT` 或 `SIGHUP` 的默认 OS 处置不会发出该事件。POSIX 终端和普通子进程需要信号 handler 或外部 supervisor，才能覆盖这些路径、原生崩溃和宿主强制终止。Windows ConPTY Job 成员在宿主丢失后仍由 OS 的关闭即终止所有权负责；通过 WMI、服务等外部代理委派的执行不属于该 Job。这是进程生命周期管理，不是安全沙箱，也不提供断电后的状态持久化。
 - **凭据清除依赖名称启发式规则**：只匹配 `*KEY*`／`*PASSWORD*`／`*SECRET*`／`*TOKEN*`；名称不同的 secret（例如 `*PASSPHRASE*`）会继续传递，对误删变量引入白名单属于已记录的后续工作。
 - **不会删除已完成的 spill 文件**：有界的完整输出恢复文件（以及每个进程的私有 spill 目录）会在 OS tmpdir 下累积，直到外部机制进行清理；超大的不完整 spill 会被丢弃并立即尝试删除，但清理失败可能留下一个有界文件。
 

@@ -30,6 +30,7 @@ export type {
   SubprocessStdio,
   SubprocessTerminalForeground,
   SubprocessTerminalHandle,
+  SubprocessTerminalInterruptResult,
   SubprocessTerminalSignal,
   SubprocessTerminalSpawnSpec,
 } from './types.ts'

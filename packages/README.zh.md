@@ -14,6 +14,7 @@ npm scope 为 `@deepseek-ai/dsh-*`；Cordis `Service` 子类和函数插件通�
 | [`api/`](api/README.md) | Remote BFF 装配与 Typert RPC 网关 | 产品：稳定 API |
 | [`typert/`](typert/README.md) | 类型图生成、产物加载与运行时注册表 | 产品：稳定 API |
 | [`goal/`](goal/README.md) | 同会话 goal 的持久化与生命周期 | 产品：稳定 API |
+| [`task/`](task/README.md) | 持久根任务事实与跨会话投影 | 产品：稳定 API |
 | [`schedule/`](schedule/README.md) | 仅限会话内的定时后续操作 | 产品：稳定 API |
 | [`feedback/`](feedback/README.md) | 人类反馈 | 产品：稳定 API |
 | [`identity/`](identity/README.md) | 共享匿名身份 | 产品：稳定 API |

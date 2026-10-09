@@ -58,7 +58,7 @@ interface TerminalBackendSession {
 
 ## 发送与保留输出
 
-一个活跃会话同时只接受一个活动发送。该操作向通用后台任务提供读取后即推进的输出游标，并向前台调用方提供最终结果。`TerminalReadResult` 则为有界的会话 scrollback 单独分页。
+一个活跃会话同时只接受一个活动发送。该操作向通用后台任务提供读取后即推进的输出游标，并向前台调用方提供最终结果。取消只接受首次请求，不证明命令已经退出。`TerminalReadResult` 则为有界的会话 scrollback 单独分页。
 
 ```ts type-equiv
 /** Live backend-owned send; exactly one may be active per PTY session. */
@@ -67,7 +67,7 @@ interface TerminalSendOperation {
   done: Promise<TerminalSendResult>
   /** Consume output produced since the prior call. */
   readOutput(): TerminalSendRead
-  /** Request `SIGINT`; returns false after the operation settled. */
+  /** Request one native terminal interrupt; false after settlement or an earlier request. */
   cancel(): boolean
 }
 ```

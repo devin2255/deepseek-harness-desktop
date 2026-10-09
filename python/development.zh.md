@@ -36,6 +36,8 @@ uv run --project python/sdk python scripts/smoke-python-runtime.py \
 
 其中两个场景会比对 `scripts/snapshots/python-sdk-single-exe/` 下已提交的期望输出。`minimal/model-visible.json` 固定了签入的极简组合所组装的系统提示词、对外公布的工具 schema 以及模型可见消息，因此插件一旦贡献出计划外的系统分段或 user 消息，该任务即失败；它会丢弃动态运行时上下文快照——同一组合在 macOS 上会发出它，在 Linux 上不会（[#2488](https://github.com/deepseek-harness/deepseek-harness/issues/2488)）。`advanced/` 固定 SDK 结果与持久化的会话日志。重新运行对应场景时加上 `--update-snapshots`，并在提交前审阅该差异。
 
+同一必需任务还会在构建工作区后、生产部署前运行 `uv run --project python/sdk python scripts/smoke-python-task-delivery.py`。这一配套验证使用系统 Node 和真实 Loader、SDK 服务器、Task 服务及 Git，而非单一可执行文件。生产部署可能移除工作区依赖链接；打包后运行工作区检查前，请先用 `pnpm install --frozen-lockfile` 恢复这些链接。其 `task-delivery/result.json` 预期输出固定授权通知、关联回执、源目录与 worktree 副作用，以及提交响应丢失并冷启动后保留的待核实状态。只有预期输出有意变化时才使用 `--update-snapshots`。
+
 交互式冒烟测试需要环境变量或仓库根目录 `.env` 中存在 `DEEPSEEK_API_KEY`：
 
 ```python

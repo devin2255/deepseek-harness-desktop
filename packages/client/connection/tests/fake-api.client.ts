@@ -3,7 +3,7 @@
 // deferred-controlled timing). Streams are hand pumps: pushMux/pushHost.
 import type {
   HostFrame, IApiClient, ModelSelection, MuxFrame,
-  RpcRequest, RpcResponse, SessionId, SessionModels, SessionSearchItem, SkillEntry, WorkspaceId,
+  RpcError, RpcRequest, RpcResponse, SessionId, SessionModels, SessionSearchItem, SkillEntry, WorkspaceId,
 } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 
@@ -28,6 +28,10 @@ let nextRpc = 0
 
 export function ok<T>(value: T): RpcResponse<T> {
   return { rpcId: RpcId(`fake-${nextRpc++}`), result: { ok: true, value } }
+}
+
+function err<T>(error: RpcError): RpcResponse<T> {
+  return { rpcId: RpcId(`fake-${nextRpc++}`), result: { ok: false, error } }
 }
 
 
@@ -167,6 +171,50 @@ export class FakeApiClient implements IApiClient {
     archiveSession: (payload: unknown) => this.record('workspace.archiveSession', payload, Promise.resolve(ok({
       archivedSessionIds: [(payload as { sessionId: SessionId }).sessionId],
     }))),
+    unarchiveSession: (payload: unknown) => this.record('workspace.unarchiveSession', payload, Promise.resolve(ok({
+      archivedSessionIds: [],
+    }))),
+  }
+
+  readonly tasks: IApiClient['tasks'] = {
+    inspectDelivery: (payload: unknown) => this.record('task.inspectDelivery', payload, Promise.resolve(err({
+      code: 'task-delivery-pending', message: 'No durable pending Git authorization in the connection fake.',
+      details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    list: (payload: unknown) => this.record('task.list', payload, Promise.resolve(ok({
+      generation: 0,
+      tasks: [],
+    }))),
+    define: (payload: unknown) => this.record('task.define', payload, Promise.resolve(err({
+      code: 'task-unavailable', message: 'Task mutations are not configured in the connection fake.', details: {},
+    }))),
+    updateCriterion: (payload: unknown) => this.record('task.updateCriterion', payload, Promise.resolve(err({
+      code: 'task-unavailable', message: 'Task mutations are not configured in the connection fake.', details: {},
+    }))),
+    recordRisk: (payload: unknown) => this.record('task.recordRisk', payload, Promise.resolve(err({
+      code: 'task-unavailable', message: 'Task mutations are not configured in the connection fake.', details: {},
+    }))),
+    review: (payload: unknown) => this.record('task.review', payload, Promise.resolve(err({
+      code: 'task-unavailable', message: 'Task mutations are not configured in the connection fake.', details: {},
+    }))),
+    reviewSummary: (payload: unknown) => this.record('task.reviewSummary', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    reviewDiff: (payload: unknown) => this.record('task.reviewDiff', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    commit: (payload: unknown) => this.record('task.commit', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    apply: (payload: unknown) => this.record('task.apply', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    discard: (payload: unknown) => this.record('task.discard', payload, Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Task review is not configured in the connection fake.', details: { sessionId: 'unavailable' as SessionId },
+    }))),
+    retryDeliveryCheckpoint: (payload: unknown) => this.record('task.retryDeliveryCheckpoint', payload, Promise.resolve(err({
+      code: 'task-unavailable', message: 'Task mutations are not configured in the connection fake.', details: {},
+    }))),
   }
 
   // Payloads stay `unknown` (lint-lane note above); response rows are the real
@@ -177,6 +225,7 @@ export class FakeApiClient implements IApiClient {
 
   readonly agentPresets: IApiClient['agentPresets'] = {
     list: (payload: unknown) => this.record('agentPreset.list', payload, Promise.resolve(ok({ presets: [], authorable: false, hasDocument: false }))),
+    composition: payload => this.record('agentPreset.composition', payload, Promise.resolve(ok({ composition: null, seq: null }))),
     select: (payload: { agentPreset: string }) =>
       this.record('agentPreset.select', payload, Promise.resolve(ok({ agentPreset: payload.agentPreset }))),
     read: (payload: { agentPreset: string }) =>

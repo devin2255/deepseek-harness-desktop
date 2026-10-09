@@ -10,6 +10,8 @@
 
 本包不包含传输逻辑或 Host 服务发现逻辑。Web 或未来的 TUI 只要提供同一份不依赖 React 的 `ctx.remote` 约定，均可复用其 Client face。
 
+Client face 也重新导出载体类型，包括 `TaskDeliveryInspection`，使 Review 消费方可以命名当前 Git 证据，无需在运行时导入 Host 服务。
+
 ## 转发的 Host 事件
 
 `src/remote-events.ts` 持有 `API_REMOTE_FORWARDED_EVENTS`——本应用原样转发给消费端的 Host cordis 事件名单（无投影、无脱敏、无改名），它同时就是 `ctx.remote.$on` 的合法键集；只含类型的 `src/types.ts` 派生其选择面。多转发一个事件只需在该数组里加一行：类型投影、消费端键面与 Host 转发循环全部由它派生。

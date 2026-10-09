@@ -35,14 +35,14 @@ afterEach(async () => {
 })
 
 /** Boot the continuable stack plus both policy services the manager consumes opportunistically. */
-async function setup(script: Script) {
+async function setup(script: Script, delegationMode: 'inherit' | 'read-only' = 'inherit') {
   const ctx = new Context()
   contexts.push(ctx)
   await mountAgentLoopTestDependencies(ctx)
   const root = mkdtempSync(join(tmpdir(), 'dsh-continuation-inherit-'))
   roots.push(root)
   await ctx.plugin(JsonlSessionPersistence, { root })
-  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: root })
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: root, delegationMode })
   await ctx.plugin(ApprovalService)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
@@ -74,6 +74,29 @@ function policyEvents(events: readonly SessionEvent[]) {
 }
 
 describe('continuable policy inheritance', () => {
+  it('records deployment-selected read-only policy and retains it through cold resume', { timeout: 20_000 }, async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('after resume')], 'read-only')
+    setSandboxMode(parent.session, 'danger-full-access')
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+    const first = await ctx.sessionPersistence.load(started.childId)
+    expect(policyEvents(first.events)).toMatchObject([
+      { type: 'sandbox/mode', data: { mode: 'read-only', source: 'delegation' } },
+      { type: 'approval/policy', data: { policy: 'never', source: 'delegation' } },
+    ])
+
+    await ctx.subagents.followup(parent, started.childId, [{ type: 'text', text: 'continue' }], {
+      source: { kind: 'user' }, signal: new AbortController().signal,
+    })
+    await waitNoActivation(ctx, started.childId)
+    const resumed = await ctx.sessionPersistence.load(started.childId)
+    expect(resumed.events.filter(event => event.type === 'sandbox/mode')).toMatchObject([
+      { data: { mode: 'read-only', source: 'delegation' } },
+    ])
+    expect(effectiveSandboxMode(resumed.events)).toBe('read-only')
+    expect(ctx.sandboxPolicy.overrideOf(parent.session)).toBe('danger-full-access')
+  })
+
   it('seeds the parent sandbox override and pins approval to never', { timeout: 20_000 }, async () => {
     const { ctx, parent } = await setup([textResponse('child done')])
     setSandboxMode(parent.session, 'danger-full-access')

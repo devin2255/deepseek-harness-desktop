@@ -352,6 +352,7 @@ function standardProps(
       root: {
         useSessions: observableHook(host.sessions.list),
         useWorkspaces: observableHook(host.workspaces.list),
+        ...(host.tasks === undefined ? {} : { useTasks: maybeObservableHook(host.tasks.list) }),
       },
       session: new WeakMap(),
       sessionMaybe: new WeakMap(),
@@ -382,7 +383,7 @@ function standardProps(
 
 /**
  * Standard-kit synthesis shared by both scope branches: the global
- * useSessions/useWorkspaces hooks, the per-session provide bundle (every
+ * useSessions/useWorkspaces hooks and optional useTasks hook, the per-session provide bundle (every
  * `hooks` source becomes a `use<Name>` selector hook — useSession is the
  * runtime's own 'session' contribution, no special case — and `props` spread
  * verbatim), the store pair when declared, the renderSlot binding when

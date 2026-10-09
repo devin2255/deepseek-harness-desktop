@@ -1,0 +1,30 @@
+- id: agent
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents: []
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    goals: false
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: danger-full-access
+- id: terminals
+  name: '@deepseek-ai/dsh-terminal'
+- id: terminal-shell
+  name: '@deepseek-ai/dsh-terminal-shell'
+  config:
+    pollIntervalMs: 10
+    exactProbeAfterMs: 20
+    idleSilenceMs: 50
+    handoffGraceMs: 10
+    timeoutMs: 2000
+- id: tool-terminal
+  name: '@deepseek-ai/dsh-tool-terminal'
+  config:
+    enableRunInBackground: false

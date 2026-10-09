@@ -469,6 +469,15 @@ composeFrom(agentCtx: Context, parentCtx: Context): string | undefined
 composedPreset(agentCtx: Context): string | undefined
 
 /**
+ * Identify the preset generation one live agent joined, without exposing
+ * plugin configuration values. The returned rows were captured when that
+ * generation finished mounting and do not follow later file edits.
+ * @param agentCtx - the joined agent's scope context.
+ * @returns its mounted composition, or undefined when it joined no preset.
+ */
+composition(agentCtx: Context): PresetComposition | undefined
+
+/**
  * Read one preset's composition text.
  * @param id - the preset id.
  * @returns the composition exactly as stored.
@@ -556,7 +565,7 @@ async standingKeyFor(id?: string): Promise<ScopeKey>
 
 Types: [ScopeKey](scope.md)
 
-Source: [`packages/preset/agent-presets/src/index.ts:82`](../../packages/preset/agent-presets/src/index.ts)
+Source: [`packages/preset/agent-presets/src/index.ts:83`](../../packages/preset/agent-presets/src/index.ts)
 
 <a id="ctxagents--agentregistry"></a>
 
@@ -615,6 +624,19 @@ withInitiator<T>(agent: Agent, operation: () => T): T
  * @throws when the initiator scope is closing/disposed, or when `operation` throws.
  */
 withoutInitiator<T>(operation: () => T): T
+
+/**
+ * Reserve an entire batch of Agent-free Sessions until an offline operation settles.
+ * Acquisition is synchronous and all-or-nothing; competing reservations and Agent
+ * publication fail rather than wait. This does not lock files or other processes.
+ * Ambient initiator attribution is preserved, and service teardown drains the operation.
+ * @param sessionIds - Session identities to keep without a registered Agent; duplicates are coalesced.
+ * @param operation - owned asynchronous work; its value or rejection is preserved.
+ * @returns the operation result after releasing every reservation.
+ * @throws when registry teardown has begun, or rejects with AgentOfflineReservationError
+ *   when a selected Session already has a registered Agent or offline owner.
+ */
+withOfflineSessions<T>(sessionIds: readonly SessionId[], operation: () => Promise<T>): Promise<T>
 
 /**
  * Register the agent-creation factory (the loop calls this on construction,
@@ -728,7 +750,7 @@ list(): Agent[]
 roots(): Agent[]
 ```
 
-Source: [`packages/core/agent/src/index.ts:256`](../../packages/core/agent/src/index.ts)
+Source: [`packages/core/agent/src/index.ts:265`](../../packages/core/agent/src/index.ts)
 
 <a id="agent-events"></a>
 

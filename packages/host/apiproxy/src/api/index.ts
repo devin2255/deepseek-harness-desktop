@@ -12,6 +12,7 @@ import type { SkillsApi } from './skills.ts'
 import type { SubagentsApi } from './subagents.ts'
 import type { EventsApi } from './events.ts'
 import type { GoalsApi } from './goals.ts'
+import type { TasksApi } from './tasks.ts'
 import type { SettingsApi } from './settings.ts'
 import type { CredentialsApi } from './credentials.ts'
 import type { LlmApi } from './llm.ts'
@@ -28,6 +29,7 @@ export interface ApiProxy {
   agentPresets: AgentPresetsApi
   events: EventsApi
   goals: GoalsApi
+  tasks: TasksApi
   settings: SettingsApi
   credentials: CredentialsApi
   llm: LlmApi
@@ -55,9 +57,14 @@ export type {
 export type { JobView } from './jobs.ts'
 export type { WorkspaceApi, WorkspaceId, WorkspaceView } from './workspace.ts'
 export type { SkillsApi, SkillEntry } from './skills.ts'
-export type { AgentPresetsApi, AgentPresetEntry } from './agent-presets.ts'
+export type { AgentPresetsApi, AgentPresetEntry, AgentPresetCompositionView } from './agent-presets.ts'
 export type { EventsApi, MuxFrame, HostFrame, QueuedInboxItem, ToolCallView, ToolEventView, ToolResultView } from './events.ts'
 export type { GoalsApi, GoalId, GoalRef } from './goals.ts'
+export type {
+  AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
+  TaskApplyReceipt, TaskCommitReceipt, TaskDeliveryInspection, TaskDiscardReceipt, TaskFileDiff, TaskListChange, TaskListSnapshot,
+  TaskReviewDecision, TaskReviewFile, TaskReviewOperationId, TaskReviewSummary, TaskRisk, TaskSnapshot, TasksApi,
+} from './tasks.ts'
 export type { SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSecretView } from './settings.ts'
 export type { CredentialsApi, CredentialView } from './credentials.ts'
 export type { ConfigurableProviderView, DiscoveredModelView, LlmApi } from './llm.ts'

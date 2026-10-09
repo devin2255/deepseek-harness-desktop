@@ -35,7 +35,7 @@
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`、`ctx.agents`、`ctx.skills` | `tool/call`、`tool/result`、`user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`、`session_event_search`、`session_event_trace`、`session_search`、`session_trace` | `ctx.tools`、`ctx.systemPrompt`、`ctx.sessionQuery`、`a calling Agent for workspace authority` | `tool/call`、`tool/result` | - | 这 5 个只读工具会隐藏提供方游标，并根据不可变的调用 agent 会话为每个结果授权。该包需要选择启用；需要强制截止时间或限制行内输出的组合还会挂载通用超时或 spill 策略。 |
 | `@deepseek-ai/dsh-tool-subagent` | `subagent` | `ctx.tools`、`ctx.subagents`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`child session events through the chosen provider` | `subagent`、`subagent_fork` | 注册的工具名称取决于加载时 `toolName` 配置（默认为 `subagent`）；上述 schema 对应默认值。随产品发布的组合会为每个 subagent 后端加载一次该包，因此模型还会看到绑定到 fork 后端的 `subagent_fork`。每个实例的描述、`run_in_background` 参数与 system prompt 策略取决于它自己的 `backgroundMode` 和 `enableRunInBackground`，因此两个随附 schema 并不相同：`subagent` 为 `continuable`，省略参数时默认后台运行，并由 runtime 自动投递结束结果；`subagent_fork` 保持 `one-shot`，省略参数时默认前台运行。详见 `packages/bundle/base/cordis.patch.yml` 和 `examples/acp-agent/cordis.yml`。 |
-| `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`、`list_agents`、`send_message` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents` | - | 这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。 |
+| `@deepseek-ai/dsh-tool-subagent-control` | `commit_agent_changes`、`integrate_agents`、`interrupt_agent`、`list_agents`、`review_agent_changes`、`send_message` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)`、`ctx.agents, ctx.sessions, ctx.sessionPersistence, ctx.tasks, ctx.taskReview, ctx.sandboxPolicy (writer tools only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents`、`reviewed writer commits and root integration` | - | 绑定提供方的 `tool-subagent` 实例注册委派工具；本包注册一次 `send_message` 和 `interrupt_agent`。独立的 `/list-agents` 与 `/integrate` 插件提供目录读取，以及根级拥有的隔离写入者审查、提交与批量集成。写入者工具需要显式启用，桌面默认配置不启用它们。 |
 | `@deepseek-ai/dsh-tool-subagent-report` | `report` | `ctx.subagents`、`ctx.systemPrompt`、`a live continuable in-process child Agent` | `tool/call`、`tool/result`、`a user-role message in the direct parent session` | - | 按可继续的进程内子级注册，而非全局注册，因此该 schema 仅在这种子级内部可见，并且不受其全局 `toolFilter` 影响。同一份贡献还会安装子级作用域的 `tool:report` 系统提示词 section，本目录不渲染该 section。面向父级的 `send_message` 工具单独安装。 |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`、`job_list`、`job_output` | `ctx.tools`、`ctx.jobs`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`user/message via agent.inject() for background completion notices` | - | 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。 |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
@@ -1512,6 +1512,82 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ## `@deepseek-ai/dsh-tool-subagent-control`
 
+### `commit_agent_changes`
+
+提交直属、已停止的隔离写入者中确切审查过的更改。要求其审查 revision，返回供集成选择的已提交 revision 与提交标识。不改变根级或原始项目检出。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "subagent_id": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "subagent_id",
+    "revision",
+    "message"
+  ]
+}
+```
+
+来源：[`packages/subagent/tool-subagent-control/src/integrate.ts`](../packages/subagent/tool-subagent-control/src/integrate.ts)
+
+### `integrate_agents`
+
+将一批直属、已停止的隔离写入者合入你的根 Task worktree。使用已审查的根 revision，以及确切的已提交子级 revision 和提交标识。根级与子级均不得有未提交更改。每次合并都先预检；冲突不会改变任何分支或工作树，并会指出冲突写入者和文件。成功时保留所有子级分支，且不改变原始项目检出。发布前遵守取消请求，最终发布期间不接受取消。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "root_revision": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "writers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "subagent_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subagent_id",
+          "revision",
+          "commit"
+        ]
+      }
+    }
+  },
+  "required": [
+    "root_revision",
+    "message",
+    "writers"
+  ]
+}
+```
+
+来源：[`packages/subagent/tool-subagent-control/src/integrate.ts`](../packages/subagent/tool-subagent-control/src/integrate.ts)
+
 ### `interrupt_agent`
 
 根据 agent id 请求取消后台 agent 的当前轮次。目标可以是你的直接子级，也可以是在你下方创建的更深层 agent。只有当前轮次会停止：已经排队发给该 agent 的消息会一直搁置到后续的 send_message；它启动的 agent 会继续运行；该 agent 本身仍可接受后续操作。停止请求被接受后，此调用立即返回，因此目标可能还会短暂运行；中断一个已经完成的 agent 是可接受的空操作。
@@ -1555,6 +1631,31 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 来源：[`packages/subagent/tool-subagent-control/src/list-agents.ts`](../packages/subagent/tool-subagent-control/src/list-agents.ts)
 
+### `review_agent_changes`
+
+检查已停止的直属隔离写入者。返回其确切审查 revision、当前提交、有界更改文件以及根集成 revision。提供文件路径可读取该文件的 diff。审查不会提交或合并任何内容。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "subagent_id": {
+      "type": "string",
+      "description": "The isolated writer id returned when it started."
+    },
+    "path": {
+      "type": "string",
+      "description": "Optional repository-relative member file to inspect in this review."
+    }
+  },
+  "required": [
+    "subagent_id"
+  ]
+}
+```
+
+来源：[`packages/subagent/tool-subagent-control/src/integrate.ts`](../packages/subagent/tool-subagent-control/src/integrate.ts)
+
 ### `send_message`
 
 根据 subagent id 向后台 subagent 发送消息，继续同一段对话。该消息会成为 subagent 的下一轮次：如果它仍在工作，消息会等待当前轮次结束，因此无法改变已经开始的工作方向。此调用不会返回 subagent 的答案，只会确认消息已投递，因此请用它分派更多工作。调用失败表示消息**未**投递。
@@ -1581,7 +1682,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 来源：[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)
 
-这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。
+绑定提供方的 `tool-subagent` 实例注册委派工具；本包注册一次 `send_message` 和 `interrupt_agent`。独立的 `/list-agents` 与 `/integrate` 插件提供目录读取，以及根级拥有的隔离写入者审查、提交与批量集成。写入者工具需要显式启用，桌面默认配置不启用它们。
 
 <a id="deepseek-aidsh-tool-subagent-report"></a>
 

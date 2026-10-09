@@ -240,9 +240,22 @@ interface SubprocessOutcome {
 
 ## Terminal-process primitive
 
-`spawnTerminal(spec)` is the non-pipe process primitive. The provider allocates the controlling terminal and owns UTF-8 text transport, foreground-process-group inspection and signalling, and one awaited TERM-to-KILL operation that reaches quiescence for every session member the provider can still observe; providers document substrate-specific observability limits. The PTY backend remains responsible for prompt detection, readiness inference, scrollback, sandbox policy, and persistent-session ownership; ordinary `spawn()` cannot reconstruct controlling-terminal semantics.
+`spawnTerminal(spec)` is the non-pipe process primitive. The provider allocates the controlling terminal and owns UTF-8 text transport, native interruption, platform-specific foreground inspection and signalling, and one awaited termination operation that reaches quiescence for every session member the provider can still observe; providers document substrate-specific observability limits. The PTY backend remains responsible for prompt detection, readiness inference, scrollback, sandbox policy, and persistent-session ownership; ordinary `spawn()` cannot reconstruct controlling-terminal semantics.
 
-The terminal spec fully specifies argv, cwd, environment overrides, dimensions, cleanup grace, and optional allocation cancellation. Its handle exposes `pid`, ordered output, `done`, `write`, `inspectForeground`, `signalForeground`, and awaited `terminate`; the exact public shapes are generated into the [`ctx.subprocess` service catalog](#ctxsubprocess--subprocessruntime-abstract-seam).
+The terminal spec fully specifies argv, cwd, environment overrides, dimensions, cleanup grace, and optional allocation cancellation. Its handle exposes `pid`, ordered output, `done`, `write`, `interrupt`, `inspectForeground`, `signalForeground`, and awaited `terminate`; the exact public declarations are generated into the [`ctx.subprocess` service catalog](#ctxsubprocess--subprocessruntime-abstract-seam).
+
+`interrupt()` requests interruption without closing the session and reports actual delivery: POSIX foreground `SIGINT` or written Windows Ctrl+C input. Neither result proves command exit or renewed input readiness. Applications can ignore interruption; delivery failures and requests after teardown begins reject. `signalForeground()` remains POSIX-only and rejects on Windows without sending input. The [interruption decision](../../.agents/notes/implemented/feature/2026-10-09-terminal-interruption-results.md) owns cancellation and readiness ordering.
+
+```ts type-equiv
+/**
+ * Observed delivery of an interruption request, never proof of command exit.
+ * Windows console input modes decide whether Ctrl+C invokes a control handler
+ * or reaches an application's raw input reader.
+ */
+type SubprocessTerminalInterruptResult =
+  | { kind: 'signal'; signal: 'SIGINT'; targetPgid: number }
+  | { kind: 'control-input'; input: 'ctrl-c' }
+```
 
 ## Service behavior
 
@@ -320,5 +333,5 @@ abstract spawn(spec: SubprocessSpawnSpec): SubprocessHandle
 abstract spawnTerminal(spec: SubprocessTerminalSpawnSpec): Promise<SubprocessTerminalHandle>
 ```
 
-Source: [`packages/subprocess/subprocess/src/index.ts:102`](../../packages/subprocess/subprocess/src/index.ts)
+Source: [`packages/subprocess/subprocess/src/index.ts:103`](../../packages/subprocess/subprocess/src/index.ts)
 <!-- END GENERATED cordis-surface -->
