@@ -16,8 +16,8 @@
     mode: danger-full-access
 - id: terminals
   name: '@deepseek-ai/dsh-terminal'
-- id: terminal-bash
-  name: '@deepseek-ai/dsh-terminal-bash'
+- id: terminal-shell
+  name: '@deepseek-ai/dsh-terminal-shell'
   config:
     pollIntervalMs: 10
     exactProbeAfterMs: 20

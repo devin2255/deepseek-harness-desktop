@@ -59,6 +59,9 @@ export class WindowsTerminalHandle implements SubprocessTerminalHandle {
     throw new Error(`Windows ConPTY does not support POSIX foreground signal ${signal}; use terminal input or terminate the session`)
   }
 
+  // Both native handles share this retryable cleanup protocol; closeOnce owns
+  // platform-specific quiescence. Keep the protocol symmetric without a base class.
+  /* jscpd:ignore-start */
   terminate(): Promise<void> {
     if (this.cleanup !== undefined) return this.cleanup
     this.closing = true
@@ -67,6 +70,7 @@ export class WindowsTerminalHandle implements SubprocessTerminalHandle {
     void cleanup.catch(() => { this.cleanup = undefined })
     return cleanup
   }
+  /* jscpd:ignore-end */
 
   /** Force-stop the exactly owned Job during host exit; no asynchronous wait is possible. */
   terminateForHostExit(): void {

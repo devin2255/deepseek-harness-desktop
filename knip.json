@@ -120,7 +120,10 @@
         "@deepseek-ai/dsh-client-ui-task-overview",
         "@deepseek-ai/dsh-host-directory-picker-browse",
         "@deepseek-ai/dsh-task",
-        "@deepseek-ai/dsh-task-session"
+        "@deepseek-ai/dsh-task-session",
+        "@deepseek-ai/dsh-terminal",
+        "@deepseek-ai/dsh-terminal-shell",
+        "@deepseek-ai/dsh-tool-terminal"
       ]
     },
     "packages/util/home": {

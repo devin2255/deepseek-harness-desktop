@@ -12,11 +12,11 @@ The overlay selects `sandbox-policy.delegationMode: read-only` without changing 
 
 ## Model Experience
 
-Indirectly, through `dsh-web-app` and `dsh-sandbox-policy`: this overlay removes Web-surface context and selects the read-only mode described by a new child's existing runtime-context snapshot.
+Indirectly, through `dsh-web-app`, `dsh-sandbox-policy`, and `dsh-tool-terminal`: this overlay removes Web-surface context, selects the read-only mode described by a new child's existing runtime-context snapshot, and exposes the six persistent-terminal tools and their standing usage guidance. The local desktop composition explicitly selects PowerShell on Windows and Bash elsewhere; it does not change remote execution-world defaults. PowerShell creation returns syntax and language-mode guidance in its logged MOTD. See the [terminal backend](../../terminal/terminal-shell/README.md).
 
 #### KV Cache effect
 
-The omitted Web-surface fields leave the request prefix without that stable context. The child's read-only fact uses the existing append-only runtime-context snapshot; root request prefixes are unaffected by the delegation setting.
+The omitted Web-surface fields leave the request prefix without that stable context; terminal schemas and usage guidance join the configured prefix. The child's read-only fact uses the existing append-only runtime-context snapshot; root request prefixes are unaffected by the delegation setting. Terminal results append to history only when requested.
 
 ## Known Limitations and Deferred Work
 

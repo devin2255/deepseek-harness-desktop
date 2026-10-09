@@ -37,6 +37,10 @@ Electron Main 以串行的两秒间隔轮询经过认证的 `task.list` 和 `ses
 
 新增的可操作注意事项、失败状态转换，以及从运行中的任务树转为可以审查或已结束时，会创建原生通知。点击通知会恢复或重建已授权窗口，并打开其确切 owner Session，包括 subagent。Main 仅通过具名的单向 preload 事件发送非空且有长度上限的 Session id；客户端等待权威目录就绪后，使用与总览点击相同的 Task 导航控制器。目标缺失时会打开“任务”并显示可读错误，后续成功或替代该尝试的导航会清除错误。
 
+## 持久终端
+
+本地桌面 profile 挂载持久终端工具，为 Windows 选择 PowerShell，为 macOS 选择 Bash。会话保留 cwd、变量、函数和交互式 stdin，直到显式关闭、所有者 dispose 或 Host 丢失。Windows 使用与单次命令相同的受限令牌文件策略；原生 Ctrl+C 中断不会破坏 shell 状态。静默被报告为推断就绪，不代表命令完成。参见[后端约定](../../packages/terminal/terminal-shell/README.md)。
+
 ## Windows 更新
 
 只有已打包、更新源指向经审查的 GitHub 仓库且记录了签名发布者的 Windows 应用才会检查更新；未签名测试包和源码运行不会启用。Main 在启动后短暂等待再检查，并在运行期间每六小时检查一次；托盘也可以手动触发。发现新版本后会在不中断 Task 的情况下下载，但普通退出绝不会自动安装。已签名安装器下载完成时，托盘和原生通知会提供安装入口。确认框默认选择“稍后”，并告知当前 Task 活动情况，或说明活动状态不可用。用户批准后，应用先释放后台驻留、停止 Harness 并释放应用 mutex，之后才启动辅助更新安装程序；清理未完成时不会启动安装程序。检查和下载失败可在托盘重试，并写入桌面日志。参见[更新决策](../../.agents/notes/implemented/feature/2026-09-24-desktop-consented-update-installation.md)。

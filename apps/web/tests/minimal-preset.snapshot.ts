@@ -115,7 +115,7 @@ describe('minimal agent preset', () => {
         "presetPlugins": [
           "persona:on",
           "pty:on",
-          "terminal-bash:on",
+          "terminal-shell:on",
           "persistent-bash:on",
           "fs-local:on",
           "str-replace-editor:on",

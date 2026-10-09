@@ -35,8 +35,8 @@
               workspaceRoot: !!js process.cwd()
           - id: pty
             name: '@deepseek-ai/dsh-terminal'
-          - id: terminal-bash
-            name: '@deepseek-ai/dsh-terminal-bash'
+          - id: terminal-shell
+            name: '@deepseek-ai/dsh-terminal-shell'
           - id: tool-terminal
             name: '@deepseek-ai/dsh-tool-terminal'
           - id: lsp

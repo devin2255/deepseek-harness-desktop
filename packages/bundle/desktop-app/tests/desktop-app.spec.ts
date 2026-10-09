@@ -292,6 +292,12 @@ describe('desktop launch capability', () => {
       name: '@deepseek-ai/dsh-client-ui-task-review',
     })
     expect(entries.find(entry => entry.id === 'directory-picker')).toMatchObject({ disabled: true })
+    expect(entries.find(entry => entry.id === 'terminals')).toMatchObject({ name: '@deepseek-ai/dsh-terminal' })
+    expect(entries.find(entry => entry.id === 'terminal-shell')).toMatchObject({
+      name: '@deepseek-ai/dsh-terminal-shell',
+      config: { shell: { __jsExpr: "process.platform === 'win32' ? 'powershell' : 'bash'" } },
+    })
+    expect(entries.find(entry => entry.id === 'tool-terminal')).toMatchObject({ name: '@deepseek-ai/dsh-tool-terminal' })
     expect(entries.find(entry => entry.id === 'directory-picker-browse')).toMatchObject({
       name: '@deepseek-ai/dsh-host-directory-picker-browse',
     })
@@ -319,6 +325,9 @@ describe('desktop launch capability', () => {
       '@deepseek-ai/dsh-task-session': 'workspace:^',
       '@deepseek-ai/dsh-client-ui-task-overview': 'workspace:^',
       '@deepseek-ai/dsh-client-ui-harness-studio': 'workspace:^',
+      '@deepseek-ai/dsh-terminal': 'workspace:^',
+      '@deepseek-ai/dsh-terminal-shell': 'workspace:^',
+      '@deepseek-ai/dsh-tool-terminal': 'workspace:^',
     })
     expect(webManifest.dependencies).toMatchObject({
       '@deepseek-ai/dsh-client-ui-task-review': 'workspace:^',

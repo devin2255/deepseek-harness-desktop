@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PassThrough } from 'node:stream'
-import { LocalPtySession } from '@deepseek-ai/dsh-terminal-bash/src/session.ts'
-import type { ResolvedConfig } from '@deepseek-ai/dsh-terminal-bash/src/config.ts'
+import { LocalPtySession } from '@deepseek-ai/dsh-terminal-shell/src/session.ts'
+import type { ResolvedConfig } from '@deepseek-ai/dsh-terminal-shell/src/config.ts'
 import type { TerminalSendOperation, TerminalSessionStatus, TerminalSignal } from '@deepseek-ai/dsh-terminal'
 import type {
   SubprocessOutcome,
@@ -134,7 +134,7 @@ function makeSession(
 
 function config(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
-    backendType: 'shell', shellPath: '/bin/bash', shellArgs: [], rows: 24, cols: 80,
+    backendType: 'shell', shell: 'bash', shellPath: '/bin/bash', shellArgs: [], rows: 24, cols: 80,
     scrollbackLines: 10, scrollbackMaxBytes: 128, maxReadBytes: 64,
     pollIntervalMs: 10, exactProbeAfterMs: 20, idleSilenceMs: 50, handoffGraceMs: 10, timeoutMs: 100,
     disposeGraceMs: 20,
@@ -152,6 +152,24 @@ async function initialize(session: LocalPtySession, terminal: FakeTerminal): Pro
 }
 
 describe('LocalPtySession readiness and output', () => {
+  it('returns logged PowerShell syntax guidance without claiming an unobserved foreground wait', async () => {
+    vi.useFakeTimers()
+    const terminal = new FakeTerminal()
+    const inspector = new FakeInspector()
+    inspector.pgid = undefined
+    const session = makeSession(terminal, inspector, config({ shell: 'powershell', maxReadBytes: 128 }))
+    const starting = session.initialize()
+    terminal.emitData('\x1b]133;D;0\x07dsh> ')
+    await vi.advanceTimersByTimeAsync(60)
+    await starting
+    expect(session.motd).toContain('PowerShell session; use PowerShell syntax.')
+    expect(session.motd).toContain('ConstrainedLanguage')
+    const operation = session.startSend({ text: '$global:state = 1', submit: true })
+    await vi.advanceTimersByTimeAsync(60)
+    expect((await operation.done).waitReason).toBe('inferred_idle')
+    await session.close('test cleanup')
+  })
+
   it('lets queued terminal output run before the first post-write readiness poll', async () => {
     vi.useFakeTimers()
     const terminal = new FakeTerminal()

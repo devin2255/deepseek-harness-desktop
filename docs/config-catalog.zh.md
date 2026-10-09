@@ -2308,9 +2308,9 @@ export interface Config {
 
 来源：[`packages/task/task-worktree-local/src/index.ts:31`](../packages/task/task-worktree-local/src/index.ts)
 
-<a id="deepseek-aidsh-terminal-bash"></a>
+<a id="deepseek-aidsh-terminal-shell"></a>
 
-## `@deepseek-ai/dsh-terminal-bash`
+## `@deepseek-ai/dsh-terminal-shell`
 
 需要：`pty` · `sandboxPolicy` · `subprocess`
 
@@ -2319,9 +2319,11 @@ export interface Config {
 export interface Config {
   /** Backend registry type (default: `shell`). */
   backendType?: string
-  /** Interactive shell executable (default: `/bin/bash`). */
+  /** Shell syntax and startup protocol; explicit execution-world choice (default: `bash`). */
+  shell?: 'bash' | 'powershell'
+  /** Shell executable (default: `/bin/bash` for Bash, `powershell.exe` for PowerShell). */
   shellPath?: string
-  /** Shell arguments (default: `--noprofile --norc -i`). */
+  /** Shell arguments; omission installs the selected shell's controlled interactive startup. */
   shellArgs?: string[]
   /** Terminal rows. */
   rows?: number
@@ -2346,12 +2348,12 @@ export interface Config {
   handoffGraceMs?: number
   /** Absolute send wait bound. */
   timeoutMs?: number
-  /** Grace before teardown escalates to `SIGKILL`. */
+  /** Provider-owned terminal teardown grace or deadline. */
   disposeGraceMs?: number
 }
 ```
 
-来源：[`packages/terminal/terminal-bash/src/config.ts:6`](../packages/terminal/terminal-bash/src/config.ts)
+来源：[`packages/terminal/terminal-shell/src/config.ts:8`](../packages/terminal/terminal-shell/src/config.ts)
 
 <a id="deepseek-aidsh-time-context"></a>
 

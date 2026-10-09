@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[`@deepseek-ai/dsh-subprocess`](../subprocess/README.md) seam 的本地 Service Provider。`LocalSubprocessRuntime` 解析本地可执行文件，以显式 stdio spawn 普通 detached 进程树，并通过 POSIX `node-pty` 或 Windows ConPTY 实现终端进程。该实现没有任何配置：每项处置方式、限制、终端尺寸、宽限期与目录都来自调用方能力 seam（[`dsh-bash-local`](../../shell/bash-local/README.md)、[`dsh-lsp-stdio`](../../lsp/lsp-stdio/README.md) 和 [`dsh-terminal-bash`](../../terminal/terminal-bash/README.md)）。
+[`@deepseek-ai/dsh-subprocess`](../subprocess/README.md) seam 的本地 Service Provider。`LocalSubprocessRuntime` 解析本地可执行文件，以显式 stdio spawn 普通 detached 进程树，并通过 POSIX `node-pty` 或 Windows ConPTY 实现终端进程。该实现没有任何配置：每项处置方式、限制、终端尺寸、宽限期与目录都来自调用方能力 seam（[`dsh-bash-local`](../../shell/bash-local/README.md)、[`dsh-lsp-stdio`](../../lsp/lsp-stdio/README.md) 和 [`dsh-terminal-shell`](../../terminal/terminal-shell/README.md)）。
 
 ## 行为
 
@@ -28,7 +28,7 @@
 ## 已知限制与暂缓事项
 
 - **普通 Windows 子进程树支持仅为尽力而为**：终止经由 `taskkill /PID <pid> /T /F` 完成，所有结果都被就地吸收，不向外抛出（进程树已不存在、竞态、二进制缺失），存活探测则回退到直接子进程边界。Windows 终端改用精确的 Job 所有权。
-- **前台进程组检查仅支持 Linux／macOS**：Windows 已支持终端分配、中断输入与清理，但 ConPTY 不提供 POSIX 进程组身份。具有就绪检测的 Windows 原生持久 shell 消费方仍待实现；该原语不会使 `dsh-terminal-bash` 成为受支持的 Windows 后端。
+- **前台进程组检查仅支持 Linux／macOS**：Windows 已支持终端分配、中断输入与清理，但 ConPTY 不提供 POSIX 进程组身份。具有就绪检测的 Windows 原生持久 shell 消费方仍待实现；该原语不会使 `dsh-terminal-shell` 成为受支持的 Windows 后端。
 - **守护化的终端后代仍可能逃出可观察边界**：在 macOS 上，子进程如果在任何前台检查快照之前重新设定父进程，将无法再从 `node-pty` 根进程发现；在 Linux 上，调用 `setsid` 的子进程会同时离开进程树与自有终端会话。本地提供方不会新增持续进程表监视器。
 - **依赖回调的清理要求退出阶段仍能执行 JavaScript**：直接 `process.exit()`、默认未捕获异常和默认未处理 rejection 会发出 Node 同步 `exit` 事件。未安装 handler 时，`SIGTERM`、`SIGINT` 或 `SIGHUP` 的默认 OS 处置不会发出该事件。POSIX 终端和普通子进程需要信号 handler 或外部 supervisor，才能覆盖这些路径、原生崩溃和宿主强制终止。Windows ConPTY Job 成员在宿主丢失后仍由 OS 的关闭即终止所有权负责；通过 WMI、服务等外部代理委派的执行不属于该 Job。这是进程生命周期管理，不是安全沙箱，也不提供断电后的状态持久化。
 - **凭据清除依赖名称启发式规则**：只匹配 `*KEY*`／`*PASSWORD*`／`*SECRET*`／`*TOKEN*`；名称不同的 secret（例如 `*PASSPHRASE*`）会继续传递，对误删变量引入白名单属于已记录的后续工作。

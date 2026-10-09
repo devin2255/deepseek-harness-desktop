@@ -213,7 +213,9 @@ export class LocalPtySession implements TerminalBackendSession {
       const result = await operation.done
       if (result.waitReason === 'session_exit') throw new Error('PTY shell exited during startup')
       if (result.waitReason === 'timeout') throw new Error('PTY shell did not reach readiness before startup timeout')
-      this.motd = result.viewport
+      this.motd = this.config.shell === 'powershell'
+        ? 'PowerShell session; use PowerShell syntax. Read-only mode may restrict .NET methods (ConstrainedLanguage).\n' + result.viewport
+        : result.viewport
     } catch (error: unknown) {
       signal?.throwIfAborted()
       throw error
@@ -529,6 +531,7 @@ export class LocalPtySession implements TerminalBackendSession {
     try {
       const activeWrite = this.activeWrite
       if (activeWrite !== undefined && !await activeWrite) return
+      this.resetReadinessEvidence()
       await this.terminal.interrupt()
     } catch (error: unknown) {
       if (this.active === operation && !this.closing) this.onTransportFailure(error)

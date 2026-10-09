@@ -33,6 +33,14 @@
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
     - id: desktop-app
       name: '@deepseek-ai/dsh-desktop-app'
+    - id: terminals
+      name: '@deepseek-ai/dsh-terminal'
+    - id: terminal-shell
+      name: '@deepseek-ai/dsh-terminal-shell'
+      config:
+        shell: !!js "process.platform === 'win32' ? 'powershell' : 'bash'"
+    - id: tool-terminal
+      name: '@deepseek-ai/dsh-tool-terminal'
     - id: task-session
       name: '@deepseek-ai/dsh-task-session'
     - id: ui-task-overview

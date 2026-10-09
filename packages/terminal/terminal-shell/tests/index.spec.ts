@@ -9,10 +9,10 @@ import SandboxProvider from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import TerminalSessionService, { TerminalBackendCleanupError, TerminalSessionId } from '@deepseek-ai/dsh-terminal'
-import { BashTerminalBackend } from '@deepseek-ai/dsh-terminal-bash'
-import * as ptyLocal from '@deepseek-ai/dsh-terminal-bash'
-import type { ResolvedConfig } from '@deepseek-ai/dsh-terminal-bash/src/config.ts'
-import type { LocalPtySession } from '@deepseek-ai/dsh-terminal-bash/src/session.ts'
+import { ShellTerminalBackend } from '@deepseek-ai/dsh-terminal-shell'
+import * as ptyLocal from '@deepseek-ai/dsh-terminal-shell'
+import { resolveConfig, type ResolvedConfig } from '@deepseek-ai/dsh-terminal-shell/src/config.ts'
+import type { LocalPtySession } from '@deepseek-ai/dsh-terminal-shell/src/session.ts'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   SubprocessHandle,
@@ -38,7 +38,7 @@ class RecordingSandbox extends SandboxProvider {
 
 function config(): ResolvedConfig {
   return {
-    backendType: 'shell', shellPath: '/bin/bash', shellArgs: [], rows: 24, cols: 80,
+    backendType: 'shell', shell: 'bash', shellPath: '/bin/bash', shellArgs: [], rows: 24, cols: 80,
     scrollbackLines: 10, scrollbackMaxBytes: 100, maxReadBytes: 50,
     pollIntervalMs: 10, exactProbeAfterMs: 20, idleSilenceMs: 50, handoffGraceMs: 10, timeoutMs: 100,
     disposeGraceMs: 10,
@@ -102,7 +102,7 @@ function stubLocalSession(initialize: () => Promise<void> = () => Promise.resolv
 
 function registerStubLocalBackend(ctx: Context, createSession: () => LocalPtySession) {
   return ctx.inject(['terminals', 'sandbox', 'sandboxPolicy', 'subprocess'], (providerCtx) => {
-    providerCtx.terminals.registerBackend(new BashTerminalBackend(
+    providerCtx.terminals.registerBackend(new ShellTerminalBackend(
       providerCtx,
       { ...config(), backendType: 'stub' },
       async () => terminalHandle(),
@@ -111,12 +111,56 @@ function registerStubLocalBackend(ctx: Context, createSession: () => LocalPtySes
   })
 }
 
-describe('BashTerminalBackend startup rollback', () => {
+describe('ShellTerminalBackend startup rollback', () => {
+  it('resolves PowerShell in the mounted execution world and confines the exact resolved argv', async () => {
+    const ctx = new Context()
+    await ctx.plugin(RecordingSandbox)
+    await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: '/workspace' })
+    await ctx.plugin(StubSubprocessRuntime)
+    const resolveExecutable = vi.spyOn(ctx.subprocess, 'resolveExecutable').mockResolvedValue('/remote/pwsh')
+    const spawnTerminal = vi.fn<(spec: SubprocessTerminalSpawnSpec) => Promise<SubprocessTerminalHandle>>(async () => terminalHandle())
+    const backend = new ShellTerminalBackend(ctx,
+      resolveConfig({ shell: 'powershell', shellPath: 'pwsh' }), spawnTerminal, () => stubLocalSession())
+    try {
+      await backend.spawn(spec(agent(ctx)))
+      expect(resolveExecutable).toHaveBeenCalledWith('pwsh')
+      expect(spawnTerminal).toHaveBeenCalledOnce()
+      const spawned = spawnTerminal.mock.calls[0]![0]
+      expect(spawned.argv).toEqual(expect.arrayContaining(['/sandbox', '--', '/remote/pwsh', '-EncodedCommand']))
+      expect(spawned.env?.NO_COLOR).toBe('1')
+      expect(spawned.env?.DSH_SESSION_ID).toBe('agent')
+      expect(spawned.env?.PROMPT_COMMAND).toBeUndefined()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not spawn when cancellation wins PowerShell executable resolution', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SandboxPolicyService, { mode: 'danger-full-access', workspaceRoot: '/workspace' })
+    await ctx.plugin(StubSubprocessRuntime)
+    const resolution = Promise.withResolvers<string>()
+    vi.spyOn(ctx.subprocess, 'resolveExecutable').mockReturnValue(resolution.promise)
+    const spawnTerminal = vi.fn<(spec: SubprocessTerminalSpawnSpec) => Promise<SubprocessTerminalHandle>>(async () => terminalHandle())
+    const backend = new ShellTerminalBackend(ctx, resolveConfig({ shell: 'powershell' }), spawnTerminal)
+    const controller = new AbortController()
+    const reason = new Error('canceled during executable resolution')
+    const spawning = backend.spawn(spec(agent(ctx), controller.signal))
+    controller.abort(reason)
+    resolution.resolve('/remote/powershell.exe')
+    try {
+      await expect(spawning).rejects.toBe(reason)
+      expect(spawnTerminal).not.toHaveBeenCalled()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('rejects pre-aborted setup and empty sandbox argv', async () => {
     const ctx = new Context()
     await ctx.plugin(EmptySandbox)
     await ctx.plugin(SandboxPolicyService, { mode: 'read-only', workspaceRoot: '/tmp' })
-    const backend = new BashTerminalBackend(ctx, config(), async () => terminalHandle())
+    const backend = new ShellTerminalBackend(ctx, config(), async () => terminalHandle())
     const controller = new AbortController()
     const abortReason = new Error('spawn aborted')
     controller.abort(abortReason)
@@ -131,7 +175,7 @@ describe('BashTerminalBackend startup rollback', () => {
 
     const closed = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
     const failed = { initialize: () => Promise.reject(new Error('startup failed')), close: closed } as unknown as LocalPtySession
-    const backend = new BashTerminalBackend(ctx, config(), spawnTerminal, () => failed)
+    const backend = new ShellTerminalBackend(ctx, config(), spawnTerminal, () => failed)
     await expect(backend.spawn(spec(agent(ctx)))).rejects.toThrow('startup failed')
     expect(closed).toHaveBeenCalledWith('PTY startup failed')
 
@@ -141,7 +185,7 @@ describe('BashTerminalBackend startup rollback', () => {
       initialize: () => Promise.reject(startupFailure),
       close: () => Promise.reject(cleanupFailure),
     } as unknown as LocalPtySession
-    const aggregate = new BashTerminalBackend(ctx, config(), spawnTerminal, () => doublyFailed)
+    const aggregate = new ShellTerminalBackend(ctx, config(), spawnTerminal, () => doublyFailed)
     await expect(aggregate.spawn(spec(agent(ctx)))).rejects.toEqual(expect.objectContaining({
       name: 'TerminalBackendCleanupError',
       spawnError: startupFailure,
@@ -162,7 +206,7 @@ describe('BashTerminalBackend startup rollback', () => {
       },
       close,
     } as unknown as LocalPtySession
-    const backend = new BashTerminalBackend(ctx, config(), async () => terminalHandle(), () => session)
+    const backend = new ShellTerminalBackend(ctx, config(), async () => terminalHandle(), () => session)
     const controller = new AbortController()
     const reason = new Error('cancel stalled startup')
 
@@ -187,7 +231,7 @@ describe('BashTerminalBackend startup rollback', () => {
     }
     const initialized = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
     const session = { initialize: initialized } as unknown as LocalPtySession
-    const backend = new BashTerminalBackend(
+    const backend = new ShellTerminalBackend(
       ctx,
       { ...config(), shellArgs: ['-i'] },
       spawnTerminal,
@@ -234,7 +278,7 @@ describe('BashTerminalBackend startup rollback', () => {
     }
     const initialized = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
     const session = { initialize: initialized } as unknown as LocalPtySession
-    const backend = new BashTerminalBackend(
+    const backend = new ShellTerminalBackend(
       ctx,
       { ...config(), shellArgs: ['-i'] },
       spawnTerminal,
@@ -257,7 +301,7 @@ describe('BashTerminalBackend startup rollback', () => {
   it('rejects a confined spawn without a sandbox provider', async () => {
     const confinedCtx = new Context()
     await confinedCtx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: '/workspace' })
-    const confined = new BashTerminalBackend(
+    const confined = new ShellTerminalBackend(
       confinedCtx,
       config(),
       async () => { throw new Error('terminal spawn must not run') },
@@ -275,7 +319,7 @@ describe('BashTerminalBackend startup rollback', () => {
 
     const publishedController = new AbortController()
     let publishedSignal: AbortSignal | undefined
-    const published = new BashTerminalBackend(
+    const published = new ShellTerminalBackend(
       ctx,
       config(),
       async (spawnSpec) => {
@@ -291,7 +335,7 @@ describe('BashTerminalBackend startup rollback', () => {
 
     const pendingController = new AbortController()
     const seen = Promise.withResolvers<AbortSignal>()
-    const pending = new BashTerminalBackend(
+    const pending = new ShellTerminalBackend(
       ctx,
       config(),
       async spawnSpec => await new Promise<SubprocessTerminalHandle>((_resolve, reject) => {
@@ -334,7 +378,7 @@ describe('BashTerminalBackend startup rollback', () => {
     }
     queueMicrotask(() => { output.write(Buffer.from('\x1b]133;D;0\x07dsh> ')) })
     const spawnTerminal = vi.spyOn(ctx.subprocess, 'spawnTerminal').mockResolvedValue(terminal)
-    const backend = new BashTerminalBackend(ctx, config())
+    const backend = new ShellTerminalBackend(ctx, config())
     const session = await backend.spawn(spec(agent(ctx)))
     expect(spawnTerminal).toHaveBeenCalledOnce()
     expect(session.motd).toBe('dsh> ')
@@ -342,12 +386,12 @@ describe('BashTerminalBackend startup rollback', () => {
   })
 })
 
-describe('terminal-bash plugin shape', () => {
+describe('terminal-shell plugin shape', () => {
   it('keeps name, inject, and Config through Loader unwrapExports', () => {
     expect('default' in ptyLocal).toBe(false)
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(ptyLocal) as Record<string, unknown>
-    expect(unwrapped.name).toBe('terminal-bash')
+    expect(unwrapped.name).toBe('terminal-shell')
     expect(unwrapped.inject).toEqual(['terminals', 'sandboxPolicy', 'subprocess'])
     expect(unwrapped.Config).toBeDefined()
   })

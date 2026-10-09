@@ -12,7 +12,7 @@ import SandboxProvider from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import * as ptyLocal from '@deepseek-ai/dsh-terminal-bash'
+import * as ptyLocal from '@deepseek-ai/dsh-terminal-shell'
 
 const roots: string[] = []
 const contexts: Context[] = []
@@ -114,7 +114,7 @@ function processIsRunning(pid: number): boolean {
   }
 }
 
-describe('terminal-bash real shell', () => {
+describe('terminal-shell real shell', () => {
   it('persists cwd and environment across sends, scrubs secrets, and closes', async () => {
     const previous = process.env.DSH_TEST_SECRET
     process.env.DSH_TEST_SECRET = 'must-not-leak'

@@ -17,3 +17,14 @@ it('reports inferred idle until the terminal provider observes a foreground grou
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expectedPath, result.stdout)
   expect(result.stdout).toBe(await readFile(expectedPath, 'utf8'))
 }, 45_000)
+
+it('reports PowerShell syntax and inferred readiness after native Ctrl+C', async () => {
+  const powershellConfig = fileURLToPath(new URL('./fixtures/terminal-powershell/cordis.yml', import.meta.url))
+  const powershellExpected = fileURLToPath(new URL('./terminal-powershell.expected.jsonl', import.meta.url))
+  const result = await runLoaderSmoke({ label: 'PowerShell terminal transcript', tempDirPrefix: 'dsh-terminal-powershell-',
+    binScript, libBinScript: binScript, configPath: powershellConfig,
+    binArgs: [powershellConfig, 'powershell'], tsconfigPath })
+  expect(result.stderr).toBe('')
+  if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(powershellExpected, result.stdout)
+  expect(result.stdout).toBe(await readFile(powershellExpected, 'utf8'))
+}, 45_000)

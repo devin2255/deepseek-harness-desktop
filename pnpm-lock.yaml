@@ -234,9 +234,9 @@ importers:
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:^
         version: link:../../packages/terminal/terminal
-      '@deepseek-ai/dsh-terminal-bash':
+      '@deepseek-ai/dsh-terminal-shell':
         specifier: workspace:^
-        version: link:../../packages/terminal/terminal-bash
+        version: link:../../packages/terminal/terminal-shell
       '@deepseek-ai/dsh-time-context':
         specifier: workspace:^
         version: link:../../packages/context/time-context
@@ -780,9 +780,9 @@ importers:
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:*
         version: link:../packages/terminal/terminal
-      '@deepseek-ai/dsh-terminal-bash':
+      '@deepseek-ai/dsh-terminal-shell':
         specifier: workspace:*
-        version: link:../packages/terminal/terminal-bash
+        version: link:../packages/terminal/terminal-shell
       '@deepseek-ai/dsh-time-context':
         specifier: workspace:*
         version: link:../packages/context/time-context
@@ -1378,6 +1378,15 @@ importers:
       '@deepseek-ai/dsh-task-session':
         specifier: workspace:^
         version: link:../../task/task-session
+      '@deepseek-ai/dsh-terminal':
+        specifier: workspace:^
+        version: link:../../terminal/terminal
+      '@deepseek-ai/dsh-terminal-shell':
+        specifier: workspace:^
+        version: link:../../terminal/terminal-shell
+      '@deepseek-ai/dsh-tool-terminal':
+        specifier: workspace:^
+        version: link:../../terminal/tool-terminal
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -6992,9 +7001,9 @@ importers:
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:^
         version: link:../../terminal/terminal
-      '@deepseek-ai/dsh-terminal-bash':
+      '@deepseek-ai/dsh-terminal-shell':
         specifier: workspace:^
-        version: link:../../terminal/terminal-bash
+        version: link:../../terminal/terminal-shell
       '@deepseek-ai/dsh-timeout':
         specifier: workspace:^
         version: link:../../util/timeout
@@ -8086,7 +8095,7 @@ importers:
         specifier: workspace:^
         version: link:../../core/session
 
-  packages/terminal/terminal-bash:
+  packages/terminal/terminal-shell:
     dependencies:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
@@ -8104,6 +8113,9 @@ importers:
       '@deepseek-ai/dsh-sandbox':
         specifier: workspace:^
         version: link:../../sandbox/sandbox
+      '@deepseek-ai/dsh-sandbox-local':
+        specifier: workspace:^
+        version: link:../../sandbox/sandbox-local
       '@deepseek-ai/dsh-sandbox-policy':
         specifier: workspace:^
         version: link:../../sandbox/sandbox-policy
@@ -8171,9 +8183,9 @@ importers:
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:^
         version: link:../terminal
-      '@deepseek-ai/dsh-terminal-bash':
+      '@deepseek-ai/dsh-terminal-shell':
         specifier: workspace:^
-        version: link:../terminal-bash
+        version: link:../terminal-shell
       '@deepseek-ai/dsh-tool-jobs':
         specifier: workspace:^
         version: link:../../jobs/tool-jobs
@@ -9115,9 +9127,9 @@ importers:
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:^
         version: link:../../packages/terminal/terminal
-      '@deepseek-ai/dsh-terminal-bash':
+      '@deepseek-ai/dsh-terminal-shell':
         specifier: workspace:^
-        version: link:../../packages/terminal/terminal-bash
+        version: link:../../packages/terminal/terminal-shell
       '@deepseek-ai/dsh-timeout':
         specifier: workspace:^
         version: link:../../packages/util/timeout

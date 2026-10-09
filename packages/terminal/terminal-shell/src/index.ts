@@ -1,7 +1,7 @@
 /**
  * Persistent shell PTY backend over the subprocess terminal primitive, shared
  * sandbox policy, bounded output, and provider-owned session cleanup.
- * @module @deepseek-ai/dsh-terminal-bash
+ * @module @deepseek-ai/dsh-terminal-shell
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -12,15 +12,15 @@ import type { TerminalBackend, TerminalBackendSpawnSpec } from '@deepseek-ai/dsh
 import type { SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { effectiveSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
-import { type Config, type ResolvedConfig, validateConfig } from './config.ts'
+import { type Config, type ResolvedConfig, resolveConfig } from './config.ts'
 import { LocalPtySession } from './session.ts'
 import { CONTROLLED_PROMPT } from './sanitize.ts'
 
 export { Config } from './config.ts'
-export type { Config as TerminalLocalConfig } from './config.ts'
+export type { Config as TerminalShellConfig } from './config.ts'
 
 /** Cordis plugin name. */
-export const name = 'terminal-bash'
+export const name = 'terminal-shell'
 /** Required services: PTY registry, shared confinement policy, and process substrate. */
 export const inject = ['terminals', 'sandboxPolicy', 'subprocess']
 
@@ -52,31 +52,32 @@ function ensureSandboxModeFence(ctx: Context, owner: Agent): void {
   }, { global: true })
 }
 
-function childEnvironment(spec: TerminalBackendSpawnSpec): Record<string, string> {
+function childEnvironment(spec: TerminalBackendSpawnSpec, config: ResolvedConfig): Record<string, string> {
   // The subprocess provider supplies its own scrubbed ambient base; these are
   // deliberate terminal-specific overrides layered after it.
   return {
     TERM: 'dumb',
     PAGER: 'cat',
     GIT_PAGER: 'cat',
-    PS1: CONTROLLED_PROMPT,
-    // Re-asserting PS1 after the marker keeps prompt readiness working when a
-    // command overwrote the shell variable: bash runs PROMPT_COMMAND before
-    // rendering each prompt, so an override never survives to the next prompt.
-    PROMPT_COMMAND: `printf "\\033]133;D;%s\\007" "$?"; PS1='${CONTROLLED_PROMPT}'`,
-    BASH_SILENCE_DEPRECATION_WARNING: '1',
+    NO_COLOR: '1',
+    ...config.shell === 'bash' ? {
+      PS1: CONTROLLED_PROMPT,
+      // Bash runs PROMPT_COMMAND before rendering each prompt, so PS1 overrides
+      // cannot survive to the next controlled prompt.
+      PROMPT_COMMAND: `printf "\\033]133;D;%s\\007" "$?"; PS1='${CONTROLLED_PROMPT}'`,
+      BASH_SILENCE_DEPRECATION_WARNING: '1',
+    } : {},
     DSH_SHELL: '1',
     DSH_SESSION_ID: spec.owner.id,
     DSH_PTY_SESSION_ID: spec.sessionId,
   }
 }
 
-function spawnArgv(ctx: Context, config: ResolvedConfig, policy: SandboxExecutionPolicy): string[] {
-  const argv = [config.shellPath, ...config.shellArgs]
+function spawnArgv(ctx: Context, argv: string[], policy: SandboxExecutionPolicy): string[] {
   if (policy.mode === 'danger-full-access') return argv
   const sandbox = ctx.get('sandbox')
   if (sandbox === undefined) {
-    throw new Error(`terminal-bash: sandbox mode "${policy.mode}" requires a ctx.sandbox provider in the execution world`)
+    throw new Error(`terminal-shell: sandbox mode "${policy.mode}" requires a ctx.sandbox provider in the execution world`)
   }
   // Re-state the discriminant because object spread does not preserve its narrowed type.
   return sandbox.confine(argv, { ...policy, mode: policy.mode }).argv
@@ -102,7 +103,7 @@ async function initializeSession(session: LocalPtySession, signal?: AbortSignal)
 }
 
 /** Local shell backend registered under the configured type. */
-export class BashTerminalBackend implements TerminalBackend {
+export class ShellTerminalBackend implements TerminalBackend {
   readonly type: string
 
   constructor(
@@ -123,12 +124,16 @@ export class BashTerminalBackend implements TerminalBackend {
     spec.signal?.throwIfAborted()
     ensureSandboxModeFence(this.ctx, spec.owner)
     const policy = this.ctx.sandboxPolicy.resolve({ session: spec.owner.session })
-    const argv = spawnArgv(this.ctx, this.config, policy)
-    if (argv[0] === undefined) throw new Error('terminal-bash: sandbox returned empty argv')
+    const executable = this.config.shell === 'powershell'
+      ? await this.ctx.subprocess.resolveExecutable(this.config.shellPath)
+      : this.config.shellPath
+    spec.signal?.throwIfAborted()
+    const argv = spawnArgv(this.ctx, [executable, ...this.config.shellArgs], policy)
+    if (argv[0] === undefined) throw new Error('terminal-shell: sandbox returned empty argv')
     const terminal = await this.spawnTerminal({
       argv,
       cwd: spec.cwd ?? policy.workspaceRoot,
-      env: childEnvironment(spec),
+      env: childEnvironment(spec, this.config),
       rows: this.config.rows,
       cols: this.config.cols,
       graceMs: this.config.disposeGraceMs,
@@ -151,6 +156,5 @@ export class BashTerminalBackend implements TerminalBackend {
 
 /** Register the local PTY backend. */
 export function apply(ctx: Context, config: Config): void {
-  validateConfig(config)
-  ctx.terminals.registerBackend(new BashTerminalBackend(ctx, config))
+  ctx.terminals.registerBackend(new ShellTerminalBackend(ctx, resolveConfig(config)))
 }

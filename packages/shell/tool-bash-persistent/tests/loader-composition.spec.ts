@@ -11,7 +11,7 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
-import * as TerminalLocal from '@deepseek-ai/dsh-terminal-bash'
+import * as TerminalLocal from '@deepseek-ai/dsh-terminal-shell'
 import SandboxProvider from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
@@ -80,7 +80,7 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
       '    mode: danger-full-access',
       `    workspaceRoot: ${JSON.stringify(root)}`,
       "- name: '@deepseek-ai/dsh-subprocess-local'",
-      "- name: '@deepseek-ai/dsh-terminal-bash'",
+      "- name: '@deepseek-ai/dsh-terminal-shell'",
       '  config:',
       '    pollIntervalMs: 10',
       '    exactProbeAfterMs: 20',
@@ -110,7 +110,7 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
       ['@deepseek-ai/dsh-test-sandbox', PassthroughSandbox],
       ['@deepseek-ai/dsh-sandbox-policy', SandboxPolicyService],
       ['@deepseek-ai/dsh-subprocess-local', LocalSubprocessRuntime],
-      ['@deepseek-ai/dsh-terminal-bash', TerminalLocal],
+      ['@deepseek-ai/dsh-terminal-shell', TerminalLocal],
       ['@deepseek-ai/dsh-tool-bash-persistent', ToolBashPersistent],
     ])
     context.loader.internal = {

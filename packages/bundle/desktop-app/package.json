@@ -38,7 +38,10 @@
     "@deepseek-ai/dsh-client-ui-task-overview": "workspace:^",
     "@deepseek-ai/dsh-host-directory-picker-browse": "workspace:^",
     "@deepseek-ai/dsh-task": "workspace:^",
-    "@deepseek-ai/dsh-task-session": "workspace:^"
+    "@deepseek-ai/dsh-task-session": "workspace:^",
+    "@deepseek-ai/dsh-terminal": "workspace:^",
+    "@deepseek-ai/dsh-terminal-shell": "workspace:^",
+    "@deepseek-ai/dsh-tool-terminal": "workspace:^"
   },
   "dsh": {
     "bundle": {
