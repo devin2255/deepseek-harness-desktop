@@ -1,13 +1,13 @@
 /** Connection-safe Task review state and delivery command owner. */
 
 import type {
-  IApiClient, RpcError, RpcResult, SessionId, TaskFileDiff, TaskReviewOperationId, TaskReviewSummary, TaskSnapshot,
+  IApiClient, RpcError, RpcResult, SessionId, TaskDeliveryInspection, TaskFileDiff, TaskReviewOperationId, TaskReviewSummary, TaskSnapshot,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { transportError } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { Notifier } from '../sessions/notifier.ts'
 
 /** Review read and delivery operation currently visible to the user. */
-export type TaskReviewOperation = 'request-changes' | 'commit' | 'apply' | 'discard' | 'save-receipt'
+export type TaskReviewOperation = 'request-changes' | 'commit' | 'apply' | 'discard' | 'save-receipt' | 'inspect-delivery'
 
 /** Immutable state for the separate Task Review workspace. */
 export interface TaskReviewState {
@@ -23,6 +23,10 @@ export interface TaskReviewState {
   readonly error: RpcError | null
   readonly operation: TaskReviewOperation | null
   readonly result: TaskSnapshot | null
+  /** Point-in-time Git observation, never a delivery receipt or permission to resume execution. */
+  readonly deliveryInspection: TaskDeliveryInspection | null
+  /** Separate from review errors so a removed worktree does not hide inspection failures. */
+  readonly deliveryInspectionError: RpcError | null
 }
 
 /** Owns one visible Task review, selection, bounded diff, and serialized delivery mutations. */
@@ -38,6 +42,9 @@ export class TaskReviewManager {
   private error: RpcError | null = null
   private operation: TaskReviewOperation | null = null
   private result: TaskSnapshot | null = null
+  private deliveryInspection: TaskDeliveryInspection | null = null
+  private deliveryInspectionError: RpcError | null = null
+  private inspectionGeneration = 0
   private requestGeneration = 0
   private diffGeneration = 0
   private inflight: Promise<void> | null = null
@@ -79,6 +86,7 @@ export class TaskReviewManager {
     const writerSessionId = this.writerSessionId
     if (taskId === undefined) return Promise.resolve()
     if (this.inflight !== null) return this.inflight
+    this.invalidateDeliveryInspection()
     const owner = this.requestGeneration
     this.state = 'loading'
     this.error = null
@@ -196,8 +204,48 @@ export class TaskReviewManager {
     }), false)
   }
 
+  /**
+   * Inspect a pending root authorization without changing Git or the Task log.
+   * A readable review is not required. Refresh, Task changes, and disconnect suppress obsolete responses.
+   * @param operationId - Exact pending authorization from the Task projection.
+   * @returns Current Git evidence or a structured inspection failure; neither clears uncertainty.
+   */
+  async inspectDelivery(operationId: TaskReviewOperationId): Promise<RpcResult<TaskDeliveryInspection>> {
+    const taskId = this.taskId
+    if (taskId === undefined || this.writerSessionId !== undefined || this.operation !== null) return this.unavailable()
+    this.invalidateDeliveryInspection()
+    const owner = this.requestGeneration
+    const inspectionOwner = this.inspectionGeneration
+    this.operation = 'inspect-delivery'
+    this.notifier.markDirty()
+    let result: RpcResult<TaskDeliveryInspection>
+    try {
+      result = (await this.api.tasks.inspectDelivery({ sessionId: taskId, operationId })).result
+    } catch (error: unknown) {
+      result = errorResult(error)
+    }
+    if (owner === this.requestGeneration) {
+      if (inspectionOwner === this.inspectionGeneration) {
+        if (result.ok) this.deliveryInspection = result.value
+        else this.deliveryInspectionError = result.error
+      }
+      this.operation = null
+      this.notifier.markDirty()
+    }
+    return result
+  }
+
+  /** Invalidate point-in-time Git evidence when its review or authoritative Task changes. */
+  invalidateDeliveryInspection(): void {
+    this.inspectionGeneration += 1
+    this.deliveryInspection = null
+    this.deliveryInspectionError = null
+    this.notifier.markDirty()
+  }
+
   /** Retain the visible review as stale and invalidate prior reads. */
   handleDisconnected(): void {
+    this.invalidateDeliveryInspection()
     this.requestGeneration += 1
     this.diffGeneration += 1
     this.inflight = null
@@ -284,7 +332,9 @@ export class TaskReviewManager {
   ): Promise<RpcResult<TaskSnapshot>> {
     const taskId = this.taskId
     if (taskId === undefined || this.writerSessionId !== undefined || this.operation !== null) return this.unavailable()
+    this.invalidateDeliveryInspection()
     this.operation = operation
+    this.freshness = 'stale'
     const owner = this.requestGeneration
     this.error = null
     this.notifier.markDirty()
@@ -318,6 +368,7 @@ export class TaskReviewManager {
       ...this.writerSessionId === undefined ? {} : { writerSessionId: this.writerSessionId },
       summary: this.summary, selectedPath: this.selectedPath, diff: this.diff, error: this.error,
       operation: this.operation, result: this.result,
+      deliveryInspection: this.deliveryInspection, deliveryInspectionError: this.deliveryInspectionError,
     }
   }
 }

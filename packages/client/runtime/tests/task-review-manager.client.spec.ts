@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionId, TaskReviewSummary, TaskSnapshot } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SessionId, TaskDeliveryInspection, TaskReviewSummary, TaskSnapshot } from '@deepseek-ai/dsh-api-remotes/client'
 import { TaskReviewManager } from '../src/client/tasks/review-manager.ts'
 import { deferred, err, FakeApiClient, ok } from './fake-api.client.ts'
 
 const taskId = 'root' as SessionId
 const revision = 'a'.repeat(64) as TaskReviewSummary['revision']
+const operationId = '00000000-0000-4000-8000-000000000001' as NonNullable<TaskSnapshot['retryableDeliveryCheckpoint']>
+const inspection: TaskDeliveryInspection = {
+  taskId, workspaceId: 'workspace' as never, revision: 'b'.repeat(64) as never, observedAt: 1,
+  intent: { kind: 'discard', operationId, reviewRevision: revision, headCommit: '1'.repeat(40),
+    confirmedUncommittedLoss: true, uncommittedChanges: true },
+  status: 'completed', effect: { kind: 'discard', branch: 'dsh/task-root', headCommit: '1'.repeat(40),
+    worktreeRemoved: true, branchPreserved: true, uncommittedChangesDiscarded: true },
+}
 
 function summary(files: TaskReviewSummary['files'] = [
   { path: 'src/one.ts', status: 'modified', binary: false, additions: 2, deletions: 1 },
@@ -114,6 +122,98 @@ describe('TaskReviewManager reads', () => {
 })
 
 describe('TaskReviewManager actions', () => {
+  it('reads Git evidence despite a missing review without refreshing tasks or inventing a receipt', async () => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(err({
+      code: 'task-review-unavailable', message: 'Review directory missing', details: { sessionId: taskId },
+    }))
+    api.onTaskDeliveryInspection = () => Promise.resolve(ok(inspection))
+    let refreshes = 0
+    const manager = new TaskReviewManager(api, async () => { refreshes += 1 })
+    await expect(manager.inspectDelivery(operationId)).resolves.toMatchObject({ ok: false })
+    await manager.open(taskId)
+    await expect(manager.inspectDelivery(operationId)).resolves.toMatchObject({ ok: true, value: inspection })
+    expect(manager.getSnapshot()).toMatchObject({ deliveryInspection: inspection, deliveryInspectionError: null,
+      result: null, operation: null, state: 'error', error: { message: 'Review directory missing' } })
+    expect(api.callsOf('task.inspectDelivery')).toEqual([{ sessionId: taskId, operationId }])
+    expect(api.callsOf('task.commit')).toEqual([])
+    expect(api.callsOf('task.apply')).toEqual([])
+    expect(api.callsOf('task.discard')).toEqual([])
+    expect(refreshes).toBe(0)
+    await manager.open(taskId, 'writer' as SessionId)
+    await expect(manager.inspectDelivery(operationId)).resolves.toMatchObject({ ok: false })
+    expect(api.callsOf('task.inspectDelivery')).toHaveLength(1)
+    expect(manager.getSnapshot().deliveryInspection).toBeNull()
+  })
+
+  it('serializes inspection with delivery and clears prior evidence when starting a mutation', async () => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))
+    const pending = deferred<Awaited<ReturnType<FakeApiClient['onTaskDeliveryInspection']>>>()
+    api.onTaskDeliveryInspection = () => pending.promise
+    const manager = new TaskReviewManager(api, async () => {})
+    await manager.open(taskId)
+    const read = manager.inspectDelivery(operationId)
+    expect(manager.getSnapshot().operation).toBe('inspect-delivery')
+    await expect(manager.inspectDelivery(operationId)).resolves.toMatchObject({ ok: false })
+    await expect(manager.commit('No concurrent write', 4)).resolves.toMatchObject({ ok: false })
+    await expect(manager.open(taskId, 'writer' as SessionId)).rejects.toThrow('current delivery operation')
+    pending.resolve(ok(inspection))
+    await read
+    expect(manager.getSnapshot().deliveryInspection).toEqual(inspection)
+    await manager.discard(true, 4)
+    expect(manager.getSnapshot()).toMatchObject({ deliveryInspection: null, freshness: 'stale' })
+  })
+
+  it.each(['refresh', 'task-change'] as const)('suppresses a late inspection after %s', async (change) => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))
+    const pending = deferred<Awaited<ReturnType<FakeApiClient['onTaskDeliveryInspection']>>>()
+    api.onTaskDeliveryInspection = () => pending.promise
+    const manager = new TaskReviewManager(api, async () => {})
+    await manager.open(taskId)
+    const read = manager.inspectDelivery(operationId)
+    if (change === 'refresh') await manager.refresh()
+    else manager.invalidateDeliveryInspection()
+    pending.resolve(ok(inspection))
+    await read
+    expect(manager.getSnapshot()).toMatchObject({ deliveryInspection: null, deliveryInspectionError: null, operation: null })
+  })
+
+  it('fences disconnected inspection responses after another review and operation begin', async () => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))
+    const old = deferred<Awaited<ReturnType<FakeApiClient['onTaskDeliveryInspection']>>>()
+    api.onTaskDeliveryInspection = () => old.promise
+    const manager = new TaskReviewManager(api, async () => {})
+    await manager.open(taskId)
+    const first = manager.inspectDelivery(operationId)
+    manager.handleDisconnected()
+    await manager.open('another' as SessionId)
+    const current = deferred<Awaited<ReturnType<FakeApiClient['onTaskDeliveryInspection']>>>()
+    api.onTaskDeliveryInspection = () => current.promise
+    const second = manager.inspectDelivery(operationId)
+    old.resolve(err({ code: 'internal', message: 'Old connection failed', details: {} }))
+    await first
+    expect(manager.getSnapshot()).toMatchObject({ taskId: 'another', operation: 'inspect-delivery', deliveryInspectionError: null })
+    current.resolve(ok({ ...inspection, taskId: 'another' as SessionId }))
+    await second
+    expect(manager.getSnapshot().deliveryInspection?.taskId).toBe('another')
+  })
+
+  it('keeps structured and transport inspection errors separate and clears them on retry or refresh', async () => {
+    const api = new FakeApiClient()
+    api.onTaskReviewSummary = () => Promise.resolve(ok(summary([])))
+    const manager = new TaskReviewManager(api, async () => {})
+    await manager.open(taskId)
+    await expect(manager.inspectDelivery(operationId)).resolves.toMatchObject({ ok: false })
+    expect(manager.getSnapshot().deliveryInspectionError?.code).toBe('task-delivery-pending')
+    api.onTaskDeliveryInspection = () => Promise.reject(new Error('Inspection offline'))
+    await manager.inspectDelivery(operationId)
+    expect(manager.getSnapshot()).toMatchObject({ error: null, deliveryInspectionError: { message: 'Inspection offline' }, operation: null })
+    await manager.refresh()
+    expect(manager.getSnapshot().deliveryInspectionError).toBeNull()
+  })
   it('saves a receipt even when discard made the review unreadable, without invoking Git delivery', async () => {
     const api = new FakeApiClient()
     api.onTaskReviewSummary = () => Promise.resolve(err({
@@ -175,6 +275,7 @@ describe('TaskReviewManager actions', () => {
     await expect(manager.requestChanges(4)).resolves.toMatchObject({ ok: true })
     await expect(manager.commit('feat: done', 5)).resolves.toMatchObject({ ok: true })
     await expect(manager.apply('2'.repeat(40), 6)).resolves.toMatchObject({ ok: true })
+    await manager.refresh()
     await expect(manager.discard(false, 7)).resolves.toMatchObject({ ok: true })
 
     expect(api.callsOf('task.review')).toEqual([{ sessionId: taskId, decision: 'changes-requested', expectedSeq: 4 }])

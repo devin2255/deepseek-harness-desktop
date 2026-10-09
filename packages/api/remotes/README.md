@@ -10,6 +10,8 @@ The current Client assembly mounts the Goal Remote contribution and the read-onl
 
 This package contains no transport or Host service discovery logic. Its Client face can be reused by Web or a future TUI that provides the same React-free `ctx.remote` contract.
 
+The Client face also re-exports carrier types, including `TaskDeliveryInspection`, so Review consumers can name current Git evidence without a runtime import of a Host service.
+
 ## Forwarded Host events
 
 `src/remote-events.ts` holds `API_REMOTE_FORWARDED_EVENTS`, the allowlist of Host cordis events this application forwards to consumers verbatim — no projection, no redaction, no renaming — and therefore the legal key set of `ctx.remote.$on`; the type-only `src/types.ts` derives its selection face. Forwarding one more event is an entry in that array and nothing else: the type projection, the consumer key face, and the Host forwarding loop all derive from it.

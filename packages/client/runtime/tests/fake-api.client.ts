@@ -4,7 +4,7 @@
 import type {
   ClientResponse, HostFrame, IApiClient, ModelSelection, MuxFrame,
   RpcError, RpcReceipt, RpcRequest, RpcResponse, SessionId, SessionModels, SessionSearchItem, SkillEntry,
-  WorkspaceId, WorkspaceView, TaskFileDiff, TaskListSnapshot, TaskReviewSummary, TaskSnapshot,
+  WorkspaceId, WorkspaceView, TaskDeliveryInspection, TaskFileDiff, TaskListSnapshot, TaskReviewSummary, TaskSnapshot,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import { RpcId } from '@deepseek-ai/dsh-client-connection/client'
 import type { SessionRemotes } from '../src/client/sessions/remotes.ts'
@@ -191,11 +191,14 @@ export class FakeApiClient implements IApiClient {
   onTaskReviewDiff: (payload: unknown) => Promise<RpcResponse<TaskFileDiff>> =
     () => Promise.resolve(err({ code: 'task-review-unavailable', message: 'stub', details: { sessionId: 'root' as SessionId } }))
 
-  readonly tasks: IApiClient['tasks'] = {
-    inspectDelivery: (payload: unknown) => this.record('task.inspectDelivery', payload, Promise.resolve(err({
+  onTaskDeliveryInspection: (payload: unknown) => Promise<RpcResponse<TaskDeliveryInspection>> =
+    () => Promise.resolve(err({
       code: 'task-delivery-pending', message: 'No durable pending Git authorization in the runtime fake.',
       details: { sessionId: 'root' as SessionId },
-    }))),
+    }))
+
+  readonly tasks: IApiClient['tasks'] = {
+    inspectDelivery: (payload: unknown) => this.record('task.inspectDelivery', payload, this.onTaskDeliveryInspection(payload)),
     list: (payload: unknown) => this.record('task.list', payload, this.onTaskList(payload)),
     define: (payload: unknown) => this.record('task.define', payload, this.onTaskMutation(payload)),
     updateCriterion: (payload: unknown) => this.record('task.updateCriterion', payload, this.onTaskMutation(payload)),

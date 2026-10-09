@@ -14,6 +14,7 @@ async function bench() {
   const review: TaskReviewState = {
     taskId: undefined, state: 'idle', diffState: 'idle', freshness: 'stale', summary: null,
     selectedPath: undefined, diff: null, error: null, operation: null, result: null,
+    deliveryInspection: null, deliveryInspectionError: null,
   }
   const reviewState = { getSnapshot: () => review, subscribe: () => () => {} }
   const tasks = {
@@ -21,6 +22,7 @@ async function bench() {
     requestChanges: vi.fn(async () => ({})), commitReview: vi.fn(async () => ({})),
     applyReview: vi.fn(async () => ({})), discardReview: vi.fn(async () => ({})),
     retryDeliveryCheckpoint: vi.fn(async () => ({})),
+    inspectDelivery: vi.fn(async () => ({})),
   }
   const layout = { showHome: vi.fn() }
   const sessions = { refreshSubagents: vi.fn(async () => {}), setSubagentCatalogOpen: vi.fn() }
@@ -60,6 +62,8 @@ describe('Task Review composition', () => {
     await face.discard(true, 4)
     await face.retryDeliveryCheckpoint('00000000-0000-4000-8000-000000000001' as never)
     expect(b.tasks.retryDeliveryCheckpoint).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001')
+    await face.inspectDelivery('00000000-0000-4000-8000-000000000001' as never)
+    expect(b.tasks.inspectDelivery).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001')
     expect(b.layout.showHome).toHaveBeenCalledOnce()
     expect(b.tasks.selectReviewFile).toHaveBeenCalledWith('src/app.ts')
     expect(b.tasks.openReview).toHaveBeenCalledWith('root', 'writer')

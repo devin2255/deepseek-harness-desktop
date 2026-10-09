@@ -41,7 +41,7 @@ export type {
   SessionSummary, SettingsNamespaceView, SettingsPathOpView, SkillEntry, AgentPresetCompositionView, StreamChunk,
   SubagentAddress, SubagentCatalog, JobView, ToolCallView, ToolEventView, ToolResultView,
   AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
-  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskListChange, TaskListSnapshot,
+  TaskApplyReceipt, TaskCommitReceipt, TaskDeliveryInspection, TaskDiscardReceipt, TaskFileDiff, TaskListChange, TaskListSnapshot,
   TaskReviewDecision, TaskReviewFile, TaskReviewOperationId, TaskReviewSummary, TaskRisk, TaskSnapshot,
   WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-client-connection/client'

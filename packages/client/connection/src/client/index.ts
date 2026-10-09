@@ -13,26 +13,7 @@ import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
 
 // ---- Contract re-exports (browser-safe apiproxy channels + core types) ----
-export type {
-  ApiProxy, SessionsApi, SessionSearchItem, SessionSummary, PromptContentPart, HostApi, EventsApi, MuxFrame, HostFrame,
-  ApprovalResponsePayload, QuestionResponsePayload, HistoryEntry, ToolEventView,
-  DirectoryEntry, DirectoryListing,
-  ToolCallView, ToolResultView, WorkspaceApi, WorkspaceId, WorkspaceView,
-  SkillsApi, SkillEntry, AgentPresetCompositionView,
-  ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning,
-  MessageId, ModelReasoningEffort, ModelSelection, QueueAction, QueuedInboxItem, SessionModels,
-  SubagentsApi, SubagentAddress, SubagentCatalog, SubagentListEntry, SubagentPromptReceipt,
-  JobView,
-  RpcRequest, RpcResponse, RpcResult, RpcError, RpcErrorCode,
-  ClientRequest, ServerResponse, ServerRequest, ClientResponse, RpcMessage, RpcReceipt,
-  HostDescription, IApiClient, SessionId, SessionEvent, ContentBlock, StreamChunk,
-  GoalsApi, GoalRef,
-  AttentionItem, DefineTaskCriterion, TaskCriterion, TaskDefinition, TaskEvidenceRef,
-  TaskListChange, TaskListSnapshot, TaskReviewDecision, TaskRisk, TaskSnapshot, TasksApi,
-  TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskFileDiff, TaskReviewFile, TaskReviewOperationId, TaskReviewSummary,
-  SettingsApi, SettingsNamespaceView, SettingsPathOpView, SettingsSecretView,
-  CredentialsApi, CredentialView, ConfigurableProviderView, DiscoveredModelView, LlmApi,
-} from './api.ts'
+export type * from './types.ts'
 export {
   RpcId,
   AbstractApiClient,

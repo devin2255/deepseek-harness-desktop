@@ -86,6 +86,13 @@
 .integrations summary { cursor: pointer; font-size: 12px; }
 .integrations code { overflow-wrap: anywhere; font-family: var(--dsw-font-mono); font-size: 11px; }
 .contributors { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.inspection { flex: 0 1 auto; min-height: 0; max-height: 300px; overflow: auto; padding: 12px 18px; border-bottom: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
+.inspection h2 { margin: 0 0 8px; font-size: 14px; line-height: 1.4; }
+.inspection p { margin: 6px 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.5; }
+.inspection dl { display: grid; grid-template-columns: minmax(140px, max-content) minmax(0, 1fr); gap: 5px 16px; margin: 12px 0; font-size: 12px; line-height: 1.5; }
+.inspection dt { color: var(--dsw-alias-label-secondary); }
+.inspection dd { margin: 0; overflow-wrap: anywhere; }
+.inspection code { font-family: var(--dsw-font-mono); }
 
 .scrim { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: var(--dsw-alias-bg-mask-1); }
 .dialog { width: min(480px, 100%); border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px; padding: 20px; color: var(--dsw-alias-label-primary); background: var(--dsw-specific-menu); box-shadow: var(--dsw-shadow-lv3); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
@@ -100,6 +107,8 @@
 }
 
 @media (max-width: 620px) {
+  .inspection dl { grid-template-columns: 1fr; gap: 3px; }
+  .inspection dd { margin-bottom: 6px; }
   .workspace { grid-template-columns: 1fr; overflow: auto; }
   .files, .diff, .inspector { max-height: none; overflow: visible; border: 0; border-bottom: 1px solid var(--dsw-alias-border-l2); }
   .files { max-height: 220px; overflow: auto; }

@@ -16,6 +16,8 @@ Outstanding root delivery displays `delivery-unconfirmed` attention with its ope
 
 Retry Saving Delivery Receipt appears only for the root's advertised live checkpoint. It saves the existing receipt without another Commit, Apply, or Discard and remains available when Discard has removed the review directory. Disconnected Tasks and concurrent operations disable it; save errors stay visible. A missing receipt offers no retry action.
 
+Inspect Current Git Result appears for a root with pending authorization but no live receipt checkpoint, including an unreadable removed worktree. It displays current completed, absent, or ambiguous evidence, exact authorization and Git identities, recovery facts, and observation time rather than execution time. It never saves a receipt or enables delivery. Inspection failures remain separate from review-read failures. Refresh, a changed authoritative Task row, disconnect, another inspection, or delivery clears prior evidence; obsolete responses cannot republish it. Child views, other operation ids, and disconnected Tasks never display retained root evidence. Manual confirmation recovery remains unavailable.
+
 ## Model Experience
 
 None, as this browser-side Task review and delivery surface registers no model input or interaction responses.

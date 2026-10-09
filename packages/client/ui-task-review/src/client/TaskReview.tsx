@@ -3,7 +3,9 @@ import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId, TaskReviewFile, TaskReviewState, TaskSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { TaskReviewOperationId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { TaskReviewInjected } from './index.ts'
+import { DeliveryInspection } from './DeliveryInspection.tsx'
 import css from './TaskReview.module.css'
 
 /** Runtime, locale, and business shares for the root Review occupant. */
@@ -53,7 +55,7 @@ function successKey(task: TaskSnapshot | null): 'successCommit' | 'successApply'
 /** Full review workspace with file navigation, patch, evidence, and explicit delivery actions. */
 export function TaskReview({
   useSessions, useTasks, useTaskReview, showTasks, refresh, selectFile, selectSource, setSourcesOpen,
-  requestChanges, commit, apply, discard, retryDeliveryCheckpoint, t,
+  requestChanges, commit, apply, discard, retryDeliveryCheckpoint, inspectDelivery, t,
 }: TaskReviewProps) {
   const review = useTaskReview(value => value)
   const rootId = review.taskId
@@ -85,6 +87,10 @@ export function TaskReview({
   const writerSelected = review.writerSessionId !== undefined
   const pendingDelivery = task?.attention.find(item => item.kind === 'delivery-unconfirmed')
   const retryableCheckpoint = writerSelected ? undefined : task?.retryableDeliveryCheckpoint
+  const inspection = !writerSelected && task?.freshness !== 'disconnected'
+    && review.deliveryInspection?.taskId === task?.taskId
+    && review.deliveryInspection?.intent.operationId === pendingDelivery?.sourceId
+    ? review.deliveryInspection : null
   const busy = review.operation !== null
   const fresh = review.freshness === 'fresh' && review.state === 'ready' && !writerSelected && pendingDelivery === undefined
   const integrationBlocked = task?.integrations?.some(node => node.outcome.kind === 'conflict' && node.resolvedBy === undefined) === true
@@ -146,7 +152,15 @@ export function TaskReview({
           <button type="button" className={css.secondary} disabled={busy || task?.freshness !== 'live'}
             onClick={() => { void retryDeliveryCheckpoint(retryableCheckpoint) }}>{t('saveReceipt')}</button>
         </>}
+        {!writerSelected && retryableCheckpoint === undefined && <button type="button" className={css.secondary}
+          disabled={busy || task?.freshness === 'disconnected'}
+          onClick={() => { void inspectDelivery(pendingDelivery.sourceId as TaskReviewOperationId) }}>{t('inspectDelivery')}</button>}
       </div>}
+      {review.operation === 'inspect-delivery' && <div role="status" className={css.stale}>{t('inspectingDelivery')}</div>}
+      {review.deliveryInspectionError !== null && <div role="alert" className={css.alert}>
+        <strong>{t('inspectionError')}</strong><span>{review.deliveryInspectionError.message}</span>
+      </div>}
+      {inspection !== null && <DeliveryInspection inspection={inspection} t={t} />}
       {review.state === 'loading' && summary === null && <div role="status" className={css.centerState}>{t('loading')}</div>}
       {review.error !== null && <div role="alert" className={clsx(css.alert, isApplyConflict(review) && css.conflict)}>
         <strong>{isApplyConflict(review) ? t('conflict') : t('error')}</strong>

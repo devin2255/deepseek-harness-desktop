@@ -2,7 +2,7 @@
 
 import type {
   DefineTaskCriterion, RpcResult, SessionId, TaskCriterion, TaskReviewDecision,
-  TaskRisk, TaskSnapshot, TaskReviewOperationId,
+  TaskRisk, TaskSnapshot, TaskReviewOperationId, TaskDeliveryInspection,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ObservableSnapshot } from './store.ts'
 import type { TaskListState } from '../tasks/manager.ts'
@@ -58,4 +58,11 @@ export interface ITasks {
   discardReview(confirmedUncommittedLoss: boolean, expectedSeq: number): Promise<RpcResult<TaskSnapshot>>
   /** Retry receipt persistence only. @param operationId - exact advertised checkpoint. @returns command result. */
   retryDeliveryCheckpoint(operationId: TaskReviewOperationId): Promise<RpcResult<TaskSnapshot>>
+  /**
+   * Read current Git evidence for a pending root delivery, including an unreadable review.
+   * Does not persist a receipt, clear attention, or authorize execution; refresh and Task changes invalidate displayed evidence.
+   * @param operationId - Exact pending authorization from the Task projection.
+   * @returns Point-in-time evidence or a structured failure.
+   */
+  inspectDelivery(operationId: TaskReviewOperationId): Promise<RpcResult<TaskDeliveryInspection>>
 }

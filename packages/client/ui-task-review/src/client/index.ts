@@ -26,6 +26,7 @@ export interface TaskReviewInjected {
   apply(commit: string, expectedSeq: number): Promise<unknown>
   discard(confirmedUncommittedLoss: boolean, expectedSeq: number): Promise<unknown>
   retryDeliveryCheckpoint(operationId: TaskReviewOperationId): Promise<unknown>
+  inspectDelivery(operationId: TaskReviewOperationId): Promise<unknown>
   hooks: { taskReview: HostObservable<TaskReviewState> }
 }
 
@@ -53,6 +54,7 @@ export function apply(ctx: ClientContext): void {
       apply: (commit, expectedSeq) => ctx.tasks.applyReview(commit, expectedSeq),
       discard: (confirmedUncommittedLoss, expectedSeq) => ctx.tasks.discardReview(confirmedUncommittedLoss, expectedSeq),
       retryDeliveryCheckpoint: operationId => ctx.tasks.retryDeliveryCheckpoint(operationId),
+      inspectDelivery: operationId => ctx.tasks.inspectDelivery(operationId),
       hooks: { taskReview: ctx.tasks.reviewState },
     }),
   }, TaskReview))

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import type {
   SessionId, SessionListState, TaskListState, TaskReviewState, TaskReviewSummary, TaskSnapshot, WorkspaceListState,
 } from '@deepseek-ai/dsh-client-runtime/client'
+import type { TaskDeliveryInspection } from '@deepseek-ai/dsh-api-remotes/client'
 import { sanitizeDiffText, TaskReview, type TaskReviewProps } from '../src/client/TaskReview.tsx'
 import { en } from '../src/client/locales.ts'
 
@@ -58,7 +59,7 @@ function harness(over: Partial<TaskReviewState> = {}, taskOver: Partial<TaskSnap
   const review: TaskReviewState = {
     taskId, state: 'ready', diffState: 'ready', freshness: 'fresh', summary: summary(), selectedPath: 'src/app.ts',
     diff: { taskId, workspaceId: 'workspace' as never, revision, path: 'src/app.ts', binary: false, truncated: false, patch: '@@ -1 +1 @@\n-old\n+new\u001b[31m\n' },
-    error: null, operation: null, result: null, ...over,
+    error: null, operation: null, result: null, deliveryInspection: null, deliveryInspectionError: null, ...over,
   }
   const taskList: TaskListState = {
     ids: [taskId], byId: { [taskId]: row }, phase: 'ready', state: 'idle', error: null, freshness: 'fresh', generation: 1,
@@ -80,10 +81,75 @@ function harness(over: Partial<TaskReviewState> = {}, taskOver: Partial<TaskSnap
     requestChanges: vi.fn(async () => ({})), commit: vi.fn(async () => ({})),
     apply: vi.fn(async () => ({})), discard: vi.fn(async () => ({})), t,
     retryDeliveryCheckpoint: vi.fn(async () => ({})),
+    inspectDelivery: vi.fn(async () => ({})),
   }
 }
 
 describe('TaskReview', () => {
+  const operationId = '00000000-0000-4000-8000-000000000001' as NonNullable<TaskSnapshot['retryableDeliveryCheckpoint']>
+  const pending = { status: 'needs-attention' as const, attention: [{ id: 'delivery' as never, taskId,
+    ownerSessionId: taskId, kind: 'delivery-unconfirmed' as const, severity: 'error' as const,
+    summary: 'Missing receipt', createdAt: 1, sourceId: operationId, actionable: true }] }
+  const inspection: TaskDeliveryInspection = {
+    taskId, workspaceId: 'workspace' as never, revision: 'b'.repeat(64) as never, observedAt: 1_000,
+    intent: { kind: 'commit', operationId, reviewRevision: revision, message: 'Reviewed commit', headCommit: '0'.repeat(40), tree: '2'.repeat(40) },
+    status: 'completed', effect: { kind: 'commit', commit: '1'.repeat(40), headBefore: '0'.repeat(40), tree: '2'.repeat(40),
+      branch: 'dsh/task-root', committedRevision: revision },
+  }
+
+  it.each(['live', 'unavailable', 'disconnected'] as const)('offers only read-only inspection of a missing receipt for a %s root', (freshness) => {
+    const p = harness({ state: 'error', summary: null }, { ...pending, freshness })
+    const view = render(<TaskReview {...p} />)
+    const button = view.getByRole('button', { name: 'Inspect current Git result' }) as HTMLButtonElement
+    expect(button.disabled).toBe(freshness === 'disconnected')
+    fireEvent.click(button)
+    expect(p.inspectDelivery).toHaveBeenCalledTimes(freshness === 'disconnected' ? 0 : 1)
+    if (freshness !== 'disconnected') expect(p.inspectDelivery).toHaveBeenCalledWith(operationId)
+    expect(view.queryByRole('button', { name: 'Retry saving delivery receipt' })).toBeNull()
+    for (const name of ['Request Changes', 'Create Commit', 'Apply to Project', 'Discard Worktree']) {
+      expect((view.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
+    }
+  })
+
+  it('displays completed Git evidence without showing a success receipt or enabling delivery', () => {
+    const p = harness({ deliveryInspection: inspection }, pending)
+    const view = render(<TaskReview {...p} />)
+    const evidence = view.getByRole('region', { name: 'Delivery inspection evidence' })
+    expect(evidence.textContent).toContain(en.inspectionCompleted)
+    expect(evidence.textContent).toContain(en.inspectionCompletedHelp)
+    expect(evidence.textContent).toContain('1970-01-01T00:00:01.000Z')
+    expect(evidence.textContent).toContain(inspection.intent.reviewRevision)
+    expect(evidence.textContent).toContain('2'.repeat(40))
+    expect(view.queryByText(en.successCommit)).toBeNull()
+    expect(view.queryByRole('button', { name: 'Confirm' })).toBeNull()
+    expect((view.getByRole('button', { name: 'Apply to Project' }) as HTMLButtonElement).disabled).toBe(true)
+    const mismatch = harness({ deliveryInspection: { ...inspection, taskId: 'other' as SessionId } }, pending)
+    view.rerender(<TaskReview {...mismatch} />)
+    expect(view.queryByRole('region', { name: 'Delivery inspection evidence' })).toBeNull()
+    view.rerender(<TaskReview {...harness({ deliveryInspection: inspection }, { ...pending, attention: [] })} />)
+    expect(view.queryByRole('region', { name: 'Delivery inspection evidence' })).toBeNull()
+    view.rerender(<TaskReview {...harness({ deliveryInspection: inspection }, { ...pending, freshness: 'disconnected' })} />)
+    expect(view.queryByRole('region', { name: 'Delivery inspection evidence' })).toBeNull()
+    view.rerender(<TaskReview {...harness({ deliveryInspection: inspection, writerSessionId: 'writer' as SessionId }, pending)} />)
+    expect(view.queryByRole('region', { name: 'Delivery inspection evidence' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Inspect current Git result' })).toBeNull()
+  })
+
+  it('shows inspection progress and failure separately from an unreadable review', () => {
+    const p = harness({ state: 'error', summary: null, operation: 'inspect-delivery', error: {
+      code: 'task-review-unavailable', message: 'Review directory missing', details: { sessionId: taskId },
+    } }, pending)
+    const view = render(<TaskReview {...p} />)
+    expect(view.getByText(en.inspectingDelivery)).toBeTruthy()
+    expect((view.getByRole('button', { name: en.inspectDelivery }) as HTMLButtonElement).disabled).toBe(true)
+    view.rerender(<TaskReview {...harness({ state: 'error', summary: null, deliveryInspectionError: {
+      code: 'internal', message: 'Inspection connection lost', details: {},
+    } }, pending)} />)
+    expect(view.getByText(en.inspectionError)).toBeTruthy()
+    expect(view.getByText('Inspection connection lost')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: en.inspectDelivery }))
+    expect(view.queryByRole('button', { name: 'Confirm' })).toBeNull()
+  })
   it.each(['live', 'disconnected'] as const)('offers receipt-only saving with %s Task freshness despite an unavailable review', (freshness) => {
     const operationId = '00000000-0000-4000-8000-000000000001' as NonNullable<TaskSnapshot['retryableDeliveryCheckpoint']>
     const p = harness({ state: 'error', summary: null }, { freshness, retryableDeliveryCheckpoint: operationId,
@@ -98,6 +164,7 @@ describe('TaskReview', () => {
     expect(p.commit).not.toHaveBeenCalled()
     expect(p.apply).not.toHaveBeenCalled()
     expect(p.discard).not.toHaveBeenCalled()
+    expect(view.queryByRole('button', { name: en.inspectDelivery })).toBeNull()
   })
   it('shows unconfirmed delivery identity and prevents every mutation while allowing read-only refresh', () => {
     const p = harness({}, { status: 'needs-attention', attention: [{ id: 'delivery' as never, taskId,

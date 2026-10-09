@@ -3,7 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   DefineTaskCriterion, IApiClient, RpcResult, SessionId, TaskCriterion,
-  TaskReviewDecision, TaskRisk, TaskSnapshot, TaskReviewOperationId,
+  TaskReviewDecision, TaskRisk, TaskSnapshot, TaskReviewOperationId, TaskDeliveryInspection,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '../contract/store.ts'
 import { createSnapshotStore } from '../contract/store.ts'
@@ -22,7 +22,13 @@ export class TaskRuntime implements ITasks {
   constructor(ctx: Context, api: IApiClient) {
     this.manager = new TaskManager(api)
     this.list = createSnapshotStore(this.manager.getSnapshot())
-    this.manager.subscribe(() => { this.list.set(this.manager.getSnapshot()) })
+    this.manager.subscribe(() => {
+      const previous = this.list.getSnapshot()
+      const next = this.manager.getSnapshot()
+      this.list.set(next)
+      const taskId = this.reviewManager.getSnapshot().taskId
+      if (taskId !== undefined && previous.byId[taskId] !== next.byId[taskId]) this.reviewManager.invalidateDeliveryInspection()
+    })
     this.reviewManager = new TaskReviewManager(api, () => this.manager.refresh())
     this.reviewState = createSnapshotStore(this.reviewManager.getSnapshot())
     this.reviewManager.subscribe(() => { this.reviewState.set(this.reviewManager.getSnapshot()) })
@@ -90,6 +96,9 @@ export class TaskRuntime implements ITasks {
   /** Retry receipt persistence only. @param operationId - exact advertised checkpoint. @returns command result. */
   retryDeliveryCheckpoint(operationId: TaskReviewOperationId): Promise<RpcResult<TaskSnapshot>> {
     return this.reviewManager.retryDeliveryCheckpoint(operationId)
+  }
+  inspectDelivery(operationId: TaskReviewOperationId): Promise<RpcResult<TaskDeliveryInspection>> {
+    return this.reviewManager.inspectDelivery(operationId)
   }
   /**
    * Route one Host frame into the Task mirror.

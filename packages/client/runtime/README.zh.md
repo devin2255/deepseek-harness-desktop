@@ -36,9 +36,11 @@ SlotRegistry 分别为 renderer 提供 `useSessions` 与 `useWorkspaces` 的裸 
 
 `SessionRuntime.search(query, signal)` 是基于 `session.search` RPC 的无状态单次操作。它返回经过排序的会话／snippet 对，但不会将查询条件、加载状态或错误状态写入共享 Session 列表，因此每个 UI 所有者都自行负责防抖、取消、抑制陈旧响应和回退呈现。`searchResultLimit` 将 `SESSION_SEARCH_RESULT_LIMIT`——即响应 schema 自身强制执行的上限——作为注入的呈现数据重新公开，使客户端插件无需复制该值。它是协议常量而非逐连接状态，因此连接 handle 不携带它。
 
-`openReview(rootId, writerSessionId?)` 将根任务交付身份与可选的子结果身份分开。子级读取仍以父级寻址；任一身份切换都会使此前摘要和 Diff 响应失效。交付要求新鲜的根任务审查且没有活动操作，交付期间切换会被拒绝。迟到的变更响应不能替换更新的审查代次。投影刷新失败时，已接受的回执仍保留，刷新错误独立展示。
+`openReview(rootId, writerSessionId?)` 将根任务交付身份与可选的子结果身份分开。子级读取仍以父级寻址；任一身份切换都会使此前摘要和 Diff 响应失效。交付要求新鲜的根任务审查且没有活动操作，交付期间切换会被拒绝。开始变更操作后，保留的摘要标记为过期，直到新摘要读取成功；拒绝或不确定结果也遵循此规则。迟到的变更响应不能替换更新的审查代次。投影刷新失败时，已接受的回执仍保留，刷新错误独立展示。
 
 `retryDeliveryCheckpoint(operationId)` 使用同一个根审查操作所有者，但不要求可读取的审查摘要。它把提供给调用方的 id 转发给 Host，不在本地重建 Git 回执，并在接受后刷新 Task 状态。选择子结果或已有活动操作时会拒绝。
+
+`inspectDelivery(operationId)` 将只读 Git 核验与根交付串行化，不要求可读取的摘要。`TaskReviewState.deliveryInspection` 和 `deliveryInspectionError` 分别独立于交付回执和审查错误。核验不刷新 Task 状态或改变审查新鲜度。刷新、断线、交付、对象选择，以及所选 Task 的权威替换或移除会使证据失效，并抑制在途响应；无关 Task 变化保留证据。观察不能清除注意事项或授权执行。
 
 ## New Session 与 blank 镜像
 

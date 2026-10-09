@@ -1,0 +1,377 @@
+# Completed Commit evidence
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Inspect browser-inspect-commit" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - text: "Branch:"
+  - code: dsh/task-41c07bc3ad73fc2e2ac98bd4
+  - text: "Base commit:"
+  - code: {{baseCommitShort}}
+  - text: "Task HEAD:"
+  - code: {{baseCommitShort}}
+  - text: "Source HEAD:"
+  - code: {{baseCommitShort}}
+  - button "Refresh"
+  - status: This review may be out of date.
+  - alert:
+    - strong: Delivery result unconfirmed
+    - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
+    - code: {{uuid}}
+    - button "Inspect current Git result"
+  - region "Delivery inspection evidence":
+    - heading "Delivery inspection evidence" [level=2]
+    - status:
+      - strong: Current Git state matches the completed authorized result
+      - paragraph: This evidence does not establish execution time or causality and is not a saved success receipt.
+    - paragraph: Evidence is only from this inspection; it neither saves a receipt nor unblocks execution. Manual confirmation recovery is not available yet. Refresh, task changes, or disconnect clear this evidence.
+    - term: Observation time (not execution time)
+    - definition:
+      - time: {{observedAt}}
+    - term: Authorized operation
+    - definition: Create Commit
+    - term: Authorized review revision
+    - definition:
+      - code: {{authorizedRevision}}
+    - term: Commit message
+    - definition: Lost browser commit
+    - term: Authorized task HEAD before operation
+    - definition:
+      - code: {{baseCommit}}
+    - term: Authorized Git tree
+    - definition:
+      - code: {{authorizedTree}}
+    - term: Observed commit
+    - definition:
+      - code: {{taskCommit}}
+    - term: Observed parent commit
+    - definition:
+      - code: {{baseCommit}}
+    - term: Observed Git tree
+    - definition:
+      - code: {{authorizedTree}}
+    - term: Branch
+    - definition:
+      - code: dsh/task-41c07bc3ad73fc2e2ac98bd4
+    - term: Committed content revision
+    - definition:
+      - code: {{committedRevision}}
+  - alert:
+    - strong: Could not complete the operation
+    - text: Delivery result is unconfirmed. The operation may have changed Git; inspect the Task and source checkout before retrying.
+    - button "Retry"
+  - navigation "Changed files":
+    - heading "Changed files" [level=2]
+    - text: +1 −1
+    - list:
+      - listitem:
+        - button "tracked.txt Modified · +1 −1"
+  - region "Unified diff":
+    - heading "Unified diff" [level=2]
+    - text: diff --git a/tracked.txt b/tracked.txt index df967b9..3147e18 100644 --- a/tracked.txt +++ b/tracked.txt @@ -1 +1 @@ -base +delivered
+  - complementary "Acceptance & risk":
+    - heading "Acceptance criteria" [level=2]
+    - list:
+      - listitem: Waived Inspect exact Git facts
+    - heading "Verification evidence" [level=2]
+    - paragraph: No verification evidence yet.
+    - heading "Unresolved risks" [level=2]
+    - paragraph: No unresolved risks.
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+    - text: Lost browser commit
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]
+
+# Externally changed Task
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Inspect browser-inspect-commit" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - text: "Branch:"
+  - code: dsh/task-41c07bc3ad73fc2e2ac98bd4
+  - text: "Base commit:"
+  - code: {{baseCommitShort}}
+  - text: "Task HEAD:"
+  - code: {{taskCommitShort}}
+  - text: "Source HEAD:"
+  - code: {{baseCommitShort}}
+  - button "Refresh"
+  - alert:
+    - strong: Delivery result unconfirmed
+    - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
+    - code: {{uuid}}
+    - button "Inspect current Git result"
+  - region "Delivery inspection evidence":
+    - heading "Delivery inspection evidence" [level=2]
+    - status:
+      - strong: Current state cannot confirm the result
+      - paragraph: The task commit, index, or files differ from the authorized state. Inspect the task worktree manually.
+    - paragraph: Evidence is only from this inspection; it neither saves a receipt nor unblocks execution. Manual confirmation recovery is not available yet. Refresh, task changes, or disconnect clear this evidence.
+    - term: Observation time (not execution time)
+    - definition:
+      - time: {{observedAt}}
+    - term: Authorized operation
+    - definition: Create Commit
+    - term: Authorized review revision
+    - definition:
+      - code: {{authorizedRevision}}
+    - term: Commit message
+    - definition: Lost browser commit
+    - term: Authorized task HEAD before operation
+    - definition:
+      - code: {{baseCommit}}
+    - term: Authorized Git tree
+    - definition:
+      - code: {{authorizedTree}}
+  - navigation "Changed files":
+    - heading "Changed files" [level=2]
+    - text: +1 −1
+    - list:
+      - listitem:
+        - button "tracked.txt Modified · +1 −1"
+  - region "Unified diff":
+    - heading "Unified diff" [level=2]
+    - text: diff --git a/tracked.txt b/tracked.txt index df967b9..09deffa 100644 --- a/tracked.txt +++ b/tracked.txt @@ -1 +1 @@ -base +external change
+  - complementary "Acceptance & risk":
+    - heading "Acceptance criteria" [level=2]
+    - list:
+      - listitem: Waived Inspect exact Git facts
+    - heading "Verification evidence" [level=2]
+    - paragraph: No verification evidence yet.
+    - heading "Unresolved risks" [level=2]
+    - paragraph: No unresolved risks.
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+    - text: Lost browser commit
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]
+
+# Authorized result absent now
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Inspect browser-inspect-absent" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - text: "Branch:"
+  - code: dsh/task-bc398fbc5c3b1a4f543c5d73
+  - text: "Base commit:"
+  - code: {{baseCommitShort}}
+  - text: "Task HEAD:"
+  - code: {{baseCommitShort}}
+  - text: "Source HEAD:"
+  - code: {{baseCommitShort}}
+  - button "Refresh"
+  - status: This review may be out of date.
+  - alert:
+    - strong: Delivery result unconfirmed
+    - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
+    - code: {{uuid}}
+    - button "Inspect current Git result"
+  - region "Delivery inspection evidence":
+    - heading "Delivery inspection evidence" [level=2]
+    - status:
+      - strong: The authorized result is absent now
+      - paragraph: This does not prove the operation never ran or authorize a retry. Check for external changes or reversals.
+    - paragraph: Evidence is only from this inspection; it neither saves a receipt nor unblocks execution. Manual confirmation recovery is not available yet. Refresh, task changes, or disconnect clear this evidence.
+    - term: Observation time (not execution time)
+    - definition:
+      - time: {{observedAt}}
+    - term: Authorized operation
+    - definition: Create Commit
+    - term: Authorized review revision
+    - definition:
+      - code: {{authorizedRevision}}
+    - term: Commit message
+    - definition: Authorized but absent
+    - term: Authorized task HEAD before operation
+    - definition:
+      - code: {{baseCommit}}
+    - term: Authorized Git tree
+    - definition:
+      - code: {{authorizedTree}}
+  - alert:
+    - strong: Could not complete the operation
+    - text: Delivery result is unconfirmed. The operation may have changed Git; inspect the Task and source checkout before retrying.
+    - button "Retry"
+  - navigation "Changed files":
+    - heading "Changed files" [level=2]
+    - text: +1 −1
+    - list:
+      - listitem:
+        - button "tracked.txt Modified · +1 −1"
+  - region "Unified diff":
+    - heading "Unified diff" [level=2]
+    - text: diff --git a/tracked.txt b/tracked.txt index df967b9..3147e18 100644 --- a/tracked.txt +++ b/tracked.txt @@ -1 +1 @@ -base +delivered
+  - complementary "Acceptance & risk":
+    - heading "Acceptance criteria" [level=2]
+    - list:
+      - listitem: Waived Inspect exact Git facts
+    - heading "Verification evidence" [level=2]
+    - paragraph: No verification evidence yet.
+    - heading "Unresolved risks" [level=2]
+    - paragraph: No unresolved risks.
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+    - text: Authorized but absent
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]
+
+# Discard evidence after renderer reload
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Inspect browser-inspect-discard" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - button "Refresh"
+  - status: This review may be out of date.
+  - alert:
+    - strong: Delivery result unconfirmed
+    - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
+    - code: {{uuid}}
+    - button "Inspect current Git result"
+  - region "Delivery inspection evidence":
+    - heading "Delivery inspection evidence" [level=2]
+    - status:
+      - strong: Current Git state matches the completed authorized result
+      - paragraph: This evidence does not establish execution time or causality and is not a saved success receipt.
+    - paragraph: Evidence is only from this inspection; it neither saves a receipt nor unblocks execution. Manual confirmation recovery is not available yet. Refresh, task changes, or disconnect clear this evidence.
+    - term: Observation time (not execution time)
+    - definition:
+      - time: {{observedAt}}
+    - term: Authorized operation
+    - definition: Discard Worktree
+    - term: Authorized review revision
+    - definition:
+      - code: {{authorizedRevision}}
+    - term: Authorized task HEAD before operation
+    - definition:
+      - code: {{discardCommit}}
+    - term: Uncommitted changes at authorization
+    - definition: "Yes"
+    - term: Uncommitted loss confirmed
+    - definition: "Yes"
+    - term: Worktree removed
+    - definition: "Yes"
+    - term: Preserved branch
+    - definition:
+      - code: dsh/task-53d27d48f65fb1f6b6ee3f44
+    - term: Task HEAD
+    - definition:
+      - code: {{discardCommit}}
+    - term: Uncommitted changes discarded
+    - definition: "Yes"
+    - term: Recoverable commit
+    - definition:
+      - code: {{discardCommit}}
+  - alert:
+    - strong: Could not complete the operation
+    - text: The recorded Task worktree is unavailable.
+    - button "Retry"
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]
+
+# Apply evidence without a receipt
+
+- main "Change Review":
+  - button "← Back to Tasks"
+  - heading "Inspect browser-inspect-apply" [level=1]
+  - text: Review source
+  - combobox "Review source":
+    - option "Root task result" [selected]
+  - text: "Branch:"
+  - code: dsh/task-c93f6b004010d209698079bf
+  - text: "Base commit:"
+  - code: {{baseCommitShort}}
+  - text: "Task HEAD:"
+  - code: {{applyCommitShort}}
+  - text: "Source HEAD:"
+  - code: {{baseCommitShort}}
+  - button "Refresh"
+  - status: This review may be out of date.
+  - alert:
+    - strong: Delivery result unconfirmed
+    - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
+    - code: {{uuid}}
+    - button "Inspect current Git result"
+  - region "Delivery inspection evidence":
+    - heading "Delivery inspection evidence" [level=2]
+    - status:
+      - strong: Current Git state matches the completed authorized result
+      - paragraph: This evidence does not establish execution time or causality and is not a saved success receipt.
+    - paragraph: Evidence is only from this inspection; it neither saves a receipt nor unblocks execution. Manual confirmation recovery is not available yet. Refresh, task changes, or disconnect clear this evidence.
+    - term: Observation time (not execution time)
+    - definition:
+      - time: {{observedAt}}
+    - term: Authorized operation
+    - definition: Apply to Project
+    - term: Authorized review revision
+    - definition:
+      - code: {{authorizedRevision}}
+    - term: Commit authorized for Apply
+    - definition:
+      - code: {{applyCommit}}
+    - term: Source HEAD
+    - definition:
+      - code: {{baseCommit}}
+    - term: Commit matched by current contents
+    - definition:
+      - code: {{applyCommit}}
+    - term: Source HEAD
+    - definition:
+      - code: {{baseCommit}}
+    - term: Git tree matched by source index and files
+    - definition:
+      - code: {{sourceTree}}
+  - alert:
+    - strong: Could not complete the operation
+    - text: Delivery result is unconfirmed. The operation may have changed Git; inspect the Task and source checkout before retrying.
+    - button "Retry"
+  - navigation "Changed files":
+    - heading "Changed files" [level=2]
+    - text: +1 −1
+    - list:
+      - listitem:
+        - button "tracked.txt Modified · +1 −1"
+  - region "Unified diff":
+    - heading "Unified diff" [level=2]
+    - text: diff --git a/tracked.txt b/tracked.txt index df967b9..3147e18 100644 --- a/tracked.txt +++ b/tracked.txt @@ -1 +1 @@ -base +delivered
+  - complementary "Acceptance & risk":
+    - heading "Acceptance criteria" [level=2]
+    - list:
+      - listitem: Waived Inspect exact Git facts
+    - heading "Verification evidence" [level=2]
+    - paragraph: No verification evidence yet.
+    - heading "Unresolved risks" [level=2]
+    - paragraph: No unresolved risks.
+  - button "Request Changes" [disabled]
+  - text: Commit message
+  - textbox "Commit message":
+    - /placeholder: Describe what this task completed
+    - text: Apply inspection commit
+  - button "Create Commit" [disabled]
+  - button "Apply to Project" [disabled]
+  - button "Discard Worktree" [disabled]

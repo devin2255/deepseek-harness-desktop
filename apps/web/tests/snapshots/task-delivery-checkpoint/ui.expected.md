@@ -15,6 +15,7 @@
   - text: "Source HEAD:"
   - code: {{baseCommitShort}}
   - button "Refresh"
+  - status: This review may be out of date.
   - alert:
     - strong: Delivery result unconfirmed
     - text: The operation may still be running or may have changed Git. Inspect the Task worktree and source checkout before retrying. Task execution and delivery are blocked; Refresh only reads current state.
