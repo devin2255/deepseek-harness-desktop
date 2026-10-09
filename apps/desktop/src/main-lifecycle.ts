@@ -60,6 +60,8 @@ export interface DesktopMainDependencies {
   readonly startHarness: (launchSpec: HarnessLaunchSpec, options: HarnessStartOptions) => Promise<HarnessHandle>
   /** Create the authorized main window after Harness readiness. */
   readonly createWindow: (endpoint: URL, capability: string) => Promise<DesktopWindow>
+  /** Stop observing and publish native-window preferences before releasing the application mutex or exiting. */
+  readonly flushWindowState: () => Promise<void>
   /** Create native background presence for one authenticated Harness attempt. */
   readonly createBackgroundPresence: (
     endpoint: URL,
@@ -350,7 +352,11 @@ export function startDesktopMain(dependencies: DesktopMainDependencies): Desktop
       if (attempt !== undefined) { attempt.superseded = true; attempt.controller.abort() }
       try {
         await withTimeout((async () => {
-          if (attempt !== undefined) { await attempt.settled; await stopAttempt(attempt) }
+          try {
+            if (attempt !== undefined) { await attempt.settled; await stopAttempt(attempt) }
+          } finally {
+            try { await dependencies.flushWindowState() } catch (error: unknown) { report('shutdown', error) }
+          }
           await applicationMutex?.release()
         })(), dependencies.cleanupTimeoutMs)
         cleanupCompleted = true

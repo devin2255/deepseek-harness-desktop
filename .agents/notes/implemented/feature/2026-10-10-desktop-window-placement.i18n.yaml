@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-10-desktop-window-placement.md
+2026-10-10-desktop-window-placement.md: 52c58541620fe1d6ae07484278555154d622cad9
+2026-10-10-desktop-window-placement.zh.md: 63a269796cee821dcb938a071522f2ab053a46f6

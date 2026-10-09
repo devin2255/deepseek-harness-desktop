@@ -332,6 +332,7 @@ function prepareNormalEntry(): {
       cwd: appData,
       environment: {},
       logs: appData,
+      productData: join(appData, 'DeepSeek Harness'),
     })),
   }))
   vi.doMock('../src/desktop-log.ts', () => ({

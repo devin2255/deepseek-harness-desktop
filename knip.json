@@ -94,7 +94,6 @@
         "@deepseek-ai/cordis-plugin-group",
         "@deepseek-ai/dsh",
         "@deepseek-ai/dsh-anonymous-user-id",
-        "@deepseek-ai/dsh-atomic-write",
         "@deepseek-ai/dsh-bash-local",
         "@deepseek-ai/dsh-code-runtime",
         "@deepseek-ai/dsh-compaction",

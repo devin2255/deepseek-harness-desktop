@@ -196,6 +196,7 @@ function fixture(overrides: Partial<DesktopMainDependencies> = {}): {
     platform: 'win32',
     startHarness,
     createWindow,
+    flushWindowState: async () => {},
     createBackgroundPresence,
     confirmQuit,
     confirmUpdateInstall,
@@ -258,6 +259,44 @@ async function flushLifecycle(): Promise<void> {
 }
 
 describe('startDesktopMain', () => {
+  it('settles window preferences before releasing the mutex and exiting', async () => {
+    const writing = deferred<undefined>()
+    const order: string[] = []
+    const flushWindowState = vi.fn(async () => { order.push('window-state'); await writing.promise })
+    const setup = fixture({
+      flushWindowState,
+      acquireApplicationMutex: async () => ({ release: async () => { order.push('mutex') } }),
+    })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    setup.app.emitBeforeQuit()
+    await flushLifecycle()
+    expect(order).toEqual(['window-state'])
+    expect(setup.app.quit).not.toHaveBeenCalled()
+    writing.resolve(undefined)
+    await desktop.shutdown
+    expect(order).toEqual(['window-state', 'mutex'])
+    expect(flushWindowState).toHaveBeenCalledOnce()
+    expect(setup.app.quit).toHaveBeenCalledOnce()
+  })
+
+  it('reports preference cleanup failure without skipping Harness or mutex cleanup', async () => {
+    const failure = new Error('window preferences unavailable')
+    const release = vi.fn(async () => {})
+    const setup = fixture({
+      flushWindowState: async () => { throw failure },
+      acquireApplicationMutex: async () => ({ release }),
+    })
+    const desktop = startDesktopMain(setup.dependencies)
+    await desktop.startup
+    setup.app.emitBeforeQuit()
+    await desktop.shutdown
+    expect(setup.stop).toHaveBeenCalledOnce()
+    expect(release).toHaveBeenCalledOnce()
+    expect(setup.reportFailure).toHaveBeenCalledWith('shutdown', failure)
+    expect(setup.app.quit).toHaveBeenCalledOnce()
+  })
+
   it('creates the startup window after Electron readiness and before Harness startup', async () => {
     const ready = deferred<undefined>()
     const events: string[] = []
@@ -957,7 +996,8 @@ describe('startDesktopMain', () => {
 
   it('reports a stop failure and still reaches the latched quit without rejecting', async () => {
     const failure = new Error('bounded stop failure')
-    const { app, dependencies, reportFailure, stop } = fixture()
+    const flushWindowState = vi.fn(async () => {})
+    const { app, dependencies, reportFailure, stop } = fixture({ flushWindowState })
     vi.mocked(stop).mockRejectedValue(failure)
     const desktop = startDesktopMain(dependencies)
     await desktop.startup
@@ -966,6 +1006,7 @@ describe('startDesktopMain', () => {
     await desktop.shutdown
 
     expect(reportFailure).toHaveBeenCalledWith('shutdown', failure)
+    expect(flushWindowState).toHaveBeenCalledOnce()
     expect(app.quit).toHaveBeenCalledTimes(1)
   })
 

@@ -1,5 +1,5 @@
 /** Electron entry binding cleanup mode or the normal retryable desktop lifecycle. */
-import { app, dialog, Menu, Notification, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, Menu, Notification, screen, shell, Tray } from 'electron'
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -22,6 +22,7 @@ import {
   runUninstallCleanup,
 } from './uninstall-cleanup.ts'
 import { createDesktopWindow } from './window.ts'
+import { applyWindowPlacement, WindowStateStore } from './window-state.ts'
 
 const DESKTOP_CLEANUP_TIMEOUT_MS = 10_000
 const UNINSTALL_CLEANUP_MAX_SNAPSHOT_ENTRIES = 100_000
@@ -32,6 +33,7 @@ const DESKTOP_TASK_POLL_INTERVAL_MS = 2_000
 const DESKTOP_TASK_REQUEST_TIMEOUT_MS = 10_000
 const DESKTOP_UPDATE_INITIAL_DELAY_MS = 60_000
 const DESKTOP_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1_000
+const DESKTOP_WINDOW_SAVE_DELAY_MS = 250
 const desktopArguments = process.argv.slice(app.isPackaged ? 1 : 2)
 
 if (isUninstallCleanupInvocation(desktopArguments)) {
@@ -84,6 +86,17 @@ function startNormalDesktop(): void {
     maxMetadataCodeUnits: DESKTOP_LOG_MAX_METADATA_CODE_UNITS,
     sensitiveValues: sensitiveEnvironmentValues(process.env),
   })
+  const windowState = new WindowStateStore({
+    filePath: join(runtimeContext.productData, 'window-state.json'),
+    saveDelayMs: DESKTOP_WINDOW_SAVE_DELAY_MS,
+    reportFailure: (error) => {
+      desktopLog.append({
+        timestamp: new Date().toISOString(),
+        type: 'desktop-window-state-failure',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    },
+  })
   let updates: DesktopUpdates | undefined
   if (process.platform === 'win32' && app.isPackaged) {
     try {
@@ -122,7 +135,30 @@ function startNormalDesktop(): void {
     platform: process.platform,
     startHarness: (launchSpec, options) => startHarness(launchSpec, options),
     createStartupWindow: actions => createStartupWindow(actions),
-    createWindow: (endpoint, capability) => createDesktopWindow(endpoint, capability),
+    createWindow: async (endpoint, capability) => {
+      const placement = await windowState.restore(
+        screen.getAllDisplays().map(display => display.workArea), screen.getPrimaryDisplay().workArea,
+      )
+      return createDesktopWindow(endpoint, capability, {
+        createWindow: (options) => {
+          const window = new BrowserWindow({
+            ...options, ...placement.bounds, minWidth: placement.minWidth, minHeight: placement.minHeight,
+          })
+          try {
+            applyWindowPlacement(window, placement)
+            windowState.track(window)
+            if (placement.maximized) window.maximize()
+          } catch (error: unknown) {
+            try { window.destroy() } catch (cleanupError: unknown) {
+              throw new AggregateError([error, cleanupError], 'Desktop layout startup and window cleanup failed', { cause: error })
+            }
+            throw error
+          }
+          return window
+        },
+      })
+    },
+    flushWindowState: () => windowState.dispose(),
     createBackgroundPresence: (endpoint, capability, actions) => createBackgroundPresence({
       actions,
       ...(updates === undefined ? {} : { updates }),
