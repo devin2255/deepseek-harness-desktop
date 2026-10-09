@@ -89,7 +89,12 @@ export type TaskDeliveryIntent = {
 } & (
   | { readonly kind: 'commit'; readonly message: string }
   | { readonly kind: 'apply'; readonly commit: string; readonly sourceHead: string }
-  | { readonly kind: 'discard'; readonly confirmedUncommittedLoss: boolean }
+  | {
+    readonly kind: 'discard'
+    readonly confirmedUncommittedLoss: boolean
+    readonly headCommit: string
+    readonly uncommittedChanges: boolean
+  }
 )
 
 /** Compare-and-set authorization for one delivery, durably flushed before it may mutate Git. */

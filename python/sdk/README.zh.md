@@ -45,6 +45,8 @@ with DeepSeekHarness(
 
 `DeepSeekHarness` 和 `HarnessClient` 提供 `list_tasks()`、`define_task()`、`update_task_criterion()`、`record_task_risk()` 与 `review_task()`。隔离 Task 还提供 `get_task_review_summary()`、`get_task_review_diff()`、`commit_task()`、`apply_task()` 与 `discard_task()`，其协议词汇与 TypeScript SDK 完全一致。Pydantic 会校验每个 Task 基线、审查摘要、文件 Diff、已提交完整行、可选的 `execution_workspace` 和交付回执，同时原样保留源路径、Worktree 路径、分支、协议标识与判别字段；无效响应会抛出 `SdkProtocolError`。SDK 不执行 Git 操作，也不在 SDK 侧维护 Task 缓存。
 
+Discard 回执标识当前授权的审查和保留的 Task 分支，不一定等于较早的 Commit revision 或提交。后续编辑和后代提交仍是独立恢复事实；Host 根据变更前授权验证它们。
+
 可选的 `integrations` 包含类型化尝试，结果区分运行中、未确认、失败、已集成或冲突。校验会检查有序日志标识、完整回执、所选后代，以及 `resolved_by` 指定的后续贡献者覆盖关系。未知发布结果保持未知；历史结果不授权另一次 Git 变更。
 
 两层客户端都提供 `retry_task_delivery_checkpoint(session_id, operation_id)`，用于提供给调用方的 `retryable_delivery_checkpoint`。即使 worktree 已被丢弃，它仍能保存现有实时回执，不追加事件，也不执行 Git。回执缺失或被替换时会拒绝；Provider 结果丢失时需要检查 Git，而不是使用此重试。

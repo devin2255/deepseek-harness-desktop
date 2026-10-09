@@ -110,13 +110,20 @@ export interface GetTaskFileDiffRequest {
 }
 
 /** Caller-owned durable authorization, awaited inside the repository queue before its first mutation. */
-export interface TaskDeliveryAuthorization {
+export interface TaskDeliveryAuthorization<Preflight = void> {
   readonly operationId: TaskReviewOperationId
   /**
    * Persist authorization before Git changes the index, worktree, or branch.
+   * @param preflight - Provider-observed facts required by the operation; void for Commit and Apply.
    * @returns settlement permitting mutation; rejection prevents mutation.
    */
-  readonly authorize: () => Promise<void>
+  readonly authorize: (preflight: Preflight) => Promise<void>
+}
+
+/** Current worktree facts captured before Discard authorization and removal. */
+export interface TaskDiscardPreflight {
+  readonly headCommit: string
+  readonly uncommittedChanges: boolean
 }
 
 /** Request to commit the exact reviewed state inside the Task worktree. */
@@ -220,7 +227,7 @@ export interface DiscardTaskReviewRequest {
   readonly assignment: TaskWorktreeAssignment
   readonly expectedRevision: TaskReviewRevision
   readonly confirmedUncommittedLoss: boolean
-  readonly authorization?: TaskDeliveryAuthorization
+  readonly authorization?: TaskDeliveryAuthorization<TaskDiscardPreflight>
 }
 
 /** Durable facts returned after releasing a Task worktree. */

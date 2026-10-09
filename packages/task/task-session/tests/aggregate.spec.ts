@@ -221,6 +221,7 @@ describe('aggregateTasks', () => {
     } })
     const discardStarted = event('task/delivery-started', 8, 7, { intent: {
       kind: 'discard', operationId: discardReceipt.operationId, reviewRevision: discardReceipt.reviewRevision, confirmedUncommittedLoss: false,
+      headCommit: commitReceipt.commit, uncommittedChanges: false,
     } })
     const committed = event('task/review-committed', 4, 6, { receipt: commitReceipt })
     const applied = event('task/review-applied', 5, 7, { receipt: applyReceipt })

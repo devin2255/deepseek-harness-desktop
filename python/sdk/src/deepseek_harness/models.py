@@ -329,10 +329,10 @@ class TaskSnapshot(TaskWireModel):
             or self.apply_receipt.review_revision != self.commit_receipt.committed_revision
         ):
             raise ValueError("applyReceipt must consume the recorded Task commit")
-        if self.discard_receipt is not None and self.commit_receipt is not None and (
-            self.discard_receipt.review_revision != self.commit_receipt.committed_revision
+        if self.discard_receipt is not None and assignment is not None and (
+            self.discard_receipt.branch != assignment.branch
         ):
-            raise ValueError("discardReceipt must identify the committed review revision")
+            raise ValueError("discardReceipt must identify the assigned Task branch")
         previous_seq = -1
         nodes = self.integrations or []
         for index, node in enumerate(nodes):

@@ -48,6 +48,8 @@ The [Python SDK tutorial](https://github.com/deepseek-ai/deepseek-harness/blob/m
 
 `DeepSeekHarness` and `HarnessClient` expose `list_tasks()`, `define_task()`, `update_task_criterion()`, `record_task_risk()`, and `review_task()`. Isolated Tasks also expose `get_task_review_summary()`, `get_task_review_diff()`, `commit_task()`, `apply_task()`, and `discard_task()` with the same wire vocabulary as the TypeScript SDK. Pydantic validates each Task baseline, review summary, file diff, committed row, optional `execution_workspace`, and delivery receipt while preserving source paths, worktree paths, branches, wire identifiers, and discriminants exactly; invalid responses raise `SdkProtocolError`. The SDK performs no Git operation and keeps no SDK-side Task cache.
 
+A Discard receipt identifies the currently authorized review and preserved Task branch, not necessarily the earlier Commit revision or commit. Later edits and descendant commits remain distinct recovery facts; the Host validates them against the pre-mutation authorization.
+
 Optional `integrations` contains typed attempts with running, unconfirmed, failed, integrated, or conflict outcomes. Validation checks ordered log identities, complete receipts, selected descendants, and the later contributor coverage identified by `resolved_by`. Unknown publication remains unknown; historical results do not authorize another Git mutation.
 
 Both clients expose `retry_task_delivery_checkpoint(session_id, operation_id)` for the advertised `retryable_delivery_checkpoint`. It saves an existing live receipt without another event or Git operation, including after the worktree has been discarded. Missing or replaced receipts reject; a lost Provider result requires Git inspection rather than this retry.

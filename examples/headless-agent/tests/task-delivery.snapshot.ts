@@ -18,7 +18,11 @@ it('excludes root execution through real commit, apply, and discard before relea
   expect(result.stdout.trimEnd().split('\n').map(line => JSON.parse(line) as object)).toEqual(
     [...['cold', 'resident'].map(stage => ({ stage, blocked: ['commit', 'apply', 'discard'], durable: ['commit', 'apply', 'discard'],
       metadataBlocked: ['commit', 'apply', 'discard'], interleavedInput: stage === 'resident', receipts: ['commit', 'apply', 'discard'],
+      discard: { currentReviewUsed: true, currentHeadRetained: true, headAdvanced: stage === 'resident',
+        uncommittedLoss: true, preflightPersisted: true },
       branchRetained: true, sourceHeadPreserved: true, sourceContentApplied: true, reservationReleased: true })),
+    { stage: 'discard-replay', originalCommitRetained: true, currentRecoveryRetained: true,
+      uncommittedLossRetained: true, noUnconfirmedAttention: true },
     { stage: 'unconfirmed', intentRetained: true, executionBlocked: true, receiptAbsent: true, retryRejected: true, gitCommitExists: true }],
   )
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expectedPath, result.stdout)

@@ -43,8 +43,19 @@ it('projects authorized delivery and preserves lost results through the TypeScri
     if (receipt === undefined) throw new Error('SDK did not return commit receipt')
     const applied = await harness.applyTask('delivered', { expectedRevision: receipt.committedRevision,
       expectedSourceHead: summary.sourceHead, commit: receipt.commit, expectedSeq: committed.asOfSeq })
-    const discarded = await harness.discardTask('delivered', { expectedRevision: receipt.committedRevision,
-      expectedSeq: applied.asOfSeq, confirmedUncommittedLoss: false })
+    const execution = initial.executionWorkspace
+    if (execution === undefined) throw new Error('SDK has no assigned worktree')
+    await writeFile(join(execution.path, 'follow-up.txt'), 'recoverable follow-up\n')
+    git(['-C', execution.path, 'add', 'follow-up.txt'])
+    git(['-C', execution.path, 'commit', '-m', 'Follow-up commit'])
+    await writeFile(join(execution.path, 'tracked.txt'), 'uncommitted follow-up\n')
+    const discardSummary = await harness.getTaskReviewSummary('delivered')
+    expect(discardSummary.revision).not.toBe(receipt.committedRevision)
+    expect(discardSummary.headCommit).not.toBe(receipt.commit)
+    const discarded = await harness.discardTask('delivered', { expectedRevision: discardSummary.revision,
+      expectedSeq: applied.asOfSeq, confirmedUncommittedLoss: true })
+    expect(discarded.discardReceipt).toMatchObject({ reviewRevision: discardSummary.revision,
+      recoverableCommit: discardSummary.headCommit, uncommittedChangesDiscarded: true })
     const checkpointBefore = row('checkpoint', (await harness.listTasks()).tasks)
     const checkpointSummary = await harness.getTaskReviewSummary('checkpoint')
     await expect(harness.commitTask('checkpoint', { expectedRevision: checkpointSummary.revision,
@@ -75,6 +86,8 @@ it('projects authorized delivery and preserves lost results through the TypeScri
       || event.type === 'task/review-applied' || event.type === 'task/review-discarded')
     expect(intents.map(event => event.data.intent.kind)).toEqual(['commit', 'apply', 'discard', 'commit', 'commit'])
     expect(completions).toHaveLength(4)
+    expect(intents[2]?.data.intent).toMatchObject({ headCommit: discardSummary.headCommit,
+      uncommittedChanges: true, confirmedUncommittedLoss: true, reviewRevision: discardSummary.revision })
     for (const event of completions) expect(intents.some(intent =>
       intent.data.intent.operationId === event.data.receipt.operationId
       && intent.data.intent.kind === event.data.receipt.kind
@@ -92,13 +105,17 @@ it('projects authorized delivery and preserves lost results through the TypeScri
     expect(git(['show', '-s', '--format=%s', lostCommit])).toBe('SDK lost result')
     expect(await readFile(join(cwd, 'source', 'tracked.txt'), 'utf8')).toBe('delivered\n')
     expect(git(['rev-parse', 'HEAD'])).toBe(summary.sourceHead)
-    expect(git(['rev-parse', initial.executionWorkspace!.branch])).toBe(receipt.commit)
+    expect(git(['rev-parse', execution.branch])).toBe(discardSummary.headCommit)
     expect(existsSync(initial.executionWorkspace!.path)).toBe(false)
     await harness.close()
     harness = create()
     const restored = await harness.listTasks()
     const cold = row('unconfirmed', restored.tasks)
     const coldSaved = row('checkpoint', restored.tasks)
+    const coldDiscarded = row('delivered', restored.tasks)
+    expect(coldDiscarded.commitReceipt?.commit).toBe(receipt.commit)
+    expect(coldDiscarded.discardReceipt).toEqual(discarded.discardReceipt)
+    expect(coldDiscarded.attention.some(item => item.kind === 'delivery-unconfirmed')).toBe(false)
     expect(coldSaved.commitReceipt?.operationId).toBe(checkpointId)
     expect(coldSaved.retryableDeliveryCheckpoint).toBeUndefined()
     expect(coldSaved.attention.some(item => item.kind === 'delivery-unconfirmed')).toBe(false)
@@ -115,6 +132,8 @@ it('projects authorized delivery and preserves lost results through the TypeScri
       worktreeRemoved: true, branchRetained: true, unconfirmed: { status: cold.status,
         attention: cold.attention.map(item => item.kind), operationIdRetained: true,
         receiptAbsent: cold.commitReceipt === undefined, retryRejected: true, gitCommitPreserved: true },
+      laterDiscard: { currentReviewUsed: true, preflightNotified: true, uncommittedLoss: true,
+        currentHeadRetained: true, originalCommitRetained: true, coldReceiptRetained: true },
       checkpointRetry: { advertised: true, operationIdMatched: true, attentionCleared: true,
         noEventAppended: true, gitCommitPreserved: true, coldReceiptRetained: true },
       missingReceiptRetryRejected: { live: true, cold: true } }

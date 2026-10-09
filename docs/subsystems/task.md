@@ -8,7 +8,17 @@ The task capability turns a root Session and its uninterrupted subagent descenda
 
 Nine whole-value Session events define the persistent record: `task/worktree-assigned`, `task/defined`, `task/criterion-updated`, `task/risk-recorded`, `task/review-decided`, `task/delivery-started`, `task/review-committed`, `task/review-applied`, and `task/review-discarded`. The worktree event records one immutable source Workspace, base commit, source status digest, application branch, and execution directory. A human review decision can only request changes or declare readiness. Commit, apply, and discard events carry the complete receipt returned by the Git Provider, including the exact review revision, operation identity, Git object ids, and recovery facts. The strict fold rejects reassignment, malformed identities, mismatched Task or Workspace ownership, extra fields, blank normalized text, duplicate identities, invalid evidence sequences, missing criteria, forbidden status changes, and delivery events that skip required states. The [persistence catalog](../persistence-catalog.md#taskdefined--log-only) records their exact declarations.
 
-`TaskDeliveryIntent` retains the operation id and exact review revision, plus the commit message for `commit`, commit and source HEAD for `apply`, or explicit uncommitted-loss confirmation for `discard`. `StartTaskDeliveryRequest` adds the authorization's `expectedSeq`. An unmatched intent produces `delivery-unconfirmed` attention; completion requires the same id, kind, revision, and operation-specific inputs. Receipt-only histories reject. Unrelated Session events may intervene, but Task metadata, overlapping delivery, and root model steps remain blocked. Git and Session persistence are not an atomic transaction; neither replay nor read-only refresh retries or settles an unconfirmed operation.
+`TaskDeliveryIntent` retains the operation id and exact review revision, plus the commit message for `commit`, commit and source HEAD for `apply`, or current worktree HEAD, uncommitted-change flag, and explicit loss confirmation for `discard`. Discard's recovery commit equals its authorized HEAD unless that HEAD is the assignment base, in which case it is absent. It is not constrained to the earlier Commit receipt. `StartTaskDeliveryRequest` adds the authorization's `expectedSeq`. An unmatched intent produces `delivery-unconfirmed` attention; completion requires the same id, kind, revision, and operation-specific inputs. Receipt-only histories and incomplete pre-release intents reject. Unrelated Session events may intervene, but Task metadata, overlapping delivery, and root model steps remain blocked. Git and Session persistence are not an atomic transaction; neither replay nor read-only refresh retries or settles an unconfirmed operation.
+
+The Review Provider supplies these Discard facts to the caller-owned authorization before removal:
+
+```ts type-equiv
+/** Current worktree facts captured before Discard authorization and removal. */
+interface TaskDiscardPreflight {
+  readonly headCommit: string
+  readonly uncommittedChanges: boolean
+}
+```
 
 Evidence identifies one exact `(sessionId, seq)` event. This package validates its serialized fields; the Session Provider validates that the event exists within the same root task tree before accepting a mutation.
 

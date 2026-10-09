@@ -17,6 +17,14 @@
   "sourceContentApplied": true,
   "worktreeRemoved": true,
   "branchRetained": true,
+  "laterDiscard": {
+    "currentReviewUsed": true,
+    "preflightNotified": true,
+    "uncommittedLoss": true,
+    "currentHeadRetained": true,
+    "originalCommitRetained": true,
+    "coldReceiptRetained": true
+  },
   "checkpointRetry": {
     "advertised": true,
     "operationIdMatched": true,

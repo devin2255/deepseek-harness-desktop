@@ -49,7 +49,7 @@ import { integrateTaskReview } from './integration.ts'
 export * from './config.ts'
 export { parseNameStatus, parseNumstat } from './git.ts'
 
-function resolveOperationId(authorization: TaskDeliveryAuthorization | undefined): TaskReviewOperationId {
+function resolveOperationId(authorization: Pick<TaskDeliveryAuthorization, 'operationId'> | undefined): TaskReviewOperationId {
   return authorization === undefined ? TaskReviewOperationId(randomUUID()) : authorization.operationId
 }
 
@@ -740,7 +740,16 @@ export class LocalTaskReview extends TaskReviewService {
       const recoverableCommit = reviewed.summary.headCommit === request.assignment.baseCommit
         ? undefined
         : reviewed.summary.headCommit
-      await request.authorization?.authorize()
+      if (request.authorization !== undefined) {
+        await request.authorization.authorize({ headCommit: reviewed.summary.headCommit, uncommittedChanges: uncommittedChangesDiscarded })
+        const current = await this.state(request.assignment, signal)
+        const currentStatus = await this.command(
+          executable, request.assignment.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], signal,
+        )
+        if (current.summary.revision !== request.expectedRevision || (currentStatus.stdout.length > 0) !== uncommittedChangesDiscarded) {
+          throw failure('The Task worktree changed while discard authorization was being saved.', 'REVIEW_STALE')
+        }
+      }
       signal?.throwIfAborted()
       await this.command(
         executable,

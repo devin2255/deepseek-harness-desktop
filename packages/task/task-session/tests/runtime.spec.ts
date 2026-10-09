@@ -311,7 +311,7 @@ describe('TaskSessionProvider', () => {
     const applied = await test.tasks.recordApply(root.id, { receipt: applyReceipt() })
     await test.tasks.startDelivery(root.id, { expectedSeq: root.seq, intent: {
       kind: 'discard', operationId: discardReceipt().operationId, reviewRevision: discardReceipt().reviewRevision,
-      confirmedUncommittedLoss: false,
+      confirmedUncommittedLoss: false, headCommit: commitReceipt().commit, uncommittedChanges: false,
     } })
     const discarded = await test.tasks.recordDiscard(root.id, { receipt: discardReceipt() })
 
@@ -440,7 +440,8 @@ describe('TaskSessionProvider', () => {
         reviewRevision: applyReceipt().reviewRevision, commit: applyReceipt().commit, sourceHead: applyReceipt().sourceHeadBefore },
       record: () => test.tasks.recordApply(root.id, { receipt: applyReceipt() }) },
       { intent: { kind: 'discard' as const, operationId: discardReceipt().operationId,
-        reviewRevision: discardReceipt().reviewRevision, confirmedUncommittedLoss: false },
+        reviewRevision: discardReceipt().reviewRevision, confirmedUncommittedLoss: false,
+        headCommit: commitReceipt().commit, uncommittedChanges: false },
       record: () => test.tasks.recordDiscard(root.id, { receipt: discardReceipt() }) },
     ]
     for (const { intent, record } of operations) {

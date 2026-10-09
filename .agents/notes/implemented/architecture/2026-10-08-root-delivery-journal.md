@@ -12,7 +12,9 @@ English | [中文](2026-10-08-root-delivery-journal.zh.md)
 
 The Host and SDK retain root maintenance or offline ownership through authorization, Git, and receipt settlement. The local Review Provider awaits a caller-owned authorization inside its repository queue, after non-mutating preflight and before its first index, worktree, or branch mutation. The caller records and checkpoints `task/delivery-started` with one operation id, exact review revision, operation kind, and mutation-specific inputs. Failed preflight does not create an intent; failed authorization prevents Git mutation.
 
-The Task service compares `expectedSeq` at authorization, not completion. A complete Provider receipt must match the outstanding operation id, kind, and revision; Apply also matches the authorized commit and source HEAD, and Discard cannot report unconfirmed uncommitted loss. Unrelated Session events may intervene. Task metadata changes and overlapping authorization remain blocked. A receipt without a preceding intent is rejected, including older pre-release histories.
+The Task service compares `expectedSeq` at authorization, not completion. A complete Provider receipt must match the outstanding operation id, kind, and revision; Apply also matches the authorized commit and source HEAD. Discard authorization includes the Provider's current worktree HEAD and actual uncommitted-change flag, and requires explicit confirmation when that flag is true. Its receipt reports the same loss flag and a recovery commit equal to that HEAD, absent only when HEAD equals the assignment base. The original Commit receipt remains an independent historical fact. Unrelated Session events may intervene. Task metadata changes and overlapping authorization remain blocked. A receipt without a preceding intent, or an incomplete pre-release intent, is rejected.
+
+Discard rechecks the current review and uncommitted-change flag after authorization settles. Changed contents, HEAD, or loss facts reject before directory removal while retaining the intent as unconfirmed. This recheck narrows the checkpoint interval without claiming a cross-process filesystem lock.
 
 An outstanding intent produces stable root-owned `delivery-unconfirmed` attention. Provider or checkpoint failure after authorization does not imply that Git stayed unchanged. Cold replay retains the intent without repeating Git or activating an Agent. A global `agent/pre-step` listener rejects root execution while this attention remains; ordinary Tasks delegate through `next()`. Review displays the operation id and disables execution-related Task actions while permitting read-only refresh and inspection.
 
@@ -23,6 +25,8 @@ The checkpoint becomes retryable only after the exact receipt append returns and
 ## Alternatives considered
 
 **Keep completion compare-and-set against the initial sequence.** Rejected because a non-waking injection legitimately advances the log without changing the authorized Git operation. Operation correlation preserves authorization without treating the whole interval as an exclusive event container.
+
+**Match Discard to the original Commit receipt.** Rejected because a valid committed Task may have later edits or descendant commits. Comparing after directory removal can reject a successful authorized cleanup, and the removed files cannot reconstruct its loss facts. Pre-mutation HEAD and loss facts preserve strict correlation against the current human review.
 
 **Record only the successful receipt.** Rejected because a crash after Git mutation leaves no evidence distinguishing an untouched operation from a lost result.
 
@@ -43,6 +47,8 @@ Strict fold tests reject malformed intents, skipped authorization, overlapping m
 Both SDK expected-output scenarios connect real clients to the Loader-composed Task services and real SDK transport. They verify intent notifications, receipt correlation, source bytes and HEAD, retained branches, and worktree removal, then lose a real Git commit response and verify cold attention, absent receipt, and rejected repetition. The required Python runtime job runs its built-Node companion explicitly; this is not single-executable or live-model acceptance.
 
 Both SDK scenarios also fail a real commit receipt checkpoint, save the exact live receipt, and restore it after a complete runtime restart without changing the Session sequence or Git commit. Missing-receipt retries reject both live and cold. Provider tests cover Commit, Apply, and Discard checkpoint retries, repeated persistence failure, mismatched ids, and Session ownership loss; UI tests retain the save action when the review directory is unreadable and disable it when disconnected.
+
+The Loader and both SDK scenarios make further worktree edits after Commit and Apply, authorize the fresh review, and verify Discard's loss facts and retained current branch HEAD before and after cold replay. The resident Loader and SDK cases also advance the worktree HEAD independently of the original Commit receipt. Provider tests preserve the directory when file contents or staging-only loss facts change during authorization; strict fold tests reject malformed preflight facts, unconfirmed loss, and mismatched recovery receipts.
 
 The HTTP carrier tests pass an exact checkpoint operation id through the Client and strict route parser, preserve the pending projection and saved receipt, and retain the unchanged event sequence. Missing or malformed operation ids, blank Session ids, and unknown request fields are rejected before the Task implementation runs.
 

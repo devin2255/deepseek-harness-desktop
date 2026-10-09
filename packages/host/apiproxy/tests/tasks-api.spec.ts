@@ -251,7 +251,8 @@ describe('root delivery execution ownership', () => {
     const start = vi.spyOn(tasks, 'startDelivery')
     const record = vi.spyOn(tasks, method === 'commit' ? 'recordCommit' : method === 'apply' ? 'recordApply' : 'recordDiscard')
     const authorize = async <T>(request: CommitTaskReviewRequest | ApplyTaskReviewRequest | DiscardTaskReviewRequest, receipt: T) => {
-      await request.authorization!.authorize()
+      if ('confirmedUncommittedLoss' in request) await request.authorization!.authorize({ headCommit: commitReceipt.commit, uncommittedChanges: false })
+      else await request.authorization!.authorize()
       expect(start).toHaveBeenCalledOnce()
       return { ...receipt, operationId: request.authorization!.operationId }
     }
@@ -263,6 +264,9 @@ describe('root delivery execution ownership', () => {
       expect(start.mock.calls[0]?.[1]).toMatchObject({ expectedSeq: reviewRow.asOfSeq, intent: {
         kind: method, operationId: record.mock.calls[0]?.[1].receipt.operationId,
       } })
+      if (method === 'discard') expect(start.mock.calls[0]?.[1].intent).toMatchObject({
+        headCommit: commitReceipt.commit, uncommittedChanges: false,
+      })
     } finally {
       await ctx.fiber.dispose()
     }
@@ -274,7 +278,8 @@ describe('root delivery execution ownership', () => {
       tasks.currentRow = method === 'apply' ? { ...reviewRow, commitReceipt } : reviewRow
       const abort = new AbortController()
       const authorize = async <T>(request: CommitTaskReviewRequest | ApplyTaskReviewRequest | DiscardTaskReviewRequest, receipt: T) => {
-        await request.authorization!.authorize()
+        if ('confirmedUncommittedLoss' in request) await request.authorization!.authorize({ headCommit: commitReceipt.commit, uncommittedChanges: false })
+        else await request.authorization!.authorize()
         if (phase === 'git-result') throw new TaskReviewError('Git response lost', 'REVIEW_STALE')
         if (phase === 'cancelled') { abort.abort(); abort.signal.throwIfAborted() }
         tasks.nextError = new TaskError('Receipt checkpoint failed', 'TASK_UNAVAILABLE')

@@ -8,6 +8,8 @@ Optional `TaskSnapshot.integrations` contains ordered root-owned tool attempts, 
 
 Human delivery first checkpoints `task/delivery-started`. `TaskDeliveryIntent` records the operation id, review revision, kind, and exact mutation inputs. Completion requires a matching Provider receipt, not the original Session sequence. Pending delivery blocks Task metadata changes and produces `delivery-unconfirmed` attention; unrelated Session events remain permitted. Receipt-only pre-release logs are rejected. See the [delivery journal decision](../../../.agents/notes/implemented/architecture/2026-10-08-root-delivery-journal.md).
 
+Discard authorization records the current worktree HEAD, uncommitted-change flag, and explicit loss confirmation. Its receipt must match those facts and the current review revision, independently of any earlier Commit receipt. Incomplete pre-release discard intents are rejected.
+
 `retryDeliveryCheckpoint` saves an already appended live receipt without executing Git or appending another event. `TaskSnapshot.retryableDeliveryCheckpoint` advertises its exact operation id only while the original Session still owns that receipt. Missing, replaced, or detached receipts reject; a failed save retains uncertainty.
 
 ## Model Experience

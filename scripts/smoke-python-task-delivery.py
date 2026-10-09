@@ -74,8 +74,22 @@ def main() -> None:
                 applied = client.apply_task("delivered", expected_revision=receipt.committed_revision,
                                             expected_source_head=summary.source_head, commit=receipt.commit,
                                             expected_seq=committed.as_of_seq)
-                discarded = client.discard_task("delivered", expected_revision=receipt.committed_revision,
-                                                confirmed_uncommitted_loss=False, expected_seq=applied.as_of_seq)
+                execution = initial.execution_workspace
+                assert execution is not None
+                execution_path = Path(execution.path)
+                (execution_path / "follow-up.txt").write_text("recoverable follow-up\n", encoding="utf-8")
+                git("-C", execution.path, "add", "follow-up.txt")
+                git("-C", execution.path, "commit", "-m", "Follow-up commit")
+                (execution_path / "tracked.txt").write_text("uncommitted follow-up\n", encoding="utf-8")
+                discard_summary = client.get_task_review_summary("delivered")
+                assert discard_summary.revision != receipt.committed_revision
+                assert discard_summary.head_commit != receipt.commit
+                discarded = client.discard_task("delivered", expected_revision=discard_summary.revision,
+                                                confirmed_uncommitted_loss=True, expected_seq=applied.as_of_seq)
+                assert discarded.discard_receipt is not None
+                assert discarded.discard_receipt.review_revision == discard_summary.revision
+                assert discarded.discard_receipt.recoverable_commit == discard_summary.head_commit
+                assert discarded.discard_receipt.uncommitted_changes_discarded
                 checkpoint_before = task(client, "checkpoint")
                 checkpoint_summary = client.get_task_review_summary("checkpoint")
                 try:
@@ -109,6 +123,9 @@ def main() -> None:
             operations = [intent["kind"] for intent in intents]
             assert operations == ["commit", "apply", "discard", "commit", "commit"], operations
             assert len(completions) == 4, completions
+            assert intents[2]["headCommit"] == discard_summary.head_commit
+            assert intents[2]["reviewRevision"] == discard_summary.revision
+            assert intents[2]["uncommittedChanges"] and intents[2]["confirmedUncommittedLoss"]
             for completed in completions:
                 assert any(all(intent[key] == completed[key] for key in ("operationId", "kind", "reviewRevision"))
                            for intent in intents), completed
@@ -124,12 +141,16 @@ def main() -> None:
             assert (root / "source/tracked.txt").read_text(encoding="utf-8") == "delivered\n"
             assert git("rev-parse", "HEAD") == summary.source_head
             assert initial.execution_workspace is not None
-            assert git("rev-parse", initial.execution_workspace.branch) == receipt.commit
+            assert git("rev-parse", execution.branch) == discard_summary.head_commit
             assert not Path(initial.execution_workspace.path).exists()
         with HarnessClient(config) as client:
             client.initialize(cwd=str(root), provider="deepseek-official", model="fixture")
             cold = task(client, "unconfirmed")
             cold_saved = task(client, "checkpoint")
+            cold_discarded = task(client, "delivered")
+            assert cold_discarded.commit_receipt is not None and cold_discarded.commit_receipt.commit == receipt.commit
+            assert cold_discarded.discard_receipt == discarded.discard_receipt
+            assert not any(item.kind == "delivery-unconfirmed" for item in cold_discarded.attention)
             assert cold_saved.commit_receipt is not None and cold_saved.commit_receipt.operation_id == checkpoint_id
             assert cold_saved.retryable_delivery_checkpoint is None
             assert not any(item.kind == "delivery-unconfirmed" for item in cold_saved.attention)
@@ -147,6 +168,10 @@ def main() -> None:
                 "sourceContentApplied": True,
                 "worktreeRemoved": True,
                 "branchRetained": True,
+                "laterDiscard": {
+                    "currentReviewUsed": True, "preflightNotified": True, "uncommittedLoss": True,
+                    "currentHeadRetained": True, "originalCommitRetained": True, "coldReceiptRetained": True,
+                },
                 "checkpointRetry": {
                     "advertised": True, "operationIdMatched": True, "attentionCleared": True,
                     "noEventAppended": True, "gitCommitPreserved": True,

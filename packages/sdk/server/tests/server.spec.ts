@@ -267,7 +267,7 @@ describe('HarnessSdkJsonRpcServer', () => {
         return { ...applyReceipt, operationId: request.authorization!.operationId }
       }),
       discard: vi.fn(async (request: DiscardTaskReviewRequest) => {
-        await request.authorization!.authorize()
+        await request.authorization!.authorize({ headCommit: commitReceipt.commit, uncommittedChanges: false })
         return { ...discardReceipt, operationId: request.authorization!.operationId }
       }),
     }
@@ -312,6 +312,9 @@ describe('HarnessSdkJsonRpcServer', () => {
       operationId: tasks.startDelivery.mock.calls[2]?.[1].intent.operationId,
     })
     expect(tasks.startDelivery.mock.calls.map(call => call[1].intent.kind)).toEqual(['commit', 'apply', 'discard'])
+    expect(tasks.startDelivery.mock.calls[2]?.[1].intent).toMatchObject({
+      headCommit: commitReceipt.commit, uncommittedChanges: false,
+    })
     expect(await server.handleRequest('task/retryDeliveryCheckpoint', {
       sessionId: 'root', operationId: commitReceipt.operationId,
     })).toBe(row)

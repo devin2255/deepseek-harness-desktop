@@ -3195,7 +3195,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DiscardTaskReviewRequest',
-    declaration: 'export interface DiscardTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly confirmedUncommittedLoss: boolean;\n    readonly authorization?: TaskDeliveryAuthorization;\n}',
+    declaration: 'export interface DiscardTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly confirmedUncommittedLoss: boolean;\n    readonly authorization?: TaskDeliveryAuthorization<TaskDiscardPreflight>;\n}',
   },
   {
     name: 'Domain',
@@ -4587,11 +4587,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskDeliveryAuthorization',
-    declaration: 'export interface TaskDeliveryAuthorization {\n    readonly operationId: TaskReviewOperationId;\n    readonly authorize: () => Promise<void>;\n}',
+    declaration: 'export interface TaskDeliveryAuthorization<Preflight = void> {\n    readonly operationId: TaskReviewOperationId;\n    readonly authorize: (preflight: Preflight) => Promise<void>;\n}',
   },
   {
     name: 'TaskDeliveryIntent',
-    declaration: 'export type TaskDeliveryIntent = {\n    readonly operationId: TaskReviewOperationId;\n    readonly reviewRevision: TaskReviewRevision;\n} & ({\n    readonly kind: \'commit\';\n    readonly message: string;\n} | {\n    readonly kind: \'apply\';\n    readonly commit: string;\n    readonly sourceHead: string;\n} | {\n    readonly kind: \'discard\';\n    readonly confirmedUncommittedLoss: boolean;\n});',
+    declaration: 'export type TaskDeliveryIntent = {\n    readonly operationId: TaskReviewOperationId;\n    readonly reviewRevision: TaskReviewRevision;\n} & ({\n    readonly kind: \'commit\';\n    readonly message: string;\n} | {\n    readonly kind: \'apply\';\n    readonly commit: string;\n    readonly sourceHead: string;\n} | {\n    readonly kind: \'discard\';\n    readonly confirmedUncommittedLoss: boolean;\n    readonly headCommit: string;\n    readonly uncommittedChanges: boolean;\n});',
+  },
+  {
+    name: 'TaskDiscardPreflight',
+    declaration: 'export interface TaskDiscardPreflight {\n    readonly headCommit: string;\n    readonly uncommittedChanges: boolean;\n}',
   },
   {
     name: 'TaskDiscardReceipt',

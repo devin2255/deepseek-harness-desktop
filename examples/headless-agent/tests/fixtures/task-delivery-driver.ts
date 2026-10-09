@@ -72,6 +72,7 @@ try {
     throw new Error('Offline delivery must start from an unattached cold Session')
   }
 
+  const completedDiscards: { taskId: SessionId; headCommit: string; commit: string }[] = []
   for (const mode of ['cold', 'resident'] as const) {
     const { assignment, handle } = mode === 'cold' ? { assignment: cold, handle: undefined } : await prepare('resident-root', true)
     const blocked: string[] = []
@@ -81,7 +82,20 @@ try {
     const review = await runtime.taskReview.summarize({ assignment })
     let commit = ''
     let committedRevision = review.revision
+    let discardHead = ''
     for (const method of ['commit', 'apply', 'discard'] as const) {
+      if (method === 'discard') {
+        if (mode === 'resident') {
+          await writeFile(join(assignment.path, 'follow-up.txt'), 'recoverable follow-up\n')
+          await git(assignment.path, ['add', 'follow-up.txt'])
+          await git(assignment.path, ['commit', '-m', 'Follow-up commit'])
+        }
+        await writeFile(join(assignment.path, 'tracked.txt'), 'uncommitted follow-up\n')
+        const currentReview = await runtime.taskReview.summarize({ assignment })
+        if (currentReview.revision === committedRevision) throw new Error('Discard needs the later review revision')
+        committedRevision = currentReview.revision
+        discardHead = currentReview.headCommit
+      }
       const entered = Promise.withResolvers<undefined>()
       const release = Promise.withResolvers<undefined>()
       // A timing fence delays a real Provider result; Git execution and receipt values stay real.
@@ -104,13 +118,17 @@ try {
           ? api.tasks.apply({ sessionId: assignment.taskId, expectedRevision: committedRevision,
             expectedSourceHead: assignment.sourceHead, commit, expectedSeq })
           : api.tasks.discard({ sessionId: assignment.taskId, expectedRevision: committedRevision,
-            confirmedUncommittedLoss: false, expectedSeq })
+            confirmedUncommittedLoss: true, expectedSeq })
       try {
         await Promise.race([entered.promise, pending.then(() => { throw new Error(`${method} did not reach its real Provider result`) })])
         const stored = await runtime.sessionPersistence.inspect(assignment.taskId)
         const start = stored.events.at(-1)
         if (start?.type !== 'task/delivery-started' || start.data.intent.kind !== method) {
           throw new Error('Git began without a durable delivery intent')
+        }
+        if (start.data.intent.kind === 'discard' && (start.data.intent.headCommit !== discardHead
+          || !start.data.intent.uncommittedChanges || !start.data.intent.confirmedUncommittedLoss)) {
+          throw new Error('Discard did not retain current recovery facts before removing the worktree')
         }
         durable.push(method)
         try {
@@ -152,7 +170,11 @@ try {
       committedRevision = recorded.committedRevision
     }
     const row = current(assignment.taskId)
-    const branchRetained = (await git(source, ['rev-parse', assignment.branch])).stdout.trim() === commit
+    const branchRetained = (await git(source, ['rev-parse', assignment.branch])).stdout.trim() === discardHead
+    if (row.discardReceipt?.recoverableCommit !== discardHead || !row.discardReceipt.uncommittedChangesDiscarded) {
+      throw new Error('Discard receipt lost the authorized recovery facts')
+    }
+    completedDiscards.push({ taskId: assignment.taskId, headCommit: discardHead, commit })
     const sourceHeadPreserved = (await git(source, ['rev-parse', 'HEAD'])).stdout.trim() === assignment.sourceHead
     const sourceContentApplied = await readFile(join(source, 'tracked.txt'), 'utf8') === `${mode}-root\n`
     await handle?.dispose()
@@ -160,6 +182,8 @@ try {
     await resumed.dispose()
     process.stdout.write(`${JSON.stringify({ stage: mode, blocked, durable, metadataBlocked, interleavedInput,
       receipts: [row.commitReceipt?.kind, row.applyReceipt?.kind, row.discardReceipt?.kind],
+      discard: { currentReviewUsed: true, currentHeadRetained: true, headAdvanced: discardHead !== commit,
+        uncommittedLoss: true, preflightPersisted: true },
       branchRetained, sourceHeadPreserved, sourceContentApplied, reservationReleased: runtime.agents.get(assignment.taskId) === undefined })}\n`)
     await git(source, ['commit', '-m', `Adopt ${mode}`])
   }
@@ -189,6 +213,15 @@ try {
   }
   await runtime.fiber.dispose()
   ctx = await boot('task-delivery-unconfirmed-replay', resolveConfigPath(configPath, undefined))
+  for (const discard of completedDiscards) {
+    const restored = ctx.tasks.snapshot().tasks.find(task => task.taskId === discard.taskId)
+    if (restored?.commitReceipt?.commit !== discard.commit || restored.discardReceipt?.recoverableCommit !== discard.headCommit
+      || !restored.discardReceipt.uncommittedChangesDiscarded || restored.attention.some(item => item.kind === 'delivery-unconfirmed')) {
+      throw new Error('Cold replay did not restore the later discard independently from the original commit')
+    }
+  }
+  process.stdout.write(`${JSON.stringify({ stage: 'discard-replay', originalCommitRetained: true, currentRecoveryRetained: true,
+    uncommittedLossRetained: true, noUnconfirmedAttention: true })}\n`)
   const replayed = ctx.tasks.snapshot().tasks.find(task => task.taskId === assignment.taskId)
   const stored = await ctx.sessionPersistence.inspect(assignment.taskId)
   const intentRetained = stored.events.filter(event => event.type === 'task/delivery-started').length === 1

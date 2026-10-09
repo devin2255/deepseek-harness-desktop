@@ -71,7 +71,8 @@ for line in sys.stdin:
     assert all(event["type"] != "subagent/execution-provider" for event in result.events)
 
 
-def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("discard_case", ["original", "later", "wrong-owner", "wrong-branch"])
+def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.MonkeyPatch, discard_case: str) -> None:
     client = HarnessClient()
     calls: list[tuple[str, object]] = []
     row = {
@@ -124,10 +125,12 @@ def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.M
         }
         discard_receipt = {
             "kind": "discard", "operationId": "00000000-0000-4000-8000-000000000003",
-            "taskId": "root", "workspaceId": "workspace", "reviewRevision": "c" * 64,
-            "branch": row["executionWorkspace"]["branch"], "branchPreserved": True,
-            "worktreeRemoved": True, "uncommittedChangesDiscarded": False,
-            "recoverableCommit": "1" * 40, "discardedAt": 4,
+            "taskId": "other" if discard_case == "wrong-owner" else "root", "workspaceId": "workspace",
+            "reviewRevision": ("c" if discard_case == "original" else "d") * 64,
+            "branch": "wrong" if discard_case == "wrong-branch" else row["executionWorkspace"]["branch"],
+            "branchPreserved": True, "worktreeRemoved": True,
+            "uncommittedChangesDiscarded": discard_case != "original",
+            "recoverableCommit": ("1" if discard_case == "original" else "3") * 40, "discardedAt": 4,
         }
         if method == "task/list":
             value = {"generation": 7, "tasks": [row]}
@@ -178,11 +181,18 @@ def test_task_projection_and_commands_preserve_wire_values(monkeypatch: pytest.M
         expected_source_head="2" * 40, commit=committed.commit_receipt.commit, expected_seq=5,
     )
     assert applied.apply_receipt.source_head_before == "2" * 40
-    discarded = client.discard_task(
-        "root", expected_revision=committed.commit_receipt.committed_revision,
-        confirmed_uncommitted_loss=False, expected_seq=6,
-    )
+    discard_params = {
+        "expected_revision": ("c" if discard_case == "original" else "d") * 64,
+        "confirmed_uncommitted_loss": discard_case != "original", "expected_seq": 6,
+    }
+    if discard_case in {"wrong-owner", "wrong-branch"}:
+        with pytest.raises(SdkProtocolError, match="malformed Task response"):
+            client.discard_task("root", **discard_params)
+        return
+    discarded = client.discard_task("root", **discard_params)
     assert discarded.discard_receipt.worktree_removed is True
+    assert discarded.discard_receipt.review_revision == discard_params["expected_revision"]
+    assert discarded.discard_receipt.recoverable_commit == ("1" if discard_case == "original" else "3") * 40
     client.retry_task_delivery_checkpoint('root', '00000000-0000-4000-8000-000000000001')
     assert [method for method, _params in calls] == [
         "task/list", "task/define", "task/updateCriterion", "task/recordRisk", "task/review",

@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { TaskReviewError, TaskReviewOperationId, type TaskDeliveryAuthorization } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewError, TaskReviewOperationId, type TaskDeliveryAuthorization, type TaskDiscardPreflight } from '@deepseek-ai/dsh-task-review'
 import { cleanupFixtures, git, mount, repository } from './fixture.ts'
 
 afterEach(() => {
@@ -23,7 +23,7 @@ describe('local Task review delivery', () => {
       }
       const sourceBefore = git(fixture.source, ['status', '--porcelain=v1', '-z'])
       const taskBefore = git(assignment.path, ['status', '--porcelain=v1', '-z'])
-      const invoke = (authorization: TaskDeliveryAuthorization) => method === 'commit'
+      const invoke = (authorization: TaskDeliveryAuthorization<unknown>) => method === 'commit'
         ? ctx.taskReview.commit({ assignment, expectedRevision: reviewed.revision, message: 'Ship', authorization })
         : method === 'apply' ? ctx.taskReview.apply({ assignment, expectedRevision: reviewed.revision,
           expectedSourceHead: reviewed.sourceHead, commit, authorization })
@@ -32,6 +32,7 @@ describe('local Task review delivery', () => {
       const denied = vi.fn(async () => { throw new Error('Durability checkpoint failed') })
       await expect(invoke({ operationId, authorize: denied })).rejects.toThrow('Durability checkpoint failed')
       expect(denied).toHaveBeenCalledOnce()
+      if (method === 'discard') expect(denied).toHaveBeenCalledWith({ headCommit: reviewed.headCommit, uncommittedChanges: true })
       expect(git(fixture.source, ['status', '--porcelain=v1', '-z'])).toBe(sourceBefore)
       expect(git(assignment.path, ['status', '--porcelain=v1', '-z'])).toBe(taskBefore)
       const entered = Promise.withResolvers<undefined>()
@@ -571,6 +572,33 @@ describe('local Task review delivery', () => {
         assignment, expectedRevision: reviewed.revision, confirmedUncommittedLoss: true,
       })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
       expect(existsSync(assignment.path)).toBe(true)
+    } finally {
+      await test.dispose()
+    }
+  })
+
+  it.each(['contents', 'index'] as const)('preserves the directory when %s changes during discard authorization', async (change) => {
+    const fixture = repository()
+    const test = await mount(fixture)
+    const { assignment, ctx } = test
+    try {
+      const reviewed = await ctx.taskReview.summarize({ assignment })
+      const authorize = vi.fn(async (preflight: TaskDiscardPreflight) => {
+        expect(preflight).toEqual({ headCommit: reviewed.headCommit, uncommittedChanges: false })
+        writeFileSync(join(assignment.path, 'tracked.txt'), 'changed during authorization\n')
+        if (change === 'index') {
+          git(assignment.path, ['add', 'tracked.txt'])
+          writeFileSync(join(assignment.path, 'tracked.txt'), 'base\n')
+        }
+      })
+      await expect(ctx.taskReview.discard({
+        assignment, expectedRevision: reviewed.revision, confirmedUncommittedLoss: true,
+        authorization: { operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000004'), authorize },
+      })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+      expect(authorize).toHaveBeenCalledOnce()
+      expect(existsSync(assignment.path)).toBe(true)
+      expect(git(assignment.path, ['status', '--porcelain=v1', '-z']).length).toBeGreaterThan(0)
+      expect(git(assignment.path, ['rev-parse', 'HEAD']).trim()).toBe(reviewed.headCommit)
     } finally {
       await test.dispose()
     }
