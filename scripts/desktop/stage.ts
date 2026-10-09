@@ -101,20 +101,21 @@ export function deploymentManifest(source: Readonly<Record<string, unknown>>): D
 }
 
 /**
- * Use the installed pnpm executable on POSIX and the Corepack CLI on Windows, where pnpm.cmd requires a shell.
- * @param corepackCli - Corepack's JavaScript CLI path on Windows.
- * @param platform - Host operating system.
- * @returns Executable and leading arguments for pnpm.
+ * Invoke the package script's pnpm JavaScript entry point without a command shell on every host.
+ * @param entrypoint - pnpm's npm_execpath, supplied by the parent package script.
+ * @returns The current Node executable and pnpm entry point.
+ * @throws If no package-script entry point is available.
  */
 export function pnpmInvocation(
-  corepackCli: string = join(dirname(process.execPath), 'node_modules/corepack/dist/corepack.js'),
-  platform: NodeJS.Platform = process.platform,
+  entrypoint: string | undefined = process.env.npm_execpath,
 ): {
   readonly command: string
   readonly argsPrefix: readonly string[]
 } {
-  if (platform !== 'win32') return { command: 'pnpm', argsPrefix: [] }
-  return { command: process.execPath, argsPrefix: [corepackCli, 'pnpm'] }
+  if (entrypoint === undefined || entrypoint === '') {
+    throw new Error('desktop packaging: npm_execpath is unavailable; invoke packaging through a pnpm package script')
+  }
+  return { command: process.execPath, argsPrefix: [entrypoint] }
 }
 
 /**

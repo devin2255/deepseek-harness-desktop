@@ -5,7 +5,7 @@ import { lstat as lstatAsync, mkdtemp, rename, rm, unlink } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   assertOwnedOutput,
@@ -32,6 +32,7 @@ const temporaryDirectories: string[] = []
 const mkdtempSync = (prefix: string) => realpathSync(systemMkdtempSync(prefix))
 
 afterEach(() => {
+  vi.unstubAllEnvs()
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true })
 })
 
@@ -87,16 +88,21 @@ describe('desktop production staging', () => {
     })
   })
 
-  it('uses installed pnpm on POSIX without requiring Corepack beside Node', () => {
-    expect(pnpmInvocation('/missing/corepack.js', 'darwin')).toEqual({ command: 'pnpm', argsPrefix: [] })
-    expect(pnpmInvocation('/missing/corepack.js', 'linux')).toEqual({ command: 'pnpm', argsPrefix: [] })
+  it.each(['C:\\tools with spaces\\pnpm.cjs', '/opt/tools with spaces/pnpm.cjs'])(
+    'launches the pnpm JavaScript entry point %s with the current Node executable', (entrypoint) => {
+      expect(pnpmInvocation(entrypoint)).toEqual({ command: process.execPath, argsPrefix: [entrypoint] })
+    },
+  )
+
+  it('reuses the pnpm package-script entry point without resolving Corepack beside Node', () => {
+    const entrypoint = '/tools/pnpm.cjs'
+    vi.stubEnv('npm_execpath', entrypoint)
+    expect(pnpmInvocation()).toEqual({ command: process.execPath, argsPrefix: [entrypoint] })
   })
 
-  it('launches pnpm through Corepack without a Windows command shell', () => {
-    expect(pnpmInvocation('C:\\tools\\corepack.js', 'win32')).toEqual({
-      command: process.execPath,
-      argsPrefix: ['C:\\tools\\corepack.js', 'pnpm'],
-    })
+  it.each([undefined, ''])('rejects an unavailable pnpm package-script entry point: %s', (entrypoint) => {
+    vi.stubEnv('npm_execpath', entrypoint)
+    expect(() => pnpmInvocation()).toThrow('invoke packaging through a pnpm package script')
   })
 
   it('allows only links whose resolved targets remain inside the stage', () => {

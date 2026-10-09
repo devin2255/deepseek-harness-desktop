@@ -6,6 +6,8 @@
 
 ## 开发
 
+通过 `pnpm run` 执行打包命令。嵌套步骤使用当前 Node 可执行文件运行 pnpm 的 `npm_execpath` JavaScript 入口，不要求 Corepack 安装在 Node 同目录下。
+
 安装仓库依赖，然后依次构建 Harness 库、Web 前端、Electron Main 入口和 CommonJS preload，再启动 Electron：
 
 ```sh

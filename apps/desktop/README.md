@@ -6,6 +6,8 @@ The Electron application boots the secured desktop profile, owns one supervised 
 
 ## Development
 
+Run packaging commands through `pnpm run`. Nested steps reuse pnpm's `npm_execpath` JavaScript entry point with the current Node executable and do not require Corepack beside Node.
+
 Install the repository dependencies, then build the Harness libraries, Web frontend, Electron Main entry, and CommonJS preload before starting Electron:
 
 ```sh
