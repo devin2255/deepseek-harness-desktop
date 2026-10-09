@@ -20,7 +20,6 @@ import {
   type RecordTaskDiscardRequest,
   type ReviewTaskRequest,
   type StartTaskDeliveryRequest,
-  type TaskDeliveryIntent,
   AttentionItemId,
   type TaskErrorCode,
   type TaskListChange,
@@ -29,7 +28,7 @@ import {
   type UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import type { TaskReviewOperationId } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskDeliveryIntent, TaskReviewOperationId } from '@deepseek-ai/dsh-task-review/types'
 import { aggregateTasks, type TaskSessionInput } from './aggregate.ts'
 
 export * from './aggregate.ts'

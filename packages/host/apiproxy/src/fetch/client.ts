@@ -57,6 +57,7 @@ import {
 import {
   taskApplyValueSchema, taskCommitValueSchema, taskDefineValueSchema, taskDiscardValueSchema,
   taskRetryDeliveryCheckpointValueSchema,
+  taskInspectDeliveryValueSchema,
   taskListValueSchema, taskRecordRiskValueSchema, taskReviewDiffValueSchema,
   taskReviewSummaryValueSchema, taskReviewValueSchema, taskUpdateCriterionValueSchema,
 } from '../api/tasks.schema.ts'
@@ -159,6 +160,7 @@ export interface IApiClient {
     updateCriterion(payload: RequestPayload<'task.updateCriterion'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.updateCriterion'>>>
     recordRisk(payload: RequestPayload<'task.recordRisk'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.recordRisk'>>>
     review(payload: RequestPayload<'task.review'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.review'>>>
+    inspectDelivery(payload: RequestPayload<'task.inspectDelivery'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.inspectDelivery'>>>
     reviewSummary(payload: RequestPayload<'task.reviewSummary'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewSummary'>>>
     reviewDiff(payload: RequestPayload<'task.reviewDiff'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.reviewDiff'>>>
     commit(payload: RequestPayload<'task.commit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'task.commit'>>>
@@ -240,6 +242,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'task.updateCriterion': taskUpdateCriterionValueSchema,
   'task.recordRisk': taskRecordRiskValueSchema,
   'task.review': taskReviewValueSchema,
+  'task.inspectDelivery': taskInspectDeliveryValueSchema,
   'task.reviewSummary': taskReviewSummaryValueSchema,
   'task.reviewDiff': taskReviewDiffValueSchema,
   'task.commit': taskCommitValueSchema,
@@ -523,6 +526,7 @@ export abstract class AbstractApiClient implements IApiClient {
     updateCriterion: (payload, signal) => this.callUnary('task.updateCriterion', payload, signal),
     recordRisk: (payload, signal) => this.callUnary('task.recordRisk', payload, signal),
     review: (payload, signal) => this.callUnary('task.review', payload, signal),
+    inspectDelivery: (payload, signal) => this.callUnary('task.inspectDelivery', payload, signal),
     reviewSummary: (payload, signal) => this.callUnary('task.reviewSummary', payload, signal),
     reviewDiff: (payload, signal) => this.callUnary('task.reviewDiff', payload, signal),
     commit: (payload, signal) => this.callUnary('task.commit', payload, signal),

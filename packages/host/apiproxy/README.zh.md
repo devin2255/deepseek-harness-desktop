@@ -78,6 +78,8 @@ Workspace 列表与 Session 列表是相互独立的重连基线。`workspace.cr
 
 `task.retryDeliveryCheckpoint({sessionId, operationId})` 只保存 Task Provider 提供的确切实时回执。它不要求可读取的 worktree 或 Review 服务，不恢复 Agent，也不执行 Git；回执缺失或被替换时返回 `task-delivery-pending`，再次保存失败时返回 `task-unavailable` 并保留待核实状态。
 
+`task.inspectDelivery({sessionId, operationId})` 从根日志读取匹配的待核实意图，并在根执行互斥期间调用只读 Git 核验。它不接受客户端指定路径或 Git 事实，保持冷态根任务不活跃，并拒绝已改变的授权。结果是观察值，不是回执，也不授权重复交付；它不追加记录，并保留待核实注意事项。意图缺失时返回 `task-delivery-pending`，包括已有实时回执等待持久化的情形；该回执使用上述保存操作。参见[核验决策](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md)。
+
 ## 模型体验
 
 无。该包定义客户端与宿主间的 wire 约定和载体，其中没有任何内容会进入模型请求。

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`ctx.taskReview` 的本地 Git Provider。每次检查前，它都会使用 Git 的实时 worktree 注册表验证完整、已记录的 worktree 分配，再以记录的基准提交比较 Task worktree。摘要包含已提交、已暂存、未暂存、重命名、删除、冲突与未跟踪变更，同时不会修改源检出目录。
+`ctx.taskReview` 的本地 Git Provider。摘要与文件 Diff 读取会使用 Git 的实时 worktree 注册表验证完整、已记录的 worktree 分配，再以记录的基准提交比较 Task worktree。摘要包含已提交、已暂存、未暂存、重命名、删除、冲突与未跟踪变更，同时不会修改源检出目录。
 
 Review revision 会散列相对于记录基准的最终变更路径、条目模式与内容，并归一化不会改变结果文件的纯暂存状态变化。文件 Diff 必须携带已显示的 revision 和准确的成员路径；任意绝对路径、路径穿越、过期审查、worktree 丢失与分支分叉都会以拒绝方式失败。返回的文件列表和 patch 使用可配置上限，并明确表示截断状态。
 
@@ -19,6 +19,8 @@ Discard 将当前 worktree HEAD 和实际未提交变更标记交给授权，而
 Commit、Apply、Integrate 和 Discard 按规范化的 Git 公共目录共享同一个进程内变更队列。因此，即使记录的源目录不同，根与子 worktree 的 Provider 变更也不会交叉执行；不同仓库仍相互独立。仓库发现发生在入队之前，排队操作开始执行时会再次检查取消。这不会阻止 agent（智能体）的文件系统写入、外部 Git 命令、钩子或其他进程改变仓库。
 
 批量集成要求 Git 支持 `merge-tree --write-tree`，根与已提交子级的审查版本准确，且工作树干净。它将完整合并历史准备为不可达 Git 对象，重新检查每项选择，再向根执行 worktree 发布一次快进。冲突不改变任何分支、index 或工作树。调用方取消会停止准备，但不会中断最终有界发布或验证。发布失败会报告错误，不进行破坏性 reset；外部 Git 写入者与钩子不受锁定。参见[集成决策](../../../.agents/notes/implemented/feature/2026-10-07-batch-writer-integration.md)。
+
+交付核验共享公共仓库队列，并从已验证的源仓库根目录发现队列，因此 Task 目录已移除时仍可核验。Commit 要求父提交和树匹配授权且结果干净；Apply 要求源索引和文件都匹配完整模拟 patch；Discard 要求路径和注册记录消失且原分支 HEAD 保留。两次观察不同会返回无法确认。私有索引避免改变用户索引，并在检查文件时绕过缓存的 stat 数据和索引标记；普通读取禁用 Git 可选锁。模拟可能保留不可达对象。核验不追加回执、不修改用户文件或引用，也不建立跨进程锁。参见[核验决策](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md)。
 
 ## 配置
 

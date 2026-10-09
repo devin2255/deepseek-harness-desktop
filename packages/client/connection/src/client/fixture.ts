@@ -2982,6 +2982,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       ),
     },
     tasks: {
+      inspectDelivery: request => err(request, {
+        code: 'task-delivery-pending', message: 'fixture has no durable pending Git authorization',
+        details: { sessionId: request.payload.sessionId },
+      }),
       retryDeliveryCheckpoint: request => err(request, {
         code: 'task-delivery-pending', message: 'fixture has no live receipt checkpoint',
         details: { sessionId: request.payload.sessionId },
@@ -3385,6 +3389,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'goal.complete': return this.api.goals.complete(request)
       case 'goal.clear': return this.api.goals.clear(request)
       case 'task.list': return this.api.tasks.list(request)
+      case 'task.inspectDelivery': return this.api.tasks.inspectDelivery(request, signal)
       case 'task.define': return this.api.tasks.define(request)
       case 'task.updateCriterion': return this.api.tasks.updateCriterion(request)
       case 'task.recordRisk': return this.api.tasks.recordRisk(request)

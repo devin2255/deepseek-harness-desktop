@@ -677,10 +677,12 @@ describe('local Task review delivery', () => {
           writeFileSync(join(assignment.path, 'tracked.txt'), 'base\n')
         }
       })
-      await expect(ctx.taskReview.discard({
+      const result = await ctx.taskReview.discard({
         assignment, expectedRevision: reviewed.revision, confirmedUncommittedLoss: true,
         authorization: { operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000004'), authorize },
-      })).rejects.toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
+      }).then(() => undefined, (error: unknown) => error)
+      expect(result, result instanceof Error ? String(result.cause) : undefined)
+        .toMatchObject({ code: 'REVIEW_STALE' } satisfies Partial<TaskReviewError>)
       expect(authorize).toHaveBeenCalledOnce()
       expect(existsSync(assignment.path)).toBe(true)
       expect(git(assignment.path, ['status', '--porcelain=v1', '-z']).length).toBeGreaterThan(0)

@@ -12,6 +12,8 @@ Integration selects exact committed child reviews and one root review. A conflic
 
 Commit, Apply, and Discard accept optional same-process `TaskDeliveryAuthorization`. Its callback checkpoints caller-owned authorization after preflight and before changing a user index, worktree, or branch; rejection prevents those changes. Commit supplies `TaskCommitPreflight` with the exact parent HEAD and target Git tree; private-index preparation may retain unreachable Git objects. Discard supplies `TaskDiscardPreflight` with the current HEAD and uncommitted-change flag, including changes after an earlier Commit. The returned receipt uses its operation id. Human Host and SDK delivery supply it; ordinary tool Consumers without it retain Provider-produced ids and tool-result logging. The callback is not a wire value.
 
+`TaskDeliveryIntent` describes recorded authorizations. `inspectDelivery` compares one intent with current Git without repeating the operation or clearing uncertainty. Its `TaskDeliveryInspection` distinguishes completed, not-completed, and ambiguous observations. Completed observations contain `TaskDeliveryEffect`, not a Provider execution receipt; `observedAt` never asserts when the original operation ran. Not-completed means the effect is absent now, not that Git never changed. The opaque inspection revision excludes observation time. Consumers own any later human confirmation and durable settlement. See the [inspection decision](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md).
+
 ## Model Experience
 
 ### Review capability

@@ -4,7 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
-import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt, TaskIntegrationConflict, TaskIntegrationReceipt, TaskReviewOperationId, TaskReviewRevision } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskApplyReceipt, TaskCommitReceipt, TaskDeliveryIntent, TaskDiscardReceipt, TaskIntegrationConflict, TaskIntegrationReceipt, TaskReviewOperationId } from '@deepseek-ai/dsh-task-review/types'
 
 /** Opaque identity of one acceptance criterion. */
 export type TaskCriterionId = Branded<'TaskCriterionId'>
@@ -81,21 +81,6 @@ export type TaskRiskSeverity = 'low' | 'medium' | 'high' | 'critical'
 
 /** Human review decision that cannot assert a Git-backed delivery result. */
 export type TaskReviewDecision = 'changes-requested' | 'ready'
-
-/** Exact user-authorized mutation retained before Git begins; absence of a receipt never authorizes replay. */
-export type TaskDeliveryIntent = {
-  readonly operationId: TaskReviewOperationId
-  readonly reviewRevision: TaskReviewRevision
-} & (
-  | { readonly kind: 'commit'; readonly message: string; readonly headCommit: string; readonly tree: string }
-  | { readonly kind: 'apply'; readonly commit: string; readonly sourceHead: string }
-  | {
-    readonly kind: 'discard'
-    readonly confirmedUncommittedLoss: boolean
-    readonly headCommit: string
-    readonly uncommittedChanges: boolean
-  }
-)
 
 /** Compare-and-set authorization for one delivery, durably flushed before it may mutate Git. */
 export interface StartTaskDeliveryRequest {

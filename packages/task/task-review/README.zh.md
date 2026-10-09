@@ -12,6 +12,8 @@ Task 所有的 worktree 变更审查与交付服务定义。Provider 提供有�
 
 Commit、Apply 和 Discard 接受可选的进程内 `TaskDeliveryAuthorization`。其回调在预检后、修改用户索引、worktree 或分支前持久化调用方拥有的授权；拒绝会阻止这些变更。Commit 提供 `TaskCommitPreflight`，包含确切父 HEAD 和目标 Git 树；私有索引准备可能留下不可达 Git 对象。Discard 提供 `TaskDiscardPreflight`，包含当前 HEAD 和未提交变更标记，也涵盖较早 Commit 之后的更改。返回回执使用其操作 id。人工 Host 与 SDK 交付提供此授权；未提供的普通工具消费方保留 Provider 生成的 id 和工具结果日志。回调不是协议值。
 
+`TaskDeliveryIntent` 描述已记录授权。`inspectDelivery` 将一个意图与当前 Git 比较，不重复操作，也不清除不确定状态。其 `TaskDeliveryInspection` 区分已完成、当前未完成和无法确认的观察结果。已完成观察包含 `TaskDeliveryEffect`，而不是 Provider 执行回执；`observedAt` 不表示原操作的执行时间。当前未完成只表示结果现在不存在，不代表 Git 从未改变。检查版本是排除观察时间的不透明标识。后续人工确认与持久结算由消费方负责。参见[核验决策](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md)。
+
 ## 模型体验
 
 ### 审查能力

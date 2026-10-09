@@ -17,10 +17,10 @@ import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
 import { TaskError } from '@deepseek-ai/dsh-task'
 import type {
   DefineTaskRequest, RecordTaskRiskRequest, ReviewTaskRequest, TaskListSnapshot,
-  TaskSnapshot, TaskDeliveryIntent, UpdateTaskCriterionRequest,
+  TaskSnapshot, UpdateTaskCriterionRequest,
 } from '@deepseek-ai/dsh-task/types'
 import type {} from '@deepseek-ai/dsh-task-review'
-import { TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDiscardPreflight, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
+import { TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDeliveryIntent, type TaskDiscardPreflight, type TaskFileDiff, type TaskReviewSummary } from '@deepseek-ai/dsh-task-review/types'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   InitializeParams,

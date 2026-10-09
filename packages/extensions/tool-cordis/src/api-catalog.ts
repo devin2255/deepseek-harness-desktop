@@ -1773,6 +1773,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'One immutable summary and its exact review revision.',
       },
       {
+        signature: 'abstract inspectDelivery(request: InspectTaskDeliveryRequest, signal?: AbortSignal): Promise<TaskDeliveryInspection>',
+        description: 'Compare current Git state with a recorded delivery authorization without repeating it. Private-index inspection may retain unreachable Git objects, but changes no user index, worktree, or branch. A completed classification supplies observed facts, not proof of execution time or causal attribution.',
+        parameters: [{ name: 'request', description: 'Recorded worktree assignment and exact pending authorization.' }, { name: 'signal', description: 'Optional cancellation of bounded Git inspection.' }],
+        returns: 'Current completed, absent, or ambiguous result; does not clear delivery uncertainty.',
+      },
+      {
         signature: 'abstract diff( request: GetTaskFileDiffRequest, signal?: AbortSignal, ): Promise<TaskFileDiff>',
         description: 'Read one member file diff from an exact review snapshot.',
         parameters: [{ name: 'request', description: 'Recorded assignment, repository-relative path, and expected revision.' }, { name: 'signal', description: 'Optional cancellation of diff generation.' }],
@@ -3410,6 +3416,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type InboxTarget = \'next-turn\' | \'next-step\';',
   },
   {
+    name: 'InspectTaskDeliveryRequest',
+    declaration: 'export interface InspectTaskDeliveryRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly intent: TaskDeliveryIntent;\n}',
+  },
+  {
     name: 'IntegrateTaskReviewRequest',
     declaration: 'export interface IntegrateTaskReviewRequest {\n    readonly assignment: TaskWorktreeAssignment;\n    readonly expectedRevision: TaskReviewRevision;\n    readonly inputs: readonly TaskIntegrationInput[];\n    readonly message: string;\n}',
   },
@@ -4592,6 +4602,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TaskDeliveryAuthorization',
     declaration: 'export interface TaskDeliveryAuthorization<Preflight = void> {\n    readonly operationId: TaskReviewOperationId;\n    readonly authorize: (preflight: Preflight) => Promise<void>;\n}',
+  },
+  {
+    name: 'TaskDeliveryEffect',
+    declaration: 'export type TaskDeliveryEffect = {\n    readonly kind: \'commit\';\n    readonly commit: string;\n    readonly committedRevision: TaskReviewRevision;\n    readonly headBefore: string;\n    readonly tree: string;\n    readonly branch: string;\n} | {\n    readonly kind: \'apply\';\n    readonly commit: string;\n    readonly sourceHead: string;\n    readonly sourceTree: string;\n} | {\n    readonly kind: \'discard\';\n    readonly branch: string;\n    readonly headCommit: string;\n    readonly worktreeRemoved: true;\n    readonly branchPreserved: true;\n    readonly uncommittedChangesDiscarded: boolean;\n    readonly recoverableCommit?: string;\n};',
+  },
+  {
+    name: 'TaskDeliveryInspection',
+    declaration: 'export type TaskDeliveryInspection = {\n    readonly taskId: SessionId;\n    readonly workspaceId: WorkspaceId;\n    readonly intent: TaskDeliveryIntent;\n    readonly revision: TaskDeliveryInspectionRevision;\n    readonly observedAt: number;\n} & ({\n    readonly status: \'completed\';\n    readonly effect: TaskDeliveryEffect;\n} | {\n    readonly status: \'not-completed\';\n} | {\n    readonly status: \'ambiguous\';\n    readonly reason: \'task-changed\' | \'source-changed\' | \'discard-incomplete\' | \'state-changed\';\n});',
+  },
+  {
+    name: 'TaskDeliveryInspectionRevision',
+    declaration: 'export type TaskDeliveryInspectionRevision = Branded<\'TaskDeliveryInspectionRevision\'>;',
   },
   {
     name: 'TaskDeliveryIntent',

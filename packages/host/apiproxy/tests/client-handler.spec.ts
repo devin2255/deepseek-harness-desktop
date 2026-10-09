@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { TaskReviewOperationId, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
-import type { TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review'
+import type { TaskDeliveryEffect, TaskDeliveryInspection, TaskDeliveryIntent, TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review'
 import type { ApiProxy, GoalRef, HostFrame, MuxFrame, RpcMessage, RpcRequest, RpcResponse, TaskSnapshot } from '@deepseek-ai/dsh-host-apiproxy'
 import { InProcessApiClient, RpcId, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 
@@ -125,6 +125,7 @@ function scriptedApi(overrides: {
       apply: err,
       discard: err,
       retryDeliveryCheckpoint: err,
+      inspectDelivery: err,
       ...overrides.tasks,
     },
     settings: {
@@ -740,6 +741,87 @@ describe('tasks unary surface', () => {
     expect(seen?.rpcId).toBeTruthy()
     expect(response.rpcId).toBe(seen?.rpcId)
     expect(response.result).toEqual({ ok: true, value: saved })
+  })
+
+  it('routes delivery observations without accepting client-supplied Git facts', async () => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const observation: TaskDeliveryInspection = { taskId: task.taskId, workspaceId: 'w1' as never,
+      intent: { kind: 'commit', operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)),
+        headCommit: '1'.repeat(40), tree: '2'.repeat(40), message: 'Inspect' },
+      status: 'not-completed', observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'] }
+    const inspect = vi.fn((request: RpcRequest<{ sessionId: SessionId; operationId: typeof operationId }>) => ok(request, observation))
+    const c = client(scriptedApi({ tasks: { inspectDelivery: inspect } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: observation })
+    expect(inspect.mock.calls[0]?.[0].payload).toEqual({ sessionId: task.taskId, operationId })
+    for (const payload of [
+      { sessionId: task.taskId }, { sessionId: ' ', operationId }, { sessionId: task.taskId, operationId: 'invalid' },
+      { sessionId: task.taskId, operationId, assignment: {} }, { sessionId: task.taskId, operationId, intent: observation.intent },
+    ]) expect((await c.tasks.inspectDelivery(payload as never)).result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(inspect).toHaveBeenCalledOnce()
+  })
+
+  it('rejects delivery observations with mismatched facts or synthetic execution timestamps', async () => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const intent = { kind: 'commit' as const, operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)),
+      headCommit: '1'.repeat(40), tree: '2'.repeat(40), message: 'Inspect' }
+    const effect = { kind: 'commit' as const, commit: '4'.repeat(40), committedRevision: TaskReviewRevision('5'.repeat(64)),
+      headBefore: intent.headCommit, tree: intent.tree, branch: 'task-branch' }
+    const valid = { taskId: task.taskId, workspaceId: 'w1' as never, intent, effect, status: 'completed' as const,
+      observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'] }
+    for (const value of [
+      { ...valid, effect: { ...effect, tree: '6'.repeat(40) } },
+      { ...valid, effect: { ...effect, headBefore: '7'.repeat(40) } },
+      { ...valid, effect: { ...effect, committedAt: 1 } },
+      { ...valid, effect: { kind: 'apply', commit: effect.commit, sourceHead: intent.headCommit, sourceTree: effect.tree } },
+      { ...valid, revision: 'invalid' }, { ...valid, intent: { ...intent, unexpected: true } },
+    ]) {
+      const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, value as TaskDeliveryInspection) } }))
+      await expect(c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).rejects.toThrow()
+    }
+    const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, valid) } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: valid })
+  })
+
+  it.each(['apply', 'discard'] as const)('validates every completed %s observation against its authorization', async (kind) => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const common = { operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)) }
+    const intent: TaskDeliveryIntent = kind === 'apply'
+      ? { ...common, kind, commit: '1'.repeat(40), sourceHead: '2'.repeat(40) }
+      : { ...common, kind, headCommit: '1'.repeat(40), uncommittedChanges: true, confirmedUncommittedLoss: true }
+    const effect: TaskDeliveryEffect = kind === 'apply'
+      ? { kind, commit: '1'.repeat(40), sourceHead: '2'.repeat(40), sourceTree: '3'.repeat(40) }
+      : { kind, branch: 'task-branch', headCommit: '1'.repeat(40), worktreeRemoved: true,
+        branchPreserved: true, uncommittedChangesDiscarded: true, recoverableCommit: '1'.repeat(40) }
+    const valid: TaskDeliveryInspection = { taskId: task.taskId, workspaceId: 'w1' as never, intent, effect, status: 'completed',
+      observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'] }
+    const changedEffects = kind === 'apply'
+      ? [{ ...effect, commit: '4'.repeat(40) }, { ...effect, sourceHead: '4'.repeat(40) }, { ...effect, appliedAt: 1 }]
+      : [{ ...effect, headCommit: '4'.repeat(40) }, { ...effect, uncommittedChangesDiscarded: false },
+        { ...effect, recoverableCommit: '4'.repeat(40) }, { ...effect, discardedAt: 1 }]
+    for (const changed of changedEffects) {
+      const c = client(scriptedApi({ tasks: {
+        inspectDelivery: request => ok(request, { ...valid, effect: changed }),
+      } }))
+      await expect(c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).rejects.toThrow()
+    }
+    const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, valid) } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: valid })
+  })
+
+  it('preserves absent recovery information and rejects unconfirmed Discard loss', async () => {
+    const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+    const intent = { kind: 'discard' as const, operationId, reviewRevision: TaskReviewRevision('a'.repeat(64)),
+      headCommit: '1'.repeat(40), uncommittedChanges: true, confirmedUncommittedLoss: true }
+    const valid: TaskDeliveryInspection = { taskId: task.taskId, workspaceId: 'w1' as never, intent, status: 'completed',
+      observedAt: 1, revision: '3'.repeat(64) as TaskDeliveryInspection['revision'],
+      effect: { kind: 'discard', branch: 'task-branch', headCommit: intent.headCommit, worktreeRemoved: true,
+        branchPreserved: true, uncommittedChangesDiscarded: true } }
+    const c = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, valid) } }))
+    expect((await c.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).result).toEqual({ ok: true, value: valid })
+    const invalid = client(scriptedApi({ tasks: { inspectDelivery: request => ok(request, {
+      ...valid, intent: { ...intent, confirmedUncommittedLoss: false },
+    }) } }))
+    await expect(invalid.tasks.inspectDelivery({ sessionId: task.taskId, operationId })).rejects.toThrow()
   })
 
   it('rejects malformed delivery checkpoint requests before invoking the Task implementation', async () => {

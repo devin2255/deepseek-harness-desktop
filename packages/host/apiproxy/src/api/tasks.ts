@@ -10,6 +10,7 @@ import type {
 } from '@deepseek-ai/dsh-task/types'
 import type {
   TaskFileDiff,
+  TaskDeliveryInspection,
   TaskReviewOperationId,
   TaskReviewSummary,
 } from '@deepseek-ai/dsh-task-review/types'
@@ -25,6 +26,11 @@ export interface TasksApi {
     sessionId: SessionId
     operationId: TaskReviewOperationId
   }>): Promise<RpcResponse<TaskSnapshot>>
+  /** Inspect the exact pending authorization without changing Git, appending events, or clearing uncertainty. */
+  inspectDelivery(request: RpcRequest<{
+    sessionId: SessionId
+    operationId: TaskReviewOperationId
+  }>, signal: AbortSignal): Promise<RpcResponse<TaskDeliveryInspection>>
   /** Define or replace one root task. */
   define(request: RpcRequest<{
     sessionId: SessionId
@@ -99,6 +105,7 @@ export type {
 } from '@deepseek-ai/dsh-task/types'
 export type {
   TaskApplyReceipt,
+  TaskDeliveryInspection,
   TaskCommitReceipt,
   TaskDiscardReceipt,
   TaskFileDiff,

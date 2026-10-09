@@ -9,6 +9,7 @@ import type { SessionId, WorkspaceId } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 import type { HostFrame, MuxFrame, RpcMessage, RpcRequest } from '../src/client/api.ts'
 import { FixtureApiClient, createFixtureApi } from '../src/client/fixture.ts'
+import { TaskReviewOperationId } from '@deepseek-ai/dsh-task-review'
 
 const sid = (id: string): SessionId => id as SessionId
 const req = <P>(payload: P): RpcRequest<P> => ({ rpcId: RpcId(`t-${Math.abs(Math.sin(reqCount++)).toString(36).slice(2, 10)}`), payload })
@@ -52,6 +53,14 @@ async function collect<F>(stream: AsyncIterable<RpcRequest<F>>, abort: AbortCont
 }
 
 describe('createFixtureApi', () => {
+  it('rejects delivery inspection without durable Git authorization in both fixture carriers', async () => {
+    const payload = { sessionId: sid('fx-alpha'), operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000009') }
+    const request = req(payload)
+    const response = await createFixtureApi().tasks.inspectDelivery(request, new AbortController().signal)
+    expect(response.rpcId).toBe(request.rpcId)
+    expect(response.result).toMatchObject({ ok: false, error: { code: 'task-delivery-pending', details: { sessionId: payload.sessionId } } })
+    expect((await new FixtureApiClient().tasks.inspectDelivery(payload)).result).toEqual(response.result)
+  })
   it('serves the session list sorted by updatedAt desc and echoes rpcIds on every unary', async () => {
     const api = createFixtureApi()
     const request = req({})

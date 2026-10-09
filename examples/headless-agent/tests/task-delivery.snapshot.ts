@@ -25,7 +25,9 @@ it('excludes root execution through real commit, apply, and discard before relea
     { stage: 'discard-replay', originalCommitRetained: true, currentRecoveryRetained: true,
       uncommittedLossRetained: true, noUnconfirmedAttention: true },
     { stage: 'unconfirmed', intentRetained: true, executionBlocked: true, commitTargetRetained: true,
-      receiptAbsent: true, retryRejected: true, gitCommitExists: true }],
+      receiptAbsent: true, retryRejected: true, gitCommitExists: true },
+    { stage: 'inspection', completedCommitObserved: true, changedTreeAmbiguous: true, noExecutionTime: true,
+      userIndexesUnchanged: true, historyUnchanged: true, rootStillCold: true, uncertaintyRetained: true }],
   )
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expectedPath, result.stdout)
   expect(result.stdout).toBe(await readFile(expectedPath, 'utf8'))

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Local Git Provider for `ctx.taskReview`. It validates the complete recorded worktree assignment against Git's live worktree registry before every inspection, then compares the Task worktree with its recorded base commit. Summaries include committed, staged, unstaged, renamed, deleted, conflicted, and untracked changes without modifying the source checkout.
+Local Git Provider for `ctx.taskReview`. Summary and file Diff reads validate the complete recorded worktree assignment against Git's live worktree registry, then compare the Task worktree with its recorded base commit. Summaries include committed, staged, unstaged, renamed, deleted, conflicted, and untracked changes without modifying the source checkout.
 
 Review revisions hash the final changed paths, entry modes, and content relative to the recorded base, normalizing staging-only changes that do not alter the resulting files. A file Diff requires the displayed revision and an exact member path; arbitrary absolute paths, traversal, stale reviews, missing worktrees, and diverged branches fail closed. Returned file lists and patches use configurable limits, with truncation represented explicitly.
 
@@ -19,6 +19,8 @@ Discard passes its current worktree HEAD and actual uncommitted-change flag to a
 Commit, Apply, Integrate, and Discard share one in-process mutation queue per canonical Git common directory. Root and child worktrees therefore cannot enter overlapping Provider mutations even when their recorded source directories differ; unrelated repositories remain independent. Repository discovery precedes queue entry, and cancellation is checked again when a queued operation enters. This does not prevent Agent filesystem writes, external Git commands, hooks, or another process from changing the repository.
 
 Batch integration requires Git with `merge-tree --write-tree` support, exact root and committed child review revisions, and clean working trees. It prepares the complete merge history as unreachable Git objects, rechecks every selection, then publishes one fast-forward into the root execution worktree. A conflict leaves all branches, indexes, and working trees unchanged. Caller cancellation stops preparation but does not interrupt final bounded publication or verification. A publication failure is reported without destructive reset; external Git writers and hooks are not locked out. See the [integration decision](../../../.agents/notes/implemented/feature/2026-10-07-batch-writer-integration.md).
+
+Delivery inspection shares the common-repository queue, discovering it from the verified source root so a removed Task directory remains inspectable. Commit requires the authorized parent and tree with a clean result; Apply requires the complete simulated patch in both source index and files; Discard requires an absent path and registration with the original branch HEAD retained. Two differing observations return ambiguity. Private indexes avoid altering user indexes and bypass cached stat data and index flags when checking files; ordinary reads disable optional Git locks. Simulation can retain unreachable objects. No inspection appends a receipt, changes user files or refs, or establishes a cross-process lock. See the [inspection decision](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md).
 
 ## Configuration
 

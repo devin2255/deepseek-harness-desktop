@@ -30,6 +30,12 @@ interface TaskDiscardPreflight {
 
 Evidence identifies one exact `(sessionId, seq)` event. This package validates its serialized fields; the Session Provider validates that the event exists within the same root task tree before accepting a mutation.
 
+## Delivery inspection
+
+The Review capability declares `TaskDeliveryIntent`, `InspectTaskDeliveryRequest`, `TaskDeliveryInspection`, `TaskDeliveryInspectionRevision`, and `TaskDeliveryEffect`. Inspection takes the recorded assignment and intent and returns a current observation identified by task, workspace, intent, digest revision, and `observedAt`. `completed` includes operation-specific Git facts without an execution timestamp; `not-completed` states that the expected result is absent now; `ambiguous` names changed Task state, changed source state, incomplete removal, or a change between observations. Neither absence nor completion establishes causal attribution to the original operation.
+
+The [Host inspection API](../../packages/host/apiproxy/README.md) reads authorization from the root log, holds execution ownership, and leaves durable pending attention unchanged. The [local Provider](../../packages/task/task-review-local/README.md) checks current Git under the common-repository queue without mutating user indexes, files, or branches. Human settlement remains separate from both this observation and an exact live receipt checkpoint retry.
+
 ## Execution worktrees
 
 [`TaskWorktreeService`](../../packages/task/task-worktree/README.md) assigns application-owned worktrees to execution Session ids: root integration Sessions and isolated writer children use the same assignment format without turning a child into a root Task. `decodeTaskWorktreeAssignment` validates and detaches recorded data but does not verify live Git registration; reuse requires the Provider's `inspect` operation.
@@ -181,6 +187,16 @@ Service Definition for inspecting and delivering Task-owned worktree changes.
 abstract summarize( request: SummarizeTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskReviewSummary>
 
 /**
+ * Compare current Git state with a recorded delivery authorization without repeating it.
+ * Private-index inspection may retain unreachable Git objects, but changes no user index, worktree, or branch.
+ * A completed classification supplies observed facts, not proof of execution time or causal attribution.
+ * @param request - Recorded worktree assignment and exact pending authorization.
+ * @param signal - Optional cancellation of bounded Git inspection.
+ * @returns Current completed, absent, or ambiguous result; does not clear delivery uncertainty.
+ */
+abstract inspectDelivery(request: InspectTaskDeliveryRequest, signal?: AbortSignal): Promise<TaskDeliveryInspection>
+
+/**
  * Read one member file diff from an exact review snapshot.
  * @param request - Recorded assignment, repository-relative path, and expected revision.
  * @param signal - Optional cancellation of diff generation.
@@ -224,7 +240,7 @@ abstract integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): P
 abstract discard( request: DiscardTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskDiscardReceipt>
 ```
 
-Source: [`packages/task/task-review/src/index.ts:47`](../../packages/task/task-review/src/index.ts)
+Source: [`packages/task/task-review/src/index.ts:49`](../../packages/task/task-review/src/index.ts)
 
 <a id="ctxtasks--taskservice-abstract-seam"></a>
 

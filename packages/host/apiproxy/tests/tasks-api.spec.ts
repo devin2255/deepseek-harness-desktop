@@ -6,10 +6,10 @@ import { readFileSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { AgentOfflineReservationError } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import {
-  TaskCriterionId, TaskError, TaskRiskId, TaskService,
+  TaskCriterionId, TaskError, TaskRiskId, TaskService, foldTask,
 } from '@deepseek-ai/dsh-task'
 import type {
   AssignTaskWorktreeRequest, DefineTaskRequest, LiveTaskFact, RecordTaskApplyRequest, RecordTaskCommitRequest,
@@ -26,6 +26,8 @@ import TaskReviewService, {
   type DiscardTaskReviewRequest,
   type GetTaskFileDiffRequest,
   type IntegrateTaskReviewRequest,
+  type InspectTaskDeliveryRequest,
+  type TaskDeliveryInspection,
   type TaskIntegrationResult,
   type SummarizeTaskReviewRequest,
   type TaskApplyReceipt,
@@ -95,6 +97,11 @@ const fileDiff: TaskFileDiff = {
 }
 
 class FakeTaskReview extends TaskReviewService {
+  inspectDelivery(request: InspectTaskDeliveryRequest, signal?: AbortSignal): Promise<TaskDeliveryInspection> {
+    return this.result('inspectDelivery', request, signal, { taskId: rootId, workspaceId: executionWorkspace.workspaceId,
+      intent: request.intent, status: 'not-completed', observedAt: 1,
+      revision: 'a'.repeat(64) as TaskDeliveryInspection['revision'] })
+  }
   integrate(_request: IntegrateTaskReviewRequest): Promise<TaskIntegrationResult> {
     throw new Error('This Host fixture does not expose writer integration.')
   }
@@ -228,6 +235,96 @@ async function harness(): Promise<{
 }
 
 type DeliveryMethod = 'commit' | 'apply' | 'discard'
+
+describe('pending delivery Git inspection', () => {
+  const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+  const intent = { kind: 'commit' as const, operationId, reviewRevision, message: 'Inspect lost result',
+    headCommit: executionWorkspace.baseCommit, tree: '6'.repeat(40) }
+
+  function pendingRoot(ctx: Context, attached = true) {
+    ;(ctx.tasks as FakeTasks).currentRow = reviewRow
+    const session = attached ? ctx.sessions.create(rootId, { meta: { cwd: executionWorkspace.path } }) : Session.create(rootId)
+    session.append('task/worktree-assigned', { assignment: executionWorkspace })
+    session.append('task/defined', { definition: { goal: 'Deliver', criteria: [
+      { id: TaskCriterionId('inspection-criterion'), text: 'Reviewed', status: 'pending', evidence: [] },
+    ] } })
+    session.append('task/criterion-updated', { criterion: {
+      id: TaskCriterionId('inspection-criterion'), text: 'Reviewed', status: 'waived', evidence: [],
+    } })
+    session.append('task/review-decided', { decision: 'ready' })
+    session.append('task/delivery-started', { intent })
+    expect(foldTask(session.events).pendingDelivery?.intent).toEqual(intent)
+    return session
+  }
+
+  it('uses the pending root log and preserves both events and uncertainty', async () => {
+    const { ctx, api, review } = await harness()
+    const session = pendingRoot(ctx)
+    const events = JSON.stringify(session.events)
+    const response = await api.tasks.inspectDelivery(request({ sessionId: rootId, operationId }), new AbortController().signal)
+    expect(response).toMatchObject({ result: { ok: true, value: { intent, status: 'not-completed' } } })
+    expect(review.last?.slice(0, 2)).toEqual(['inspectDelivery', { assignment: executionWorkspace, intent }])
+    expect(JSON.stringify(session.events)).toBe(events)
+    expect(ctx.agents.get(rootId)).toBeUndefined()
+  })
+
+  it('rejects missing or different authorization without inspecting Git', async () => {
+    const { ctx, api, review, tasks } = await harness()
+    tasks.currentRow = reviewRow
+    await expect(api.tasks.inspectDelivery(request({ sessionId: rootId, operationId }), new AbortController().signal))
+      .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-delivery-pending' } } })
+    pendingRoot(ctx)
+    await expect(api.tasks.inspectDelivery(request({ sessionId: rootId,
+      operationId: TaskReviewOperationId('00000000-0000-4000-8000-000000000010') }), new AbortController().signal))
+      .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-delivery-pending' } } })
+    expect(review.last).toBeUndefined()
+  })
+
+  it('reads a cold authorization without publishing an Agent', async () => {
+    const { ctx, api } = await harness()
+    const session = pendingRoot(ctx, false)
+    const inspection = { meta: session.header, events: session.events.slice() }
+    const inspect = vi.fn(async () => inspection)
+    ctx.provide('sessionPersistence', { inspect } as never)
+    await expect(api.tasks.inspectDelivery(request({ sessionId: rootId, operationId }), new AbortController().signal))
+      .resolves.toMatchObject({ result: { ok: true, value: { status: 'not-completed', intent } } })
+    expect(inspect).toHaveBeenCalledTimes(2)
+    expect(ctx.agents.get(rootId)).toBeUndefined()
+  })
+
+  it('holds offline execution ownership through the complete inspection', async () => {
+    const { ctx, api, review } = await harness()
+    const session = pendingRoot(ctx)
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const inspect = review.inspectDelivery.bind(review)
+    vi.spyOn(review, 'inspectDelivery').mockImplementation(async (input, signal) => {
+      entered.resolve(undefined)
+      await release.promise
+      return inspect(input, signal)
+    })
+    const pending = api.tasks.inspectDelivery(request({ sessionId: rootId, operationId }), new AbortController().signal)
+    await Promise.race([entered.promise, pending.then(() => { throw new Error('Inspection did not enter its Provider') })])
+    try {
+      expect(() => ctx.agents.enter({ id: rootId, session, status: 'idle', ctx } as Agent, undefined)).toThrow(AgentOfflineReservationError)
+    } finally { release.resolve(undefined) }
+    await expect(pending).resolves.toMatchObject({ result: { ok: true } })
+    const unregister = ctx.agents.enter({ id: rootId, session, status: 'idle', ctx } as Agent, undefined)
+    unregister()
+  })
+
+  it('rejects a result when its authorization is completed during inspection', async () => {
+    const { ctx, api, review } = await harness()
+    const session = pendingRoot(ctx)
+    const inspect = review.inspectDelivery.bind(review)
+    vi.spyOn(review, 'inspectDelivery').mockImplementation(async (input, signal) => {
+      session.append('task/review-committed', { receipt: { ...commitReceipt, operationId, reviewRevision } })
+      return inspect(input, signal)
+    })
+    await expect(api.tasks.inspectDelivery(request({ sessionId: rootId, operationId }), new AbortController().signal))
+      .resolves.toMatchObject({ result: { ok: false, error: { code: 'task-delivery-pending' } } })
+  })
+})
 
 function deliver(api: ReturnType<typeof createApiProxy>, method: DeliveryMethod, signal: AbortSignal) {
   switch (method) {

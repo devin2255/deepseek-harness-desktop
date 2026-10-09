@@ -6,6 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import LocalTaskReview from '@deepseek-ai/dsh-task-review-local'
+import { TaskReviewOperationId, type TaskDeliveryIntent } from '@deepseek-ai/dsh-task-review'
 import LocalTaskWorktrees from '@deepseek-ai/dsh-task-worktree-local'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { removeFixtureSafely } from '../../../../scripts/test-fixture-cleanup.ts'
@@ -76,4 +77,45 @@ export async function mount(
 /** Remove all disposable review repositories created by this worker. */
 export function cleanupFixtures(): void {
   for (const root of fixtures.splice(0)) removeFixtureSafely(root)
+}
+
+/** Capture real Provider authorization, optionally stopping before user-repository mutation. */
+export async function authorizeDelivery(
+  test: Awaited<ReturnType<typeof mount>>, kind: TaskDeliveryIntent['kind'], complete: boolean, edit = true,
+): Promise<TaskDeliveryIntent> {
+  const { ctx, assignment } = test
+  if (edit) {
+    writeFileSync(join(assignment.path, 'tracked.txt'), 'authorized edit\n')
+    writeFileSync(join(assignment.path, 'new.txt'), 'new content\n')
+  }
+  let summary = await ctx.taskReview.summarize({ assignment })
+  if (kind === 'apply') {
+    await ctx.taskReview.commit({ assignment, expectedRevision: summary.revision, message: 'Prepare Apply' })
+    summary = await ctx.taskReview.summarize({ assignment })
+  }
+  const operationId = TaskReviewOperationId('00000000-0000-4000-8000-000000000009')
+  let intent: TaskDeliveryIntent | undefined
+  const capture = (value: TaskDeliveryIntent): Promise<void> => {
+    intent = value
+    return complete ? Promise.resolve() : Promise.reject(new Error('Stop after durable authorization'))
+  }
+  const operation = kind === 'commit'
+    ? ctx.taskReview.commit({ assignment, expectedRevision: summary.revision, message: 'Authorized Commit',
+      authorization: { operationId, authorize: preflight => capture({ kind, operationId, reviewRevision: summary.revision,
+        message: 'Authorized Commit', ...preflight }) } })
+    : kind === 'apply'
+      ? ctx.taskReview.apply({ assignment, expectedRevision: summary.revision, commit: summary.headCommit,
+        expectedSourceHead: summary.sourceHead,
+        authorization: { operationId, authorize: () => capture({ kind, operationId, reviewRevision: summary.revision,
+          commit: summary.headCommit, sourceHead: summary.sourceHead }) } })
+      : ctx.taskReview.discard({ assignment, expectedRevision: summary.revision, confirmedUncommittedLoss: true,
+        authorization: { operationId, authorize: preflight => capture({ kind, operationId, reviewRevision: summary.revision,
+          confirmedUncommittedLoss: true, ...preflight }) } })
+  if (complete) await operation
+  else {
+    const error = await operation.then(() => undefined, (cause: unknown) => cause)
+    if (!(error instanceof Error) || error.message !== 'Stop after durable authorization') throw error
+  }
+  if (intent === undefined) throw new Error('No authorization captured')
+  return intent
 }

@@ -60,6 +60,7 @@ import {
 import {
   taskApplyRequestSchema, taskCommitRequestSchema, taskDefineRequestSchema, taskDiscardRequestSchema,
   taskRetryDeliveryCheckpointRequestSchema,
+  taskInspectDeliveryRequestSchema,
   taskListRequestSchema, taskRecordRiskRequestSchema, taskReviewDiffRequestSchema,
   taskReviewRequestSchema, taskReviewSummaryRequestSchema, taskUpdateCriterionRequestSchema,
 } from '../api/tasks.schema.ts'
@@ -143,6 +144,7 @@ const UNARY_ROUTES: UnaryRoutes = {
   'task.updateCriterion': { schema: taskUpdateCriterionRequestSchema, invoke: (api, r) => api.tasks.updateCriterion(r) },
   'task.recordRisk': { schema: taskRecordRiskRequestSchema, invoke: (api, r) => api.tasks.recordRisk(r) },
   'task.review': { schema: taskReviewRequestSchema, invoke: (api, r) => api.tasks.review(r) },
+  'task.inspectDelivery': { schema: taskInspectDeliveryRequestSchema, invoke: (api, r, signal) => api.tasks.inspectDelivery(r, signal) },
   'task.reviewSummary': { schema: taskReviewSummaryRequestSchema, invoke: (api, r, signal) => api.tasks.reviewSummary(r, signal) },
   'task.reviewDiff': { schema: taskReviewDiffRequestSchema, invoke: (api, r, signal) => api.tasks.reviewDiff(r, signal) },
   'task.commit': { schema: taskCommitRequestSchema, invoke: (api, r, signal) => api.tasks.commit(r, signal) },

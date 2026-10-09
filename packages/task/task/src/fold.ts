@@ -3,7 +3,7 @@
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
 import { decodeTaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree'
-import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskApplyReceipt, TaskCommitReceipt, TaskDeliveryIntent, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import {
   TaskCriterionId,
@@ -11,7 +11,6 @@ import {
   type TaskCriterion,
   type TaskCriterionStatus,
   type TaskDefinition,
-  type TaskDeliveryIntent,
   type TaskEvidenceRef,
   type TaskReviewDecision,
   type TaskRisk,

@@ -30,6 +30,12 @@ interface TaskDiscardPreflight {
 
 证据指向一个确切的 `(sessionId, seq)` 事件。此包校验其序列化字段；Session Provider 在接受变更前校验该事件存在于同一根任务树中。
 
+## 交付核验
+
+Review 能力声明 `TaskDeliveryIntent`、`InspectTaskDeliveryRequest`、`TaskDeliveryInspection`、`TaskDeliveryInspectionRevision` 和 `TaskDeliveryEffect`。核验接收已记录分配和意图，返回以任务、Workspace、意图、摘要版本及 `observedAt` 标识的当前观察。`completed` 包含对应操作的 Git 事实，不包含执行时间；`not-completed` 表示预期结果当前不存在；`ambiguous` 区分 Task 状态变化、源状态变化、未完整移除，以及两次观察之间的变化。未完成与已完成都不证明结果由原操作造成。
+
+[Host 核验 API](../../packages/host/apiproxy/README.md) 从根日志读取授权，保留执行互斥，并保持持久的待核实注意事项不变。[本地 Provider](../../packages/task/task-review-local/README.md) 在公共仓库队列内检查当前 Git，不改变用户索引、文件或分支。人工结算独立于该观察和确切实时回执的持久化重试。
+
 ## 执行 worktree
 
 [`TaskWorktreeService`](../../packages/task/task-worktree/README.md) 将应用所有的 worktree 分配给执行 Session id：根集成 Session 和隔离写入子 agent 使用同一分配格式，但不会把子 agent 变成根 Task。`decodeTaskWorktreeAssignment` 校验并分离记录数据，但不验证实时 Git 注册；复用必须经过 Provider 的 `inspect` 操作。
@@ -181,6 +187,16 @@ Service Definition for inspecting and delivering Task-owned worktree changes.
 abstract summarize( request: SummarizeTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskReviewSummary>
 
 /**
+ * Compare current Git state with a recorded delivery authorization without repeating it.
+ * Private-index inspection may retain unreachable Git objects, but changes no user index, worktree, or branch.
+ * A completed classification supplies observed facts, not proof of execution time or causal attribution.
+ * @param request - Recorded worktree assignment and exact pending authorization.
+ * @param signal - Optional cancellation of bounded Git inspection.
+ * @returns Current completed, absent, or ambiguous result; does not clear delivery uncertainty.
+ */
+abstract inspectDelivery(request: InspectTaskDeliveryRequest, signal?: AbortSignal): Promise<TaskDeliveryInspection>
+
+/**
  * Read one member file diff from an exact review snapshot.
  * @param request - Recorded assignment, repository-relative path, and expected revision.
  * @param signal - Optional cancellation of diff generation.
@@ -224,7 +240,7 @@ abstract integrate(request: IntegrateTaskReviewRequest, signal?: AbortSignal): P
 abstract discard( request: DiscardTaskReviewRequest, signal?: AbortSignal, ): Promise<TaskDiscardReceipt>
 ```
 
-Source: [`packages/task/task-review/src/index.ts:47`](../../packages/task/task-review/src/index.ts)
+Source: [`packages/task/task-review/src/index.ts:49`](../../packages/task/task-review/src/index.ts)
 
 <a id="ctxtasks--taskservice-abstract-seam"></a>
 

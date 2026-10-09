@@ -192,6 +192,10 @@ export class FakeApiClient implements IApiClient {
     () => Promise.resolve(err({ code: 'task-review-unavailable', message: 'stub', details: { sessionId: 'root' as SessionId } }))
 
   readonly tasks: IApiClient['tasks'] = {
+    inspectDelivery: (payload: unknown) => this.record('task.inspectDelivery', payload, Promise.resolve(err({
+      code: 'task-delivery-pending', message: 'No durable pending Git authorization in the runtime fake.',
+      details: { sessionId: 'root' as SessionId },
+    }))),
     list: (payload: unknown) => this.record('task.list', payload, this.onTaskList(payload)),
     define: (payload: unknown) => this.record('task.define', payload, this.onTaskMutation(payload)),
     updateCriterion: (payload: unknown) => this.record('task.updateCriterion', payload, this.onTaskMutation(payload)),

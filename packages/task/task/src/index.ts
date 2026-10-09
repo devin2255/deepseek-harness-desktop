@@ -3,12 +3,11 @@
 import type {
   TaskCriterion,
   TaskDefinition,
-  TaskDeliveryIntent,
   TaskReviewDecision,
   TaskRisk,
 } from './types.ts'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
-import type { TaskApplyReceipt, TaskCommitReceipt, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
+import type { TaskApplyReceipt, TaskCommitReceipt, TaskDeliveryIntent, TaskDiscardReceipt } from '@deepseek-ai/dsh-task-review/types'
 
 export * from './types.ts'
 export * from './fold.ts'

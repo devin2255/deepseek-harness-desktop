@@ -61,11 +61,11 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves the background-job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
-import { AttentionItemId, TaskError } from '@deepseek-ai/dsh-task'
-import type { LiveTaskFact, TaskDeliveryIntent, TaskErrorCode, TaskService, TaskSnapshot } from '@deepseek-ai/dsh-task'
+import { AttentionItemId, TaskError, foldTask } from '@deepseek-ai/dsh-task'
+import type { LiveTaskFact, TaskErrorCode, TaskService, TaskSnapshot } from '@deepseek-ai/dsh-task'
 import { TaskWorktreeError } from '@deepseek-ai/dsh-task-worktree'
 import type { TaskWorktreeAssignment } from '@deepseek-ai/dsh-task-worktree/types'
-import { TaskReviewError, TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDiscardPreflight } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewError, TaskReviewOperationId, TaskReviewRevision, type TaskCommitPreflight, type TaskDeliveryAuthorization, type TaskDeliveryIntent, type TaskDiscardPreflight } from '@deepseek-ai/dsh-task-review'
 import { foldSubagentWorktree } from '@deepseek-ai/dsh-subagent-spawn-in-process'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
@@ -2025,12 +2025,20 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return taskReviewError(request, error, operationSignal)
       }
     }
+    return withTaskRootExecution(request, signal, deliver)
+  }
+
+  /** Reserve root execution through inspection or delivery settlement, without activating a cold Agent. */
+  async function withTaskRootExecution<T>(
+    request: RpcRequest<{ sessionId: SessionId }>, signal: AbortSignal,
+    operation: (signal: AbortSignal) => Promise<RpcResponse<T>>,
+  ): Promise<RpcResponse<T>> {
     if (signal.aborted) return taskReviewError(request, signal.reason, signal)
     const { sessionId } = request.payload
     const agent = ctx.agents.get(sessionId)
     if (agent === undefined) {
       try {
-        return await ctx.agents.withOfflineSessions([sessionId], () => deliver(signal))
+        return await ctx.agents.withOfflineSessions([sessionId], () => operation(signal))
       } catch (error: unknown) {
         if (error instanceof AgentOfflineReservationError) {
           return taskError(request, new TaskError(`Task "${sessionId}" already has active work.`, 'TASK_ACTIVE'))
@@ -2038,14 +2046,28 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return taskReviewError(request, error, signal)
       }
     }
-    let maintenance: Promise<RpcResponse<TaskSnapshot>>
+    let maintenance: Promise<RpcResponse<T>>
     try {
-      maintenance = agent.runMaintenance(agentSignal => deliver(AbortSignal.any([signal, agentSignal])))
+      maintenance = agent.runMaintenance(agentSignal => operation(AbortSignal.any([signal, agentSignal])))
     } catch (_busy: unknown) {
       // Maintenance rejects synchronously only when another activity owns the Agent.
       return taskError(request, new TaskError(`Task "${sessionId}" already has active work.`, 'TASK_ACTIVE'))
     }
     return maintenance
+  }
+
+  /** Read the actual pending intent from the root log, never from client-supplied facts. */
+  async function inspectionIntent(
+    sessionId: SessionId, operationId: TaskReviewOperationId, signal: AbortSignal,
+  ): Promise<TaskDeliveryIntent> {
+    const attached = ctx.sessions.get(sessionId)
+    const events = attached?.events ?? (await ctx.get('sessionPersistence')?.inspect(sessionId, signal))?.events
+    signal.throwIfAborted()
+    const pending = events === undefined ? undefined : foldTask(events).pendingDelivery
+    if (pending === undefined || pending.intent.operationId !== operationId) {
+      throw new TaskError('No matching pending delivery authorization. An existing live receipt must be saved instead.', 'TASK_DELIVERY_PENDING')
+    }
+    return pending.intent
   }
 
   /** Resolve a session's agent, apply one goal mutation, and acknowledge with the new CAS ref. */
@@ -3394,6 +3416,24 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     },
 
     tasks: {
+      async inspectDelivery(request, signal) {
+        const target = taskReviewTarget(request.payload.sessionId)
+        if ('error' in target) return err(request, target.error)
+        return withTaskRootExecution(request, signal, async (operationSignal) => {
+          try {
+            const { sessionId, operationId } = request.payload
+            const intent = await inspectionIntent(sessionId, operationId, operationSignal)
+            const result = await target.review.inspectDelivery({ assignment: target.assignment, intent }, operationSignal)
+            const current = await inspectionIntent(sessionId, operationId, operationSignal)
+            if (JSON.stringify(current) !== JSON.stringify(intent)) {
+              throw new TaskError('The pending delivery authorization changed during inspection.', 'TASK_DELIVERY_PENDING')
+            }
+            return ok(request, result)
+          } catch (error: unknown) {
+            return taskReviewError(request, error, operationSignal)
+          }
+        })
+      },
       async retryDeliveryCheckpoint(request) {
         const tasks = ctx.get('tasks')
         if (tasks === undefined) {

@@ -11,6 +11,21 @@ const sequence = z.number().int().nonnegative()
 const gitObjectId = z.string().regex(/^[0-9a-f]{40}$/)
 const reviewRevision = z.string().regex(/^[0-9a-f]{64}$/)
 const operationId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+const deliveryIntentSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('commit'), operationId, reviewRevision, headCommit: gitObjectId, tree: gitObjectId,
+    message: z.string().refine(value => value.trim().length > 0 && !value.includes('\0')) }),
+  z.strictObject({ kind: z.literal('apply'), operationId, reviewRevision, commit: gitObjectId, sourceHead: gitObjectId }),
+  z.strictObject({ kind: z.literal('discard'), operationId, reviewRevision, headCommit: gitObjectId,
+    uncommittedChanges: z.boolean(), confirmedUncommittedLoss: z.boolean() }),
+]).refine(value => value.kind !== 'discard' || !value.uncommittedChanges || value.confirmedUncommittedLoss)
+const deliveryEffectSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('commit'), commit: gitObjectId, committedRevision: reviewRevision,
+    headBefore: gitObjectId, tree: gitObjectId, branch: nonBlank }),
+  z.strictObject({ kind: z.literal('apply'), commit: gitObjectId, sourceHead: gitObjectId, sourceTree: gitObjectId }),
+  z.strictObject({ kind: z.literal('discard'), branch: nonBlank, headCommit: gitObjectId,
+    worktreeRemoved: z.literal(true), branchPreserved: z.literal(true), uncommittedChangesDiscarded: z.boolean(),
+    recoverableCommit: gitObjectId.optional() }),
+])
 const reviewPath = z.string().min(1).refine(value =>
   !value.includes('\\') && !value.includes('\0') && !/^(?:[A-Za-z]:|\/)/.test(value)
   && value.split('/').every(part => part.length > 0 && part !== '.' && part !== '..'),
@@ -200,6 +215,27 @@ export const taskRecordRiskValueSchema: z.ZodType<Wire<ResponseValue<'task.recor
 export const taskReviewRequestSchema = z.strictObject({ sessionId: identity, decision: z.enum(['changes-requested', 'ready']), expectedSeq: sequence }) as unknown as z.ZodType<Wire<RequestPayload<'task.review'>>>
 /** task.review response value. */
 export const taskReviewValueSchema: z.ZodType<Wire<ResponseValue<'task.review'>>> = taskSnapshotSchema
+/** task.inspectDelivery request payload, with no client-supplied Git paths or authorization facts. */
+export const taskInspectDeliveryRequestSchema = z.strictObject({ sessionId: identity, operationId }) as unknown as z.ZodType<Wire<RequestPayload<'task.inspectDelivery'>>>
+/** task.inspectDelivery observation, not an execution receipt or durable settlement. */
+export const taskInspectDeliveryValueSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('completed'), taskId: identity, workspaceId: identity, intent: deliveryIntentSchema,
+    revision: reviewRevision, observedAt: sequence, effect: deliveryEffectSchema }),
+  z.strictObject({ status: z.literal('not-completed'), taskId: identity, workspaceId: identity, intent: deliveryIntentSchema,
+    revision: reviewRevision, observedAt: sequence }),
+  z.strictObject({ status: z.literal('ambiguous'), taskId: identity, workspaceId: identity, intent: deliveryIntentSchema,
+    revision: reviewRevision, observedAt: sequence,
+    reason: z.enum(['task-changed', 'source-changed', 'discard-incomplete', 'state-changed']) }),
+]).refine((value) => {
+  if (value.status !== 'completed') return true
+  const { intent, effect } = value
+  if (intent.kind === 'commit' && effect.kind === 'commit') return effect.headBefore === intent.headCommit && effect.tree === intent.tree
+  if (intent.kind === 'apply' && effect.kind === 'apply') return effect.commit === intent.commit && effect.sourceHead === intent.sourceHead
+  if (intent.kind === 'discard' && effect.kind === 'discard') return effect.headCommit === intent.headCommit
+    && effect.uncommittedChangesDiscarded === intent.uncommittedChanges
+    && (effect.recoverableCommit === undefined || effect.recoverableCommit === intent.headCommit)
+  return false
+}, 'observed result must match its delivery authorization') as unknown as z.ZodType<Wire<ResponseValue<'task.inspectDelivery'>>>
 /** task.reviewSummary request payload. */
 export const taskReviewSummaryRequestSchema = z.strictObject({ sessionId: identity, writerSessionId: identity.optional() }) as unknown as z.ZodType<Wire<RequestPayload<'task.reviewSummary'>>>
 /** task.reviewSummary response value. */

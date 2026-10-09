@@ -78,6 +78,8 @@ The `settings.*`, `credentials.*`, and `llm.*` domains are the configuration-pag
 
 `task.retryDeliveryCheckpoint({sessionId, operationId})` saves only the exact live receipt advertised by the Task Provider. It needs neither a readable worktree nor the Review service, resumes no Agent, and executes no Git; an absent or replaced receipt returns `task-delivery-pending`, while another save failure returns `task-unavailable` and retains uncertainty.
 
+`task.inspectDelivery({sessionId, operationId})` reads the matching pending intent from the root log and invokes read-only Git inspection under root execution ownership. It accepts no client-supplied path or Git facts, keeps cold roots inactive, and rejects a changed authorization. The result is an observation, not a receipt or permission to repeat delivery; it appends nothing and leaves pending attention intact. A missing intent, including a live receipt awaiting checkpoint, returns `task-delivery-pending`; that receipt uses the save operation above. See the [inspection decision](../../../.agents/notes/implemented/feature/2026-10-09-root-delivery-inspection.md).
+
 ## Model Experience
 
 None, as the package defines the client↔host wire contract and carriers; nothing here reaches a model request.

@@ -13,6 +13,8 @@ import type {
   DiscardTaskReviewRequest,
   GetTaskFileDiffRequest,
   IntegrateTaskReviewRequest,
+  InspectTaskDeliveryRequest,
+  TaskDeliveryInspection,
   SummarizeTaskReviewRequest,
   TaskApplyReceipt,
   TaskCommitReceipt,
@@ -110,6 +112,10 @@ const discardReceipt: TaskDiscardReceipt = {
 }
 
 class StubTaskReview extends TaskReviewService {
+  async inspectDelivery(request: InspectTaskDeliveryRequest): Promise<TaskDeliveryInspection> {
+    return { taskId, workspaceId, intent: request.intent, status: 'not-completed', observedAt: 1,
+      revision: 'a'.repeat(64) as TaskDeliveryInspection['revision'] }
+  }
   async integrate(request: IntegrateTaskReviewRequest): Promise<TaskIntegrationResult> {
     expect(request.assignment).toBe(assignment)
     return { kind: 'integrated', operationId, taskId, workspaceId, reviewRevision: revision,
@@ -151,6 +157,9 @@ describe('TaskReview Service Definition', () => {
     const ctx = new Context()
     const fiber = await ctx.plugin(StubTaskReview)
     await expect(ctx.taskReview.summarize({ assignment })).resolves.toBe(summary)
+    await expect(ctx.taskReview.inspectDelivery({ assignment, intent: { kind: 'commit', operationId,
+      reviewRevision: revision, headCommit: assignment.baseCommit, tree: assignment.baseCommit, message: 'Ship' } }))
+      .resolves.toMatchObject({ status: 'not-completed', taskId })
     await expect(ctx.taskReview.diff({ assignment, path: file.path, expectedRevision: revision })).resolves.toBe(diff)
     await expect(ctx.taskReview.commit({
       assignment,

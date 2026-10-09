@@ -132,6 +132,64 @@ export interface TaskCommitPreflight {
   readonly tree: string
 }
 
+/** Exact user-authorized mutation retained before Git begins; absence of a receipt never authorizes replay. */
+export type TaskDeliveryIntent = {
+  readonly operationId: TaskReviewOperationId
+  readonly reviewRevision: TaskReviewRevision
+} & (
+  | { readonly kind: 'commit'; readonly message: string; readonly headCommit: string; readonly tree: string }
+  | { readonly kind: 'apply'; readonly commit: string; readonly sourceHead: string }
+  | {
+    readonly kind: 'discard'
+    readonly confirmedUncommittedLoss: boolean
+    readonly headCommit: string
+    readonly uncommittedChanges: boolean
+  }
+)
+
+/** Opaque digest of an inspected delivery result, excluding the observation timestamp. */
+export type TaskDeliveryInspectionRevision = Branded<'TaskDeliveryInspectionRevision'>
+
+/** Current Git facts consistent with a completed authorization, not a Provider execution receipt. */
+export type TaskDeliveryEffect =
+  | {
+    readonly kind: 'commit'
+    readonly commit: string
+    readonly committedRevision: TaskReviewRevision
+    readonly headBefore: string
+    readonly tree: string
+    readonly branch: string
+  }
+  | { readonly kind: 'apply'; readonly commit: string; readonly sourceHead: string; readonly sourceTree: string }
+  | {
+    readonly kind: 'discard'
+    readonly branch: string
+    readonly headCommit: string
+    readonly worktreeRemoved: true
+    readonly branchPreserved: true
+    readonly uncommittedChangesDiscarded: boolean
+    readonly recoverableCommit?: string
+  }
+
+/** Read-only classification; not-completed states absence now, not that Git never changed. */
+export type TaskDeliveryInspection = {
+  readonly taskId: SessionId
+  readonly workspaceId: WorkspaceId
+  readonly intent: TaskDeliveryIntent
+  readonly revision: TaskDeliveryInspectionRevision
+  readonly observedAt: number
+} & (
+  | { readonly status: 'completed'; readonly effect: TaskDeliveryEffect }
+  | { readonly status: 'not-completed' }
+  | { readonly status: 'ambiguous'; readonly reason: 'task-changed' | 'source-changed' | 'discard-incomplete' | 'state-changed' }
+)
+
+/** Recorded authorization to inspect without repeating its mutation or asserting an execution time. */
+export interface InspectTaskDeliveryRequest {
+  readonly assignment: TaskWorktreeAssignment
+  readonly intent: TaskDeliveryIntent
+}
+
 /** Request to commit the exact reviewed state inside the Task worktree. */
 export interface CommitTaskReviewRequest {
   readonly assignment: TaskWorktreeAssignment

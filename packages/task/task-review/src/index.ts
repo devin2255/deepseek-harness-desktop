@@ -7,12 +7,14 @@ import type {
   DiscardTaskReviewRequest,
   GetTaskFileDiffRequest,
   IntegrateTaskReviewRequest,
+  InspectTaskDeliveryRequest,
   SummarizeTaskReviewRequest,
   TaskApplyReceipt,
   TaskCommitReceipt,
   TaskDiscardReceipt,
   TaskFileDiff,
   TaskIntegrationResult,
+  TaskDeliveryInspection,
   TaskReviewErrorCode,
   TaskReviewSummary,
 } from './types.ts'
@@ -59,6 +61,16 @@ export abstract class TaskReviewService extends Service {
     request: SummarizeTaskReviewRequest,
     signal?: AbortSignal,
   ): Promise<TaskReviewSummary>
+
+  /**
+   * Compare current Git state with a recorded delivery authorization without repeating it.
+   * Private-index inspection may retain unreachable Git objects, but changes no user index, worktree, or branch.
+   * A completed classification supplies observed facts, not proof of execution time or causal attribution.
+   * @param request - Recorded worktree assignment and exact pending authorization.
+   * @param signal - Optional cancellation of bounded Git inspection.
+   * @returns Current completed, absent, or ambiguous result; does not clear delivery uncertainty.
+   */
+  abstract inspectDelivery(request: InspectTaskDeliveryRequest, signal?: AbortSignal): Promise<TaskDeliveryInspection>
 
   /**
    * Read one member file diff from an exact review snapshot.

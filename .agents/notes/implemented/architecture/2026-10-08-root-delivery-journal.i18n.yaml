@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-08-root-delivery-journal.md
-2026-10-08-root-delivery-journal.md: f39a2ebe9d39f5f2646bc896e15640846b6b2fed
-2026-10-08-root-delivery-journal.zh.md: 0b2ed815e57d72e2795b18d87ea01a580a575c1e
+2026-10-08-root-delivery-journal.md: 648753e0680061a586e8748736bb79da50947361
+2026-10-08-root-delivery-journal.zh.md: 048b90dc9108df759673870df4823e9242d2a0ff

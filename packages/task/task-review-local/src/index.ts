@@ -19,12 +19,14 @@ import type {
   DiscardTaskReviewRequest,
   GetTaskFileDiffRequest,
   IntegrateTaskReviewRequest,
+  InspectTaskDeliveryRequest,
   SummarizeTaskReviewRequest,
   TaskApplyReceipt,
   TaskCommitReceipt,
   TaskCommitPreflight,
   TaskDiscardReceipt,
   TaskDeliveryAuthorization,
+  TaskDeliveryInspection,
   TaskFileDiff,
   TaskIntegrationResult,
   TaskReviewErrorCode,
@@ -46,6 +48,7 @@ import {
 import type { ResolvedConfig } from './config.ts'
 import { parseNameStatus, parseNumstat } from './git.ts'
 import { integrateTaskReview } from './integration.ts'
+import { inspectTaskDelivery } from './delivery-inspection.ts'
 
 export * from './config.ts'
 export { parseNameStatus, parseNumstat } from './git.ts'
@@ -249,7 +252,7 @@ export class LocalTaskReview extends TaskReviewService {
         signal,
         acceptedExitCodes,
         stdinData,
-        env,
+        { GIT_OPTIONAL_LOCKS: '0', ...env },
       )
     } catch (error) {
       if (signal?.aborted === true) throw error
@@ -263,6 +266,12 @@ export class LocalTaskReview extends TaskReviewService {
   ): Promise<T> {
     signal?.throwIfAborted()
     const path = await this.worktreePath(assignment)
+    return this.serializeAt(path, signal, operation)
+  }
+
+  private async serializeAt<T>(
+    path: string, signal: AbortSignal | undefined, operation: () => Promise<T>,
+  ): Promise<T> {
     const executable = await this.git(signal)
     const common = await this.command(executable, path, ['rev-parse', '--path-format=absolute', '--git-common-dir'], signal)
     const directory = common.stdout.trim()
@@ -465,6 +474,31 @@ export class LocalTaskReview extends TaskReviewService {
     signal?: AbortSignal,
   ): Promise<TaskReviewSummary> {
     return (await this.state(request.assignment, signal)).summary
+  }
+
+  async inspectDelivery(request: InspectTaskDeliveryRequest, signal?: AbortSignal): Promise<TaskDeliveryInspection> {
+    signal?.throwIfAborted()
+    let sourcePath: string
+    try {
+      const metadata = await lstat(request.assignment.sourcePath)
+      sourcePath = await realpath(request.assignment.sourcePath)
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || sourcePath !== request.assignment.sourcePath) {
+        throw new Error('Source checkout is not the recorded real directory')
+      }
+    } catch (error: unknown) {
+      throw failure('The recorded source checkout cannot be inspected.', 'REVIEW_WORKTREE_DIVERGED', error)
+    }
+    const executable = await this.git(signal)
+    const root = await this.command(executable, sourcePath, ['rev-parse', '--show-toplevel'], signal)
+    if (await realpath(root.stdout.trim()) !== sourcePath) {
+      throw failure('The recorded source checkout is not its Git repository root.', 'REVIEW_WORKTREE_DIVERGED')
+    }
+    return this.serializeAt(sourcePath, signal, () => inspectTaskDelivery(request, {
+      maxPatchBytes: this.config.maxPatchBytes,
+      summarize: async (assignment, currentSignal) => (await this.state(assignment, currentSignal)).summary,
+      command: (cwd, args, currentSignal, accepted, stdinData, env) =>
+        this.command(executable, cwd, args, currentSignal, accepted, stdinData, env),
+    }, signal))
   }
 
   async diff(request: GetTaskFileDiffRequest, signal?: AbortSignal): Promise<TaskFileDiff> {

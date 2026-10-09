@@ -40,7 +40,7 @@ Discard 在授权完成后重新检查当前审查和未提交变更标记。内
 
 ## 后果
 
-人工交付具有持久授权与关联完成，但 Git 和 Session 持久化不是同一原子事务。缺少确切实时回执的未确认操作需要检查当前 Task 与源 Git 状态。此机制不提供人工采纳或明确的未变更结算；只读刷新不能清除不确定状态。此日志不会锁住外部进程和子级执行，也不代表人工写入者控制、冲突解决或签名发布验收已完成。
+人工交付具有持久授权与关联完成，但 Git 和 Session 持久化不是同一原子事务。缺少确切实时回执的未确认操作需要[检查当前 Task 与源 Git 状态](../feature/2026-10-09-root-delivery-inspection.md)。此机制不提供人工采纳或明确的未变更结算；只读刷新不能清除不确定状态。此日志不会锁住外部进程和子级执行，也不代表人工写入者控制、冲突解决或签名发布验收已完成。
 
 执行互斥、[离线预留](2026-10-08-offline-session-reservations.md)、[根审查](../feature/2026-09-13-task-review-delivery.md)、[排队维护](../feature/2026-07-30-queued-manual-compaction.md)、[已提交 worktree 复用](../bug-fix/2026-10-06-committed-task-worktree-reuse.md)和[集成历史](../feature/2026-10-08-task-integration-history.md)记录继续保持活跃。此决策部分加强交付排序与恢复，不替代它们独立的执行、输入顺序、Git 身份和工具结果原理。
 

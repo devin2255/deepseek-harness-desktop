@@ -248,6 +248,34 @@ try {
     commitTargetRetained: true,
     receiptAbsent: replayed?.commitReceipt === undefined, retryRejected: !retried.result.ok,
     gitCommitExists: (await git(source, ['rev-parse', assignment.branch])).stdout.trim() === committed })}\n`)
+  const beforeInspection = JSON.stringify(stored.events)
+  const taskIndexPath = (await git(assignment.path, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])).stdout.trim()
+  const sourceIndexPath = (await git(source, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])).stdout.trim()
+  const [taskIndex, sourceIndex] = await Promise.all([readFile(taskIndexPath), readFile(sourceIndexPath)])
+  const inspected = await retryApi.tasks.inspectDelivery({ sessionId: assignment.taskId, operationId: lostIntent.data.intent.operationId })
+  if (!inspected.result.ok || inspected.result.value.status !== 'completed'
+    || inspected.result.value.effect.kind !== 'commit' || inspected.result.value.effect.commit !== committed
+    || inspected.result.value.effect.tree !== lostIntent.data.intent.tree
+    || inspected.result.value.effect.headBefore !== lostIntent.data.intent.headCommit) {
+    throw new Error('Cold inspection did not match the exact authorized commit')
+  }
+  if (!(await readFile(taskIndexPath)).equals(taskIndex) || !(await readFile(sourceIndexPath)).equals(sourceIndex)
+    || JSON.stringify((await ctx.sessionPersistence.inspect(assignment.taskId)).events) !== beforeInspection
+    || ctx.agents.get(assignment.taskId) !== undefined || ctx.sessions.get(assignment.taskId) !== undefined) {
+    throw new Error('Delivery inspection changed Git, history, or cold ownership')
+  }
+  const originalContent = await readFile(join(assignment.path, 'tracked.txt'))
+  await writeFile(join(assignment.path, 'tracked.txt'), 'Modified after lost receipt\n')
+  const changed = await retryApi.tasks.inspectDelivery({ sessionId: assignment.taskId, operationId: lostIntent.data.intent.operationId })
+  if (!changed.result.ok || changed.result.value.status !== 'ambiguous' || changed.result.value.reason !== 'task-changed') {
+    throw new Error('Changed worktree was accepted as a completed delivery')
+  }
+  await writeFile(join(assignment.path, 'tracked.txt'), originalContent)
+  process.stdout.write(`${JSON.stringify({ stage: 'inspection', completedCommitObserved: true, changedTreeAmbiguous: true,
+    noExecutionTime: !('committedAt' in inspected.result.value.effect), userIndexesUnchanged: true,
+    historyUnchanged: true, rootStillCold: true,
+    uncertaintyRetained: ctx.tasks.snapshot().tasks.find(task => task.taskId === assignment.taskId)
+      ?.attention.some(item => item.kind === 'delivery-unconfirmed') === true })}\n`)
 } finally {
   await ctx?.fiber.dispose()
   uninstallFailLoud()
