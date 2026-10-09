@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
+import { TaskReviewOperationId, TaskReviewRevision } from '@deepseek-ai/dsh-task-review'
 import type { TaskFileDiff, TaskReviewSummary } from '@deepseek-ai/dsh-task-review'
 import type { ApiProxy, GoalRef, HostFrame, MuxFrame, RpcMessage, RpcRequest, RpcResponse, TaskSnapshot } from '@deepseek-ai/dsh-host-apiproxy'
 import { InProcessApiClient, RpcId, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
@@ -706,6 +706,57 @@ describe('tasks unary surface', () => {
     updatedAt: 1,
     asOfSeq: 0,
   }
+
+  it('round-trips an exact delivery checkpoint and its saved receipt without advancing the event sequence', async () => {
+    const operationId = TaskReviewOperationId('12345678-1234-4234-8234-123456789abc')
+    const receipt = {
+      kind: 'commit' as const, operationId, taskId: task.taskId, workspaceId: 'workspace' as never,
+      reviewRevision: TaskReviewRevision('a'.repeat(64)), committedRevision: TaskReviewRevision('b'.repeat(64)),
+      branch: 'dsh/task-0123456789abcdef01234567', commit: 'c'.repeat(40), committedAt: 1,
+    }
+    const pending: TaskSnapshot = {
+      ...task, status: 'needs-attention', asOfSeq: 9, commitReceipt: receipt,
+      retryableDeliveryCheckpoint: operationId,
+      attention: [{
+        id: 'checkpoint-attention' as never, taskId: task.taskId, ownerSessionId: task.taskId,
+        kind: 'delivery-unconfirmed', severity: 'error', summary: 'Receipt save failed',
+        createdAt: 1, sourceId: operationId, actionable: false,
+      }],
+    }
+    const saved: TaskSnapshot = { ...task, asOfSeq: pending.asOfSeq, commitReceipt: receipt }
+    let seen: RpcRequest<{ sessionId: SessionId; operationId: TaskReviewOperationId }> | undefined
+    const api = scriptedApi({ tasks: {
+      list: request => ok(request, { generation: 1, tasks: [pending] }),
+      retryDeliveryCheckpoint: (request) => {
+        seen = request
+        return ok(request, saved)
+      },
+    } })
+    const c = client(api)
+    expect((await c.tasks.list({})).result).toEqual({ ok: true, value: { generation: 1, tasks: [pending] } })
+    const payload = { sessionId: task.taskId, operationId }
+    const response = await c.tasks.retryDeliveryCheckpoint(payload)
+    expect(seen?.payload).toEqual(payload)
+    expect(seen?.rpcId).toBeTruthy()
+    expect(response.rpcId).toBe(seen?.rpcId)
+    expect(response.result).toEqual({ ok: true, value: saved })
+  })
+
+  it('rejects malformed delivery checkpoint requests before invoking the Task implementation', async () => {
+    const retry = vi.fn((request: RpcRequest<{ sessionId: SessionId; operationId: TaskReviewOperationId }>) => ok(request, task))
+    const c = client(scriptedApi({ tasks: { retryDeliveryCheckpoint: retry } }))
+    const operationId = '12345678-1234-4234-8234-123456789abc'
+    for (const payload of [
+      { sessionId: task.taskId },
+      { sessionId: task.taskId, operationId: 'invalid' },
+      { sessionId: ' ', operationId },
+      { sessionId: task.taskId, operationId, unexpected: true },
+    ]) {
+      const response = await c.tasks.retryDeliveryCheckpoint(payload as never)
+      expect(response.result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    }
+    expect(retry).not.toHaveBeenCalled()
+  })
 
   it('round-trips the baseline and every mutation through the strict route table', async () => {
     const seen: { method: string; payload: unknown }[] = []

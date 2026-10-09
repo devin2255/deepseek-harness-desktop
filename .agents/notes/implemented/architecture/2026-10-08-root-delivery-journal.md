@@ -44,4 +44,6 @@ Both SDK expected-output scenarios connect real clients to the Loader-composed T
 
 Both SDK scenarios also fail a real commit receipt checkpoint, save the exact live receipt, and restore it after a complete runtime restart without changing the Session sequence or Git commit. Missing-receipt retries reject both live and cold. Provider tests cover Commit, Apply, and Discard checkpoint retries, repeated persistence failure, mismatched ids, and Session ownership loss; UI tests retain the save action when the review directory is unreadable and disable it when disconnected.
 
+The HTTP carrier tests pass an exact checkpoint operation id through the Client and strict route parser, preserve the pending projection and saved receipt, and retain the unchanged event sequence. Missing or malformed operation ids, blank Session ids, and unknown request fields are rejected before the Task implementation runs.
+
 The Chromium scenario boots the real Web bundles with the desktop Task overlay, performs real Commit and Discard operations, and fails each first receipt save. It retries through the Host wire without adding events or changing Git identities, reloads the renderer after directory removal, and reopens the root Review through its unconfirmed-delivery attention. Browser snapshots pin the pending and confirmed states; the source bytes and HEAD remain unchanged.
