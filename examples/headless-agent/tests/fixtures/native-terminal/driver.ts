@@ -39,10 +39,25 @@ try {
   await until(() => output.includes('__PONG__:1'))
   await terminal.write('ping\r')
   await until(() => output.includes('__PONG__:2'))
+  const interrupt = await terminal.interrupt()
+  if (process.platform === 'win32') {
+    assert.deepEqual(interrupt, { kind: 'control-input', input: 'ctrl-c' })
+  } else {
+    assert.equal(interrupt.kind, 'signal')
+    if (interrupt.kind === 'signal') {
+      assert.equal(interrupt.signal, 'SIGINT')
+      assert.equal(interrupt.targetPgid, terminal.pid)
+    }
+  }
+  await until(() => output.includes('__INTERRUPTED__'))
+  assert(alive(tree.root) && alive(tree.descendant))
+  await terminal.write('ping\r')
+  await until(() => output.includes('__PONG__:3'))
   await terminal.terminate()
   await until(() => !alive(tree.root) && !alive(tree.descendant))
   assert(terminal.output.readableEnded)
-  console.log(JSON.stringify({ open: true, persistentInput: true, rootExited: true, descendantExited: true, outputEnded: true }))
+  console.log(JSON.stringify({ open: true, persistentInput: true, interrupted: true, inputAfterInterrupt: true,
+    rootExited: true, descendantExited: true, outputEnded: true }))
 } finally {
   await ctx.fiber.dispose()
   uninstall()

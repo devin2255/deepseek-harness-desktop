@@ -8,6 +8,7 @@ import type {
   SubprocessOutcome,
   SubprocessTerminalForeground,
   SubprocessTerminalHandle,
+  SubprocessTerminalInterruptResult,
   SubprocessTerminalSignal,
 } from '@deepseek-ai/dsh-subprocess'
 import type { ProcessIdentity, ProcessInspector } from './process-inspector.ts'
@@ -26,11 +27,9 @@ function signalName(number: number | undefined): NodeJS.Signals | null {
 
 /**
  * A local terminal whose process-session ownership stays below the PTY backend.
- * The seam's terminate() promise — no write, inspection, or signal in flight
- * after settlement — holds here without operation tracking only because every
- * handle call completes synchronously under the hood (node-pty write, ps-based
- * inspection). A first genuinely asynchronous step in any handle call must add
- * the tracking a remote provider needs.
+ * Writes and process inspection execute synchronously. Foreground signalling
+ * awaits inspection, retains its operation through teardown, and rechecks
+ * closure before delivering a signal.
  */
 export class LocalTerminalHandle implements SubprocessTerminalHandle {
   readonly pid: number
@@ -42,6 +41,8 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
   private readonly exitDisposable: IDisposable
   private cleanup: Promise<void> | undefined
   private exited = false
+  private closing = false
+  private readonly signals = new Set<Promise<number>>()
   private trackedDescendants: ProcessIdentity[] = []
   /** The spawned shell's start identity; scans stop adopting members once the root pid no longer carries it. */
   private readonly rootIdentity: ProcessIdentity | undefined
@@ -74,13 +75,19 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
   // node-pty writes synchronously; the seam returns a promise for remote transports.
   // oxlint-disable-next-line typescript/require-await -- Preserve promise rejection semantics at the async provider contract.
   async write(data: string): Promise<void> {
-    if (this.exited) throw new Error('terminal process has exited')
+    this.assertOpen()
     this.terminal.write(data)
+  }
+
+  async interrupt(): Promise<SubprocessTerminalInterruptResult> {
+    const targetPgid = await this.signalForeground('SIGINT')
+    return { kind: 'signal', signal: 'SIGINT', targetPgid }
   }
 
   // Local inspection is synchronous; the seam returns a promise for remote transports.
   // oxlint-disable-next-line typescript/require-await -- Preserve promise rejection semantics at the async provider contract.
   async inspectForeground(): Promise<SubprocessTerminalForeground | undefined> {
+    this.assertOpen()
     this.descendants()
     const processGroupId = this.inspector.foregroundPgid(this.pid)
     if (processGroupId === undefined) return undefined
@@ -90,8 +97,23 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
     }
   }
 
-  async signalForeground(signal: SubprocessTerminalSignal): Promise<number> {
+  signalForeground(signal: SubprocessTerminalSignal): Promise<number> {
+    const pending = this.signalForegroundOnce(signal)
+    this.signals.add(pending)
+    void pending.then(
+      () => { this.signals.delete(pending) },
+      () => { this.signals.delete(pending) },
+    )
+    return pending
+  }
+
+  private assertOpen(): void {
+    if (this.exited || this.closing) throw new Error('terminal process has exited or is closing')
+  }
+
+  private async signalForegroundOnce(signal: SubprocessTerminalSignal): Promise<number> {
     const foreground = await this.inspectForeground()
+    this.assertOpen()
     if (foreground === undefined) {
       throw new Error(`cannot resolve foreground process group for terminal ${this.pid}`)
     }
@@ -104,6 +126,7 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
 
   terminate(): Promise<void> {
     if (this.cleanup !== undefined) return this.cleanup
+    this.closing = true
     const cleanup = this.closeOnce()
     this.cleanup = cleanup
     void cleanup.catch(() => { this.cleanup = undefined })
@@ -115,6 +138,7 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
    * event. This does not claim quiescence and does not replace terminate().
    */
   terminateForHostExit(): void {
+    this.closing = true
     this.forceStopDescendants()
     this.forceStopShell()
     this.forceStopDescendants()
@@ -234,6 +258,7 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
   }
 
   private async closeOnce(): Promise<void> {
+    await Promise.allSettled([...this.signals])
     let survivors = await this.stopDescendants()
     if (survivors.length > 0) {
       throw new Error(`terminal cleanup failed; surviving pids: ${survivors.map(member => member.pid).join(', ')}`)

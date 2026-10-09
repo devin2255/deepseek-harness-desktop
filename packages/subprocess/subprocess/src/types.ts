@@ -227,6 +227,15 @@ export interface SubprocessTerminalForeground {
 }
 
 /**
+ * Observed delivery of an interruption request, never proof of command exit.
+ * Windows console input modes decide whether Ctrl+C invokes a control handler
+ * or reaches an application's raw input reader.
+ */
+export type SubprocessTerminalInterruptResult =
+  | { kind: 'signal'; signal: 'SIGINT'; targetPgid: number }
+  | { kind: 'control-input'; input: 'ctrl-c' }
+
+/**
  * One live terminal process and its owned OS session. Terminal allocation,
  * foreground-group inspection/signalling, and session-tree cleanup are one
  * deep subprocess primitive because none can be reconstructed from ordinary
@@ -244,6 +253,15 @@ export interface SubprocessTerminalHandle {
    * @param data - text to deliver without implicit newline conversion.
    */
   write(data: string): Promise<void>
+  /**
+   * Request the substrate's ordinary terminal interruption without terminating
+   * its owned session. POSIX delivers SIGINT to the verified foreground group;
+   * Windows writes Ctrl+C input and does not claim a process-group identity.
+   * Applications may ignore either request; callers must observe readiness or exit.
+   * Rejects failed delivery and requests made after teardown begins.
+   * @returns the delivered signal identity or successfully written control input.
+   */
+  interrupt(): Promise<SubprocessTerminalInterruptResult>
   /**
    * Inspect the current foreground process group.
    * @returns its id and input-wait fact, or undefined when no foreground group can be resolved.

@@ -18,7 +18,7 @@ Status: implemented
 
 输出或工作线程失败时仍会释放传输通道与进程／Job 句柄、等待未完成输入，并拒绝清理操作；不会重复结果不确定的 ConPTY 关闭。分配回滚会同时报告原始失败与关闭失败，而不是放弃其余资源或替换原始原因。
 
-前台检查返回 undefined，POSIX 信号直接拒绝且不发送控制字节。键盘 Ctrl+C 不等于已交付的 POSIX 信号，也无法产生真实的 `targetPgid`。Windows 原生持久 shell 消费方与中断操作仍是独立工作；该提供方不会在桌面默认配置中启用 Bash 后端。
+前台检查返回 undefined，POSIX 信号直接拒绝且不发送控制字节。键盘 Ctrl+C 不等于已交付的 POSIX 信号，也无法产生真实的 `targetPgid`。独立的[原生中断操作](../feature/2026-10-09-terminal-interruption-results.md)报告已写入 Ctrl+C 输入，不声称命令已经退出。具有就绪检测的 Windows 原生持久 shell 消费方仍是独立工作；该提供方不会在桌面默认配置中启用 Bash 后端。
 
 ## 考虑过的替代方案
 

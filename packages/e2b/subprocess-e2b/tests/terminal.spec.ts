@@ -270,6 +270,16 @@ function testSpawn(
 }
 
 describe('E2B terminal allocation', () => {
+  it('interrupts through its verified remote group and rejects after teardown', async () => {
+    const fake = new FakeTerminalSandbox()
+    const terminal = await testSpawn(runtime(fake), spec(), '/runtime/interrupt')
+    await expect(terminal.interrupt()).resolves.toEqual({ kind: 'signal', signal: 'SIGINT', targetPgid: 456 })
+    expect(fake.commands).toContain('kill -INT -- -456')
+    expect(fake.inputs.some(input => input.data.includes(3))).toBe(false)
+    await terminal.terminate()
+    await expect(terminal.interrupt()).rejects.toThrow('terminating')
+  })
+
   it('hides bootstrap-shell bytes and preserves requested-shell bytes across the output boundary', async () => {
     const fake = new FakeTerminalSandbox()
     const terminal = await testSpawn(runtime(fake), spec(), '/runtime/terminal-one')

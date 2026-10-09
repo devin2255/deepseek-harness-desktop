@@ -24,6 +24,7 @@ try {
     write: () => { setImmediate(() => { output.write(prompt) }); return Promise.resolve() },
     inspectForeground: () => Promise.resolve(observed ? { processGroupId: 123, inputWaiting: false } : undefined),
     signalForeground: () => Promise.reject(new Error('No foreground group to signal')),
+    interrupt: () => Promise.reject(new Error('No foreground group to interrupt')),
     terminate: () => {
       closed = true
       output.end()

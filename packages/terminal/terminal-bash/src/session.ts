@@ -145,7 +145,7 @@ class LocalSendOperation implements TerminalSendOperation {
   }
 
   cancel(): boolean {
-    if (this.finished) return false
+    if (this.finished || this.cancellationRequested) return false
     this.cancellationRequested = true
     this.onCancel()
     return true
@@ -529,7 +529,7 @@ export class LocalPtySession implements TerminalBackendSession {
     try {
       const activeWrite = this.activeWrite
       if (activeWrite !== undefined && !await activeWrite) return
-      await this.terminal.signalForeground('SIGINT')
+      await this.terminal.interrupt()
     } catch (error: unknown) {
       if (this.active === operation && !this.closing) this.onTransportFailure(error)
       return

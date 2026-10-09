@@ -103,6 +103,10 @@ class FakeTerminal implements SubprocessTerminalHandle {
     return foreground.processGroupId
   }
 
+  async interrupt() {
+    return { kind: 'signal' as const, signal: 'SIGINT' as const, targetPgid: await this.signalForeground('SIGINT') }
+  }
+
   terminate(): Promise<void> {
     if (this.cleanup !== undefined) return this.cleanup
     const cleanup = this.terminateOnce()
@@ -405,6 +409,7 @@ describe('LocalPtySession readiness and output', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(operation.cancel()).toBe(true)
+    expect(operation.cancel()).toBe(false)
 
     terminal.emitData('\x1b]133;D;130\x07dsh> ')
     await vi.advanceTimersByTimeAsync(100)
@@ -412,7 +417,7 @@ describe('LocalPtySession readiness and output', () => {
     expect(() => session.startSend({ text: 'successor', submit: true })).toThrow('active send')
     signalGate.resolve(undefined)
     await vi.advanceTimersByTimeAsync(0)
-    expect(inspector.groups).toContainEqual([456, 'SIGINT'])
+    expect(inspector.groups).toEqual([[456, 'SIGINT']])
     expect(inspector.groups).not.toContainEqual([789, 'SIGINT'])
   })
 

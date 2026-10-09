@@ -16,6 +16,7 @@ import type {
   SubprocessOutcome,
   SubprocessTerminalForeground,
   SubprocessTerminalHandle,
+  SubprocessTerminalInterruptResult,
   SubprocessTerminalSignal,
   SubprocessTerminalSpawnSpec,
 } from '@deepseek-ai/dsh-subprocess'
@@ -313,6 +314,12 @@ export class E2BTerminalHandle implements SubprocessTerminalHandle {
   /** @inheritdoc */
   inspectForeground(): Promise<SubprocessTerminalForeground | undefined> {
     return this.trackOperation(signal => this.inspectForegroundOnce(signal))
+  }
+
+  /** @inheritdoc */
+  async interrupt(): Promise<SubprocessTerminalInterruptResult> {
+    const targetPgid = await this.signalForeground('SIGINT')
+    return { kind: 'signal', signal: 'SIGINT', targetPgid }
   }
 
   /** @inheritdoc */

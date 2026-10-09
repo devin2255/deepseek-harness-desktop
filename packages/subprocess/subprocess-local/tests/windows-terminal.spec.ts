@@ -1,6 +1,6 @@
 /** Native Windows acceptance for persistent PowerShell and exact Job teardown. */
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -33,6 +33,49 @@ describe('Windows terminal encoding', () => {
 describe.skipIf(process.platform !== 'win32')('Windows native terminal', () => {
   const shell = join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe')
 
+  it.each([
+    { label: 'Windows PowerShell 5.1', command: shell, major: 5 },
+    { label: 'PowerShell 7', command: 'pwsh', major: 7 },
+  ])('interrupts a real foreground child and retains $label state', { timeout: 30_000 }, async ({ command, major }) => {
+    const cwd = await mkdtemp(join(tmpdir(), 'dsh-interrupt-中文 space-'))
+    const ctx = new Context()
+    const fiber = await ctx.plugin(LocalSubprocessRuntime)
+    const quote = (text: string): string => "'" + text.replaceAll("'", "''") + "'"
+    let output = ''
+    try {
+      const executable = await ctx.subprocess.resolveExecutable(command)
+      const handle = await ctx.subprocess.spawnTerminal({
+        argv: [executable, '-NoLogo', '-NoProfile', '-NoExit', '-Command',
+          "Remove-Module PSReadLine -ErrorAction SilentlyContinue; $global:keep = 'persistent 中文'; function global:Get-TestState { $global:keep }; function global:prompt { '__READY__> ' }"],
+        cwd, rows: 40, cols: 240, graceMs: 5000,
+      })
+      handle.output.on('data', (data: Buffer) => { output += data.toString('utf8') })
+      await vi.waitFor(() => { expect(output).toContain('__READY__> ') }, { timeout: 10_000 })
+      await handle.write("Write-Output ('__VERSION'+'__'+$PSVersionTable.PSVersion.Major)\r")
+      await vi.waitFor(() => { expect(output).toContain(`__VERSION__${major}`) }, { timeout: 5000 })
+      const childCode = "console.log('__CHILD__'+process.pid+'__');setInterval(()=>{},1000)"
+      await handle.write('& ' + quote(process.execPath) + ' -e ' + quote(childCode) + '\r')
+      await vi.waitFor(() => { expect(output).toMatch(/__CHILD__(\d+)__/u) }, { timeout: 5000 })
+      const child = Number(/__CHILD__(\d+)__/u.exec(output)?.[1])
+      expect(() => process.kill(child, 0)).not.toThrow()
+      const beforeInterrupt = output.length
+      await expect(handle.interrupt()).resolves.toEqual({ kind: 'control-input', input: 'ctrl-c' })
+      await vi.waitFor(() => { expect(() => process.kill(child, 0)).toThrow() }, { timeout: 5000 })
+      expect(() => process.kill(handle.pid, 0)).not.toThrow()
+      // Child exit precedes the shell's input-buffer reset and new prompt.
+      await vi.waitFor(() => { expect(output.slice(beforeInterrupt)).toContain('__READY__> ') }, { timeout: 5000 })
+      await handle.write("Write-Output ('__KEEP'+'__'+$global:keep); Write-Output ('__FUNCTION'+'__'+(Get-TestState))\r")
+      await vi.waitFor(() => { expect(output).toContain('__FUNCTION__persistent 中文') }, { timeout: 5000 })
+      expect(output).toContain('__KEEP__persistent 中文')
+      await handle.terminate()
+      expect(() => process.kill(handle.pid, 0)).toThrow()
+      expect(handle.output.readableEnded).toBe(true)
+    } finally {
+      await fiber.dispose()
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
   it('preserves PowerShell state and closes a real foreground descendant', { timeout: 30_000 }, async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'dsh-终端 space-'))
     const ctx = new Context()
@@ -51,7 +94,9 @@ describe.skipIf(process.platform !== 'win32')('Windows native terminal', () => {
       await vi.waitFor(() => { expect(output).toContain('\n__SET__') }, { timeout: 5000 })
       await handle.write("Write-Output ('__VALUE__' + (Get-TestState)); Write-Output ('__CWD__' + (Get-Location).Path)\r")
       await vi.waitFor(() => { expect(output).toContain('__VALUE__persistent 中文') }, { timeout: 5000 })
-      expect(output).toContain(`__CWD__${cwd}`)
+      // Windows temp paths may use 8.3 aliases while PowerShell prints long names.
+      const canonicalCwd = await realpath(cwd)
+      await vi.waitFor(() => { expect(output).toContain(`__CWD__${canonicalCwd}`) }, { timeout: 5000 })
       const childCode = "console.log('__CHILD__'+process.pid+'__');setInterval(()=>{},1000)"
       await handle.write(`& ${quote(process.execPath)} -e ${quote(childCode)}\r`)
       await vi.waitFor(() => { expect(output).toMatch(/__CHILD__(\d+)__/u) }, { timeout: 5000 })

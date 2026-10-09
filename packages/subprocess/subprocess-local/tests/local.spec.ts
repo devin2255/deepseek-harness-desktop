@@ -184,6 +184,7 @@ describe('LocalSubprocessRuntime', () => {
       write: async () => {},
       inspectForeground: async () => undefined,
       signalForeground: async () => 1,
+      interrupt: async () => ({ kind: 'signal', signal: 'SIGINT', targetPgid: 1 }),
       terminate,
     }
     const terminals = (ctx.subprocess as unknown as { terminals: Set<SubprocessTerminalHandle> }).terminals
@@ -208,6 +209,7 @@ describe('LocalSubprocessRuntime', () => {
       write: async () => {},
       inspectForeground: async () => undefined,
       signalForeground: async () => 1,
+      interrupt: async () => ({ kind: 'signal', signal: 'SIGINT', targetPgid: 1 }),
       terminate: vi.fn(async () => { throw firstFailure }),
     }
     const secondFailedTerminal: SubprocessTerminalHandle = {
@@ -255,6 +257,7 @@ describe('LocalSubprocessRuntime', () => {
       write: async () => {},
       inspectForeground: async () => undefined,
       signalForeground: async () => 1,
+      interrupt: async () => ({ kind: 'signal', signal: 'SIGINT', targetPgid: 1 }),
       terminate: vi.fn(async () => { throw failure }),
     }
     const terminals = (service as unknown as { terminals: Set<SubprocessTerminalHandle> }).terminals

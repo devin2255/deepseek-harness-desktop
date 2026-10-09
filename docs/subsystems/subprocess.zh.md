@@ -240,9 +240,22 @@ interface SubprocessOutcome {
 
 ## 终端进程原语
 
-`spawnTerminal(spec)` 是非管道进程原语。提供方分配控制终端，并负责 UTF-8 文本传输、前台进程组检查与信号发送，以及一项须等待的 TERM→KILL 操作；该操作会使提供方仍可观察到的每个会话成员完全停稳，提供方则会记录执行基底特有的可观察性限制。PTY 后端仍负责提示符检测、就绪推断、scrollback、沙箱策略和持久会话所有权；普通 `spawn()` 无法重建控制终端语义。
+`spawnTerminal(spec)` 是非管道进程原语。提供方分配控制终端，并负责 UTF-8 文本传输、原生中断、平台特定的前台检查与信号发送，以及一项须等待的终止操作；该操作会使提供方仍可观察到的每个会话成员完全停稳，提供方则会记录执行基底特有的可观察性限制。PTY 后端仍负责提示符检测、就绪推断、scrollback、沙箱策略和持久会话所有权；普通 `spawn()` 无法重建控制终端语义。
 
-终端 spec 完全指定 argv、cwd、环境覆盖、尺寸、清理宽限期与可选的分配取消。其句柄公开 `pid`、有序输出、`done`、`write`、`inspectForeground`、`signalForeground` 和须等待的 `terminate`；确切的公共形状生成到 [`ctx.subprocess` 服务目录](#ctxsubprocess--subprocessruntime-abstract-seam)中。
+终端 spec 完全指定 argv、cwd、环境覆盖、尺寸、清理宽限期与可选的分配取消。其句柄公开 `pid`、有序输出、`done`、`write`、`interrupt`、`inspectForeground`、`signalForeground` 和须等待的 `terminate`；确切的公共声明生成到 [`ctx.subprocess` 服务目录](#ctxsubprocess--subprocessruntime-abstract-seam)中。
+
+`interrupt()` 请求中断但不关闭会话，并报告实际交付：POSIX 前台 `SIGINT` 或已写入的 Windows Ctrl+C 输入。两种结果都不能证明命令退出或重新准备好接受输入。应用可能忽略中断；交付失败与清理开始后的请求会拒绝。`signalForeground()` 仍仅用于 POSIX，在 Windows 上拒绝且不发送输入。[中断决策](../../.agents/notes/implemented/feature/2026-10-09-terminal-interruption-results.md)负责取消与就绪的时序。
+
+```ts type-equiv
+/**
+ * Observed delivery of an interruption request, never proof of command exit.
+ * Windows console input modes decide whether Ctrl+C invokes a control handler
+ * or reaches an application's raw input reader.
+ */
+type SubprocessTerminalInterruptResult =
+  | { kind: 'signal'; signal: 'SIGINT'; targetPgid: number }
+  | { kind: 'control-input'; input: 'ctrl-c' }
+```
 
 ## 服务行为
 
@@ -320,5 +333,5 @@ abstract spawn(spec: SubprocessSpawnSpec): SubprocessHandle
 abstract spawnTerminal(spec: SubprocessTerminalSpawnSpec): Promise<SubprocessTerminalHandle>
 ```
 
-Source: [`packages/subprocess/subprocess/src/index.ts:102`](../../packages/subprocess/subprocess/src/index.ts)
+Source: [`packages/subprocess/subprocess/src/index.ts:103`](../../packages/subprocess/subprocess/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -18,7 +18,7 @@ Native synchronous pipe clients connect to independently drained Node sockets. T
 
 Output or worker failure still releases transport and process/Job handles, joins pending input, and rejects cleanup; an uncertain ConPTY close is never repeated. Allocation rollback reports its original failure together with a close failure rather than abandoning the remaining resources or replacing the original cause.
 
-Foreground inspection returns undefined and POSIX signals reject without sending control bytes. A keyboard Ctrl+C is not a delivered POSIX signal and cannot produce a truthful `targetPgid`. A Windows-native persistent-shell Consumer and interruption operation remain separate work; this Provider does not enable the Bash backend in desktop defaults.
+Foreground inspection returns undefined and POSIX signals reject without sending control bytes. A keyboard Ctrl+C is not a delivered POSIX signal and cannot produce a truthful `targetPgid`. The separate [native interruption operation](../feature/2026-10-09-terminal-interruption-results.md) reports written Ctrl+C input without claiming command exit. A Windows-native persistent-shell Consumer with readiness detection remains separate work; this Provider does not enable the Bash backend in desktop defaults.
 
 ## Alternatives considered
 

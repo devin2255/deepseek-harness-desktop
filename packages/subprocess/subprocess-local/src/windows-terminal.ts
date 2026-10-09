@@ -2,7 +2,7 @@
 
 import { PassThrough } from 'node:stream'
 import { setTimeout as pause } from 'node:timers/promises'
-import type { SubprocessOutcome, SubprocessTerminalHandle, SubprocessTerminalForeground, SubprocessTerminalSignal } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessOutcome, SubprocessTerminalHandle, SubprocessTerminalForeground, SubprocessTerminalInterruptResult, SubprocessTerminalSignal } from '@deepseek-ai/dsh-subprocess'
 import type { WindowsPtyProcess } from './windows-pty.ts'
 
 /** A Windows terminal with honest foreground limitations and awaited Job cleanup. */
@@ -43,6 +43,11 @@ export class WindowsTerminalHandle implements SubprocessTerminalHandle {
     this.writes.add(write)
     void write.finally(() => { this.writes.delete(write) }).catch(() => {})
     await write
+  }
+
+  async interrupt(): Promise<SubprocessTerminalInterruptResult> {
+    await this.write('\x03')
+    return { kind: 'control-input', input: 'ctrl-c' }
   }
 
   // ConPTY has no POSIX foreground process-group identity.

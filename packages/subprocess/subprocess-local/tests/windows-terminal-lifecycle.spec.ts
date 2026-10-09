@@ -4,6 +4,41 @@ import { nativeProcess } from './windows-terminal-harness.ts'
 
 afterEach(() => { vi.useRealTimers() })
 
+it('reports Ctrl+C input only after its transport callback, without claiming process exit', async () => {
+  const process = nativeProcess()
+  const terminal = new WindowsTerminalHandle(process.native, 100)
+  let callback: (() => void) | undefined
+  const write = vi.spyOn(process.input, 'write').mockImplementation((...args: unknown[]) => {
+    expect(args[0]).toBe('\x03')
+    callback = args[2] as () => void
+    return true
+  })
+  let accepted = false
+  const interrupt = terminal.interrupt().then((result) => { accepted = true; return result })
+  await Promise.resolve()
+  expect(accepted).toBe(false)
+  callback?.()
+  await expect(interrupt).resolves.toEqual({ kind: 'control-input', input: 'ctrl-c' })
+  expect(process.native.exitCode()).toBeUndefined()
+  expect(process.native.kill).not.toHaveBeenCalled()
+  write.mockRestore()
+  await terminal.terminate()
+})
+
+it('rejects interrupted-input failures and new interrupts after cleanup begins', async () => {
+  const process = nativeProcess()
+  const terminal = new WindowsTerminalHandle(process.native, 100)
+  const write = vi.spyOn(process.input, 'write').mockImplementation((...args: unknown[]) => {
+    queueMicrotask(() => { (args[2] as (error: Error) => void)(new Error('interrupt write failed')) })
+    return true
+  })
+  await expect(terminal.interrupt()).rejects.toThrow('interrupt write failed')
+  write.mockRestore()
+  const closing = terminal.terminate()
+  await expect(terminal.interrupt()).rejects.toThrow('closing')
+  await closing
+})
+
 it('bridges UTF-8 bytes, writes input, and preserves full-width Windows exit codes', async () => {
   const process = nativeProcess()
   const terminal = new WindowsTerminalHandle(process.native, 100)
